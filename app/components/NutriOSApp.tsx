@@ -1,0 +1,1966 @@
+"use client";
+
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Activity,
+  Bell,
+  BookOpen,
+  CalendarDays,
+  Check,
+  ChevronRight,
+  ClipboardList,
+  Copy,
+  FileText,
+  ImagePlus,
+  Loader2,
+  LogOut,
+  MessageCircle,
+  Palette,
+  Plus,
+  Send,
+  ShieldCheck,
+  UserPlus,
+  Users,
+  Weight,
+} from "lucide-react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
+  createSupabaseBrowser,
+  type SupabasePublicConfig,
+} from "../lib/supabase/browser";
+import type { Tenant } from "../lib/types";
+
+type UserRole = "owner" | "nutritionist" | "patient";
+
+type Patient = {
+  id: string;
+  tenant_id: string;
+  user_id: string | null;
+  nutritionist_user_id: string;
+  patient_code: string;
+  full_name: string;
+  age: number;
+  height_cm: number;
+  initial_weight_kg: number;
+  current_weight_kg: number;
+  waist_cm: number | null;
+  allergies: string | null;
+  avoided_foods: string | null;
+  exercise_routine: string | null;
+  registered_at: string;
+};
+
+type WeightLog = {
+  id: string;
+  patient_id: string;
+  weight_kg: number;
+  logged_at: string;
+  source: string | null;
+};
+
+type WaistLog = {
+  id: string;
+  patient_id: string;
+  waist_cm: number;
+  logged_at: string;
+};
+
+type ExerciseLog = {
+  id: string;
+  patient_id: string;
+  activity: string;
+  duration_minutes: number | null;
+  intensity: string | null;
+  logged_at: string;
+};
+
+type MealPhoto = {
+  id: string;
+  patient_id: string;
+  storage_path: string;
+  signed_url?: string;
+  notes: string | null;
+  meal_type: string | null;
+  logged_at: string;
+};
+
+type DocumentFile = {
+  id: string;
+  patient_id: string;
+  title: string;
+  storage_path: string;
+  signed_url?: string;
+  content_type: string | null;
+  created_at: string;
+};
+
+type Conversation = {
+  id: string;
+  patient_id: string;
+  nutritionist_user_id: string;
+};
+
+type ChatMessage = {
+  id: string;
+  conversation_id: string;
+  patient_id: string;
+  sender_id: string;
+  body: string;
+  created_at: string;
+};
+
+type MealPlan = {
+  id: string;
+  patient_id: string;
+  title: string;
+  start_date: string | null;
+  status: string;
+  meal_plan_days?: MealPlanDay[];
+};
+
+type MealPlanDay = {
+  id: string;
+  day_index: number;
+  day_label: string;
+  notes: string | null;
+  meal_items?: MealItem[];
+};
+
+type MealItem = {
+  id: string;
+  meal_type: string;
+  title: string;
+  description: string | null;
+  position: number;
+};
+
+type DraftMealItem = {
+  dayIndex: number;
+  mealType: string;
+  title: string;
+  description: string;
+};
+
+type TabId = "patients" | "plans" | "tracking" | "chat" | "documents" | "settings";
+
+type CreateInvitationResponse = {
+  error?: string;
+  delivery?: "email" | "manual_link";
+  invitationId?: string;
+  invitationUrl?: string;
+  actionLink?: string;
+  warning?: string;
+};
+
+const tabs: Array<{ id: TabId; label: string; icon: typeof Users }> = [
+  { id: "patients", label: "Pacientes", icon: Users },
+  { id: "plans", label: "Dietas", icon: BookOpen },
+  { id: "tracking", label: "Seguimiento", icon: Activity },
+  { id: "chat", label: "Chat", icon: MessageCircle },
+  { id: "documents", label: "Documentos", icon: FileText },
+  { id: "settings", label: "Marca", icon: Palette },
+];
+
+const dayLabels = [
+  "Lunes",
+  "Martes",
+  "Miercoles",
+  "Jueves",
+  "Viernes",
+  "Sabado",
+  "Domingo",
+];
+
+const demoTenant = (slug: string): Tenant => ({
+  id: "demo-tenant",
+  slug,
+  name: "Espacio NutriOS",
+  logo_url: null,
+  primary_color: "#2f7d6d",
+  privacy_policy_url: null,
+});
+
+const demoPatients: Patient[] = [
+  {
+    id: "demo-patient-1",
+    tenant_id: "demo-tenant",
+    user_id: "demo-patient-user",
+    nutritionist_user_id: "demo-nutritionist",
+    patient_code: "PAT-8F42C1A9",
+    full_name: "Laura Martin Ruiz",
+    age: 34,
+    height_cm: 168,
+    initial_weight_kg: 76.2,
+    current_weight_kg: 73.4,
+    waist_cm: 82,
+    allergies: "Lactosa",
+    avoided_foods: "Pescado azul y brocoli",
+    exercise_routine: "Camina 4 dias por semana y hace fuerza 2 dias",
+    registered_at: new Date("2026-07-03T09:30:00").toISOString(),
+  },
+  {
+    id: "demo-patient-2",
+    tenant_id: "demo-tenant",
+    user_id: "demo-patient-user-2",
+    nutritionist_user_id: "demo-nutritionist",
+    patient_code: "PAT-12DA88B4",
+    full_name: "Carlos Sanz Perez",
+    age: 41,
+    height_cm: 181,
+    initial_weight_kg: 91.1,
+    current_weight_kg: 89.9,
+    waist_cm: 96,
+    allergies: "Sin alergias declaradas",
+    avoided_foods: "Coliflor",
+    exercise_routine: "Bicicleta los fines de semana",
+    registered_at: new Date("2026-07-10T16:00:00").toISOString(),
+  },
+];
+
+const demoWeights: WeightLog[] = [
+  {
+    id: "w1",
+    patient_id: "demo-patient-1",
+    weight_kg: 76.2,
+    source: "initial",
+    logged_at: "2026-07-03",
+  },
+  {
+    id: "w2",
+    patient_id: "demo-patient-1",
+    weight_kg: 75.4,
+    source: "patient",
+    logged_at: "2026-07-10",
+  },
+  {
+    id: "w3",
+    patient_id: "demo-patient-1",
+    weight_kg: 74.5,
+    source: "patient",
+    logged_at: "2026-07-17",
+  },
+  {
+    id: "w4",
+    patient_id: "demo-patient-1",
+    weight_kg: 73.4,
+    source: "patient",
+    logged_at: "2026-07-24",
+  },
+];
+
+const demoWaist: WaistLog[] = [
+  { id: "c1", patient_id: "demo-patient-1", waist_cm: 86, logged_at: "2026-07-03" },
+  { id: "c2", patient_id: "demo-patient-1", waist_cm: 84, logged_at: "2026-07-17" },
+  { id: "c3", patient_id: "demo-patient-1", waist_cm: 82, logged_at: "2026-07-24" },
+];
+
+const demoConversation: Conversation = {
+  id: "demo-conversation",
+  patient_id: "demo-patient-1",
+  nutritionist_user_id: "demo-nutritionist",
+};
+
+const demoMessages: ChatMessage[] = [
+  {
+    id: "m1",
+    conversation_id: "demo-conversation",
+    patient_id: "demo-patient-1",
+    sender_id: "demo-patient-user",
+    body: "Ayer cambie la cena por una tortilla francesa. Lo registro aqui.",
+    created_at: "2026-07-24T18:20:00",
+  },
+  {
+    id: "m2",
+    conversation_id: "demo-conversation",
+    patient_id: "demo-patient-1",
+    sender_id: "demo-nutritionist",
+    body: "Perfecto. Mantente con una racion de verdura y revisamos el peso el viernes.",
+    created_at: "2026-07-24T19:02:00",
+  },
+];
+
+const demoPlan: MealPlan = {
+  id: "demo-plan",
+  patient_id: "demo-patient-1",
+  title: "Plan semanal equilibrado",
+  start_date: "2026-07-27",
+  status: "published",
+  meal_plan_days: [
+    {
+      id: "day-1",
+      day_index: 1,
+      day_label: "Lunes",
+      notes: null,
+      meal_items: [
+        {
+          id: "item-1",
+          meal_type: "Desayuno",
+          title: "Yogur sin lactosa con avena",
+          description: "Anadir frutos rojos y nueces.",
+          position: 1,
+        },
+        {
+          id: "item-2",
+          meal_type: "Comida",
+          title: "Pollo con arroz integral",
+          description: "Verduras salteadas y aceite de oliva.",
+          position: 2,
+        },
+      ],
+    },
+  ],
+};
+
+export function NutriOSApp({
+  tenantSlug,
+  initialTenant,
+  supabaseConfig,
+}: {
+  tenantSlug: string;
+  initialTenant?: Tenant | null;
+  supabaseConfig?: SupabasePublicConfig | null;
+}) {
+  const supabase = useMemo(
+    () => createSupabaseBrowser(supabaseConfig),
+    [supabaseConfig],
+  );
+  const isDemo = !supabase;
+  const [tenant, setTenant] = useState<Tenant>(
+    initialTenant ?? demoTenant(tenantSlug),
+  );
+  const [role, setRole] = useState<UserRole | null>(isDemo ? "nutritionist" : null);
+  const [sessionUserId, setSessionUserId] = useState(isDemo ? "demo-nutritionist" : "");
+  const [patients, setPatients] = useState<Patient[]>(demoPatients);
+  const [selectedPatientId, setSelectedPatientId] = useState(demoPatients[0]?.id ?? "");
+  const [weights, setWeights] = useState<WeightLog[]>(demoWeights);
+  const [waists, setWaists] = useState<WaistLog[]>(demoWaist);
+  const [exercises, setExercises] = useState<ExerciseLog[]>([]);
+  const [mealPhotos, setMealPhotos] = useState<MealPhoto[]>([]);
+  const [documents, setDocuments] = useState<DocumentFile[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([demoConversation]);
+  const [messages, setMessages] = useState<ChatMessage[]>(demoMessages);
+  const [plans, setPlans] = useState<MealPlan[]>([demoPlan]);
+  const [activeTab, setActiveTab] = useState<TabId>("patients");
+  const [loading, setLoading] = useState(Boolean(supabase));
+  const [notice, setNotice] = useState("");
+  const [workspaceError, setWorkspaceError] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+
+  const selectedPatient = patients.find((patient) => patient.id === selectedPatientId) ?? null;
+  const selectedConversation =
+    conversations.find((conversation) => conversation.patient_id === selectedPatientId) ??
+    null;
+
+  const patientWeights = weights
+    .filter((item) => item.patient_id === selectedPatientId)
+    .sort((a, b) => new Date(a.logged_at).getTime() - new Date(b.logged_at).getTime());
+  const patientWaists = waists
+    .filter((item) => item.patient_id === selectedPatientId)
+    .sort((a, b) => new Date(a.logged_at).getTime() - new Date(b.logged_at).getTime());
+  const patientMessages = messages
+    .filter((item) => item.conversation_id === selectedConversation?.id)
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  const patientPlans = plans.filter((plan) => plan.patient_id === selectedPatientId);
+
+  const withSignedUrls = useCallback(
+    async <T extends { storage_path: string }>(rows: T[], key: keyof T) => {
+      if (!supabase) return rows;
+      return Promise.all(
+        rows.map(async (row) => {
+          const { data } = await supabase.storage
+            .from("nutrios-private")
+            .createSignedUrl(String(row[key]), 60 * 60);
+          return { ...row, signed_url: data?.signedUrl };
+        }),
+      );
+    },
+    [supabase],
+  );
+
+  const loadWorkspace = useCallback(async () => {
+    if (!supabase) return;
+    setLoading(true);
+    setWorkspaceError("");
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    const { data: tenantRow } = await supabase
+      .from("tenants")
+      .select("*")
+      .eq("slug", tenantSlug)
+      .maybeSingle();
+
+    const resolvedTenant = (tenantRow as Tenant | null) ?? initialTenant ?? null;
+
+    if (!resolvedTenant) {
+      setWorkspaceError(
+        `No existe ningun nutricionista configurado para ${tenantSlug}.`,
+      );
+      setLoading(false);
+      return;
+    }
+
+    setTenant(resolvedTenant);
+
+    if (!session) {
+      setLoading(false);
+      return;
+    }
+
+    setSessionUserId(session.user.id);
+
+    const { data: membership } = await supabase
+      .from("tenant_members")
+      .select("role,status")
+      .eq("tenant_id", resolvedTenant.id)
+      .eq("user_id", session.user.id)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (!membership) {
+      setRole(null);
+      setWorkspaceError("Tu usuario todavia no esta vinculado a este espacio.");
+      setLoading(false);
+      return;
+    }
+
+    setRole(membership.role as UserRole);
+
+    const patientQuery =
+      membership.role === "patient"
+        ? supabase
+            .from("patients")
+            .select("*")
+            .eq("tenant_id", resolvedTenant.id)
+            .eq("user_id", session.user.id)
+        : supabase
+            .from("patients")
+            .select("*")
+            .eq("tenant_id", resolvedTenant.id)
+            .order("registered_at", { ascending: false });
+
+    const { data: patientRows } = await patientQuery;
+    const loadedPatients = (patientRows ?? []) as Patient[];
+    setPatients(loadedPatients);
+    const nextPatientId = loadedPatients.some((patient) => patient.id === selectedPatientId)
+      ? selectedPatientId
+      : loadedPatients[0]?.id || "";
+    setSelectedPatientId(nextPatientId);
+
+    const patientIds = loadedPatients.map((patient) => patient.id);
+    if (patientIds.length === 0) {
+      setWeights([]);
+      setWaists([]);
+      setExercises([]);
+      setMealPhotos([]);
+      setDocuments([]);
+      setConversations([]);
+      setMessages([]);
+      setPlans([]);
+      setLoading(false);
+      return;
+    }
+
+    const [
+      weightRows,
+      waistRows,
+      exerciseRows,
+      photoRows,
+      documentRows,
+      conversationRows,
+      planRows,
+    ] = await Promise.all([
+      supabase
+        .from("weight_logs")
+        .select("*")
+        .in("patient_id", patientIds)
+        .order("logged_at", { ascending: false }),
+      supabase
+        .from("waist_logs")
+        .select("*")
+        .in("patient_id", patientIds)
+        .order("logged_at", { ascending: false }),
+      supabase
+        .from("exercise_logs")
+        .select("*")
+        .in("patient_id", patientIds)
+        .order("logged_at", { ascending: false }),
+      supabase
+        .from("meal_photos")
+        .select("*")
+        .in("patient_id", patientIds)
+        .order("logged_at", { ascending: false }),
+      supabase
+        .from("documents")
+        .select("*")
+        .in("patient_id", patientIds)
+        .order("created_at", { ascending: false }),
+      supabase.from("conversations").select("*").in("patient_id", patientIds),
+      supabase
+        .from("meal_plans")
+        .select("*, meal_plan_days(*, meal_items(*))")
+        .in("patient_id", patientIds)
+        .order("created_at", { ascending: false }),
+    ]);
+
+    setWeights((weightRows.data ?? []) as WeightLog[]);
+    setWaists((waistRows.data ?? []) as WaistLog[]);
+    setExercises((exerciseRows.data ?? []) as ExerciseLog[]);
+    setMealPhotos(await withSignedUrls((photoRows.data ?? []) as MealPhoto[], "storage_path"));
+    setDocuments(await withSignedUrls((documentRows.data ?? []) as DocumentFile[], "storage_path"));
+    setConversations((conversationRows.data ?? []) as Conversation[]);
+    setPlans((planRows.data ?? []) as MealPlan[]);
+    setLoading(false);
+  }, [initialTenant, selectedPatientId, supabase, tenantSlug, withSignedUrls]);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    const timer = window.setTimeout(() => {
+      void loadWorkspace();
+    }, 0);
+    const { data } = supabase.auth.onAuthStateChange(() => {
+      void loadWorkspace();
+    });
+
+    return () => {
+      window.clearTimeout(timer);
+      data.subscription.unsubscribe();
+    };
+  }, [loadWorkspace, supabase]);
+
+  useEffect(() => {
+    if (!supabase || !selectedConversation) return;
+
+    const channel = supabase
+      .channel(`nutrios-chat-${selectedConversation.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "chat_messages",
+          filter: `conversation_id=eq.${selectedConversation.id}`,
+        },
+        (payload) => {
+          setMessages((current) => {
+            const next = payload.new as ChatMessage;
+            if (current.some((item) => item.id === next.id)) return current;
+            return [...current, next];
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedConversation, supabase]);
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase) return;
+    setNotice("");
+    const { error } = await supabase.auth.signInWithPassword({
+      email: authEmail,
+      password: authPassword,
+    });
+    setNotice(error ? error.message : "Sesion iniciada.");
+  }
+
+  async function handleLogout() {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setRole(null);
+    setSessionUserId("");
+  }
+
+  const appStyle = {
+    "--tenant-color": tenant.primary_color,
+    "--tenant-color-dark": tenant.primary_color,
+  } as React.CSSProperties;
+
+  if (loading) {
+    return (
+      <main className="nutrios-app tenant-bg flex items-center justify-center px-6">
+        <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-[var(--panel)] px-5 py-4 shadow-[var(--shadow-soft)]">
+          <Loader2 className="size-5 animate-spin text-[var(--tenant-color)]" />
+          <span className="text-sm font-medium">Cargando NutriOS...</span>
+        </div>
+      </main>
+    );
+  }
+
+  if (supabase && !role) {
+    return (
+      <main className="nutrios-app tenant-bg flex min-h-screen items-center justify-center px-4" style={appStyle}>
+        <section className="w-full max-w-md rounded-lg border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[var(--shadow-soft)]">
+          <Brand tenant={tenant} compact={false} />
+          <form className="mt-8 space-y-4" onSubmit={handleLogin}>
+            <Field
+              label="Correo electronico"
+              type="email"
+              value={authEmail}
+              onChange={setAuthEmail}
+              required
+            />
+            <Field
+              label="Contrasena"
+              type="password"
+              value={authPassword}
+              onChange={setAuthPassword}
+              required
+            />
+            <button className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
+              <ChevronRight className="size-4" />
+              Entrar
+            </button>
+          </form>
+          {(workspaceError || notice) && (
+            <p className="mt-4 rounded-lg border border-[#e8d9aa] bg-[#fff8df] px-3 py-2 text-sm text-[#6b5420]">
+              {workspaceError || notice}
+            </p>
+          )}
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="nutrios-app tenant-bg" style={appStyle}>
+      <div className="mx-auto grid min-h-screen max-w-[1440px] grid-cols-1 lg:grid-cols-[280px_1fr]">
+        <aside className="border-b border-[var(--line)] bg-[#fffbf3]/90 px-4 py-4 lg:border-b-0 lg:border-r lg:px-5 lg:py-6">
+          <div className="flex items-center justify-between gap-3 lg:block">
+            <Brand tenant={tenant} compact />
+            <div className="flex items-center gap-2 lg:mt-6">
+              {isDemo && (
+                <span className="rounded-full bg-[#f1e7c4] px-3 py-1 text-xs font-semibold text-[#69551f]">
+                  Demo local
+                </span>
+              )}
+              {supabase && (
+                <button
+                  className="grid size-9 place-items-center rounded-lg border border-[var(--line)] bg-white text-[#39433f]"
+                  onClick={handleLogout}
+                  title="Cerrar sesion"
+                >
+                  <LogOut className="size-4" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <nav className="mt-5 flex gap-2 overflow-x-auto pb-1 lg:grid lg:overflow-visible lg:pb-0">
+            {tabs
+              .filter((tab) => role !== "patient" || tab.id !== "settings")
+              .map((tab) => {
+                const Icon = tab.icon;
+                const active = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    className={`flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${
+                      active
+                        ? "bg-[var(--tenant-color)] text-white"
+                        : "text-[#4a554f] hover:bg-white"
+                    }`}
+                    onClick={() => setActiveTab(tab.id)}
+                  >
+                    <Icon className="size-4" />
+                    {tab.label}
+                  </button>
+                );
+              })}
+          </nav>
+
+          <PatientSwitcher
+            patients={patients}
+            selectedPatientId={selectedPatientId}
+            onSelect={setSelectedPatientId}
+            role={role}
+          />
+        </aside>
+
+        <section className="min-w-0 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+          <Header tenant={tenant} role={role} selectedPatient={selectedPatient} />
+          {workspaceError && (
+            <div className="mt-5 rounded-lg border border-[#e8d9aa] bg-[#fff8df] px-4 py-3 text-sm text-[#6b5420]">
+              {workspaceError}
+            </div>
+          )}
+          {notice && (
+            <div className="mt-5 rounded-lg border border-[#bee4d7] bg-[#effaf5] px-4 py-3 text-sm text-[#255d50]">
+              {notice}
+            </div>
+          )}
+
+          <div className="mt-5">
+            {activeTab === "patients" && (
+              <PatientsPanel
+                tenant={tenant}
+                role={role}
+                patients={patients}
+                selectedPatient={selectedPatient}
+                weights={weights}
+                onSelectPatient={setSelectedPatientId}
+                onNotice={setNotice}
+                onReload={loadWorkspace}
+                supabase={supabase}
+              />
+            )}
+            {activeTab === "plans" && (
+              <PlansPanel
+                role={role}
+                tenant={tenant}
+                selectedPatient={selectedPatient}
+                plans={patientPlans}
+                supabase={supabase}
+                onNotice={setNotice}
+                onReload={loadWorkspace}
+              />
+            )}
+            {activeTab === "tracking" && (
+              <TrackingPanel
+                role={role}
+                tenant={tenant}
+                selectedPatient={selectedPatient}
+                weights={patientWeights}
+                waists={patientWaists}
+                exercises={exercises.filter((item) => item.patient_id === selectedPatientId)}
+                mealPhotos={mealPhotos.filter((item) => item.patient_id === selectedPatientId)}
+                supabase={supabase}
+                onNotice={setNotice}
+                onReload={loadWorkspace}
+              />
+            )}
+            {activeTab === "chat" && (
+              <ChatPanel
+                tenant={tenant}
+                selectedPatient={selectedPatient}
+                conversation={selectedConversation}
+                messages={patientMessages}
+                currentUserId={sessionUserId}
+                supabase={supabase}
+                onNotice={setNotice}
+              />
+            )}
+            {activeTab === "documents" && (
+              <DocumentsPanel
+                tenant={tenant}
+                role={role}
+                selectedPatient={selectedPatient}
+                documents={documents.filter((item) => item.patient_id === selectedPatientId)}
+                supabase={supabase}
+                onNotice={setNotice}
+                onReload={loadWorkspace}
+              />
+            )}
+            {activeTab === "settings" && (
+              <SettingsPanel
+                tenant={tenant}
+                supabase={supabase}
+                onTenant={setTenant}
+                onNotice={setNotice}
+              />
+            )}
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function Brand({ tenant, compact }: { tenant: Tenant; compact: boolean }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg bg-[var(--tenant-color)] text-base font-black text-white">
+        {tenant.logo_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={tenant.logo_url} alt="" className="h-full w-full object-cover" />
+        ) : (
+          "N"
+        )}
+      </div>
+      <div className="min-w-0">
+        <p className="truncate text-base font-black tracking-normal">NutriOS</p>
+        <p className="truncate text-sm text-[var(--muted)]">
+          {compact ? tenant.name : `${tenant.name} - ${tenant.slug}`}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Header({
+  tenant,
+  role,
+  selectedPatient,
+}: {
+  tenant: Tenant;
+  role: UserRole | null;
+  selectedPatient: Patient | null;
+}) {
+  return (
+    <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p className="text-sm font-semibold uppercase text-[var(--tenant-color)]">
+          {role === "patient" ? "Area paciente" : "Panel nutricionista"}
+        </p>
+        <h1 className="mt-1 text-2xl font-black tracking-normal text-[#17201d] sm:text-3xl">
+          {selectedPatient ? selectedPatient.full_name : tenant.name}
+        </h1>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Pill icon={ShieldCheck} label="GDPR preparado" />
+        <Pill icon={Bell} label="Chat en tiempo real" />
+      </div>
+    </header>
+  );
+}
+
+function Pill({ icon: Icon, label }: { icon: typeof Users; label: string }) {
+  return (
+    <span className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-semibold text-[#3b4741]">
+      <Icon className="size-4 text-[var(--tenant-color)]" />
+      {label}
+    </span>
+  );
+}
+
+function PatientSwitcher({
+  patients,
+  selectedPatientId,
+  onSelect,
+  role,
+}: {
+  patients: Patient[];
+  selectedPatientId: string;
+  onSelect: (id: string) => void;
+  role: UserRole | null;
+}) {
+  if (role === "patient") return null;
+
+  return (
+    <div className="mt-6 hidden lg:block">
+      <p className="mb-2 text-xs font-bold uppercase text-[var(--muted)]">Clientes</p>
+      <div className="grid max-h-[45vh] gap-2 overflow-y-auto pr-1 scrollbar-thin">
+        {patients.map((patient) => (
+          <button
+            key={patient.id}
+            className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+              patient.id === selectedPatientId
+                ? "border-[var(--tenant-color)] bg-white text-[#17201d]"
+                : "border-transparent text-[#59645f] hover:bg-white"
+            }`}
+            onClick={() => onSelect(patient.id)}
+          >
+            <span className="block truncate font-semibold">{patient.full_name}</span>
+            <span className="text-xs text-[var(--muted)]">{patient.patient_code}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PatientsPanel({
+  tenant,
+  role,
+  patients,
+  selectedPatient,
+  weights,
+  onSelectPatient,
+  onNotice,
+  onReload,
+  supabase,
+}: {
+  tenant: Tenant;
+  role: UserRole | null;
+  patients: Patient[];
+  selectedPatient: Patient | null;
+  weights: WeightLog[];
+  onSelectPatient: (id: string) => void;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+}) {
+  const [email, setEmail] = useState("");
+  const [manualInviteLink, setManualInviteLink] = useState("");
+  const latestWeight = selectedPatient
+    ? weights
+        .filter((item) => item.patient_id === selectedPatient.id)
+        .sort((a, b) => new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime())[0]
+    : null;
+
+  async function invitePatient(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para enviar invitaciones reales.");
+      return;
+    }
+
+    const {
+      data: { session },
+      } = await supabase.auth.getSession();
+
+    setManualInviteLink("");
+    const response = await fetch("/api/invitations/create", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session?.access_token}`,
+      },
+      body: JSON.stringify({
+        email,
+        tenantId: tenant.id,
+        tenantSlug: tenant.slug,
+      }),
+    });
+
+    const payload = (await response.json()) as CreateInvitationResponse;
+    if (!response.ok) {
+      onNotice(payload.error ?? "No se pudo enviar la invitacion.");
+      return;
+    }
+
+    setEmail("");
+    if (payload.delivery === "manual_link" && payload.actionLink) {
+      setManualInviteLink(payload.actionLink);
+      onNotice(payload.warning ?? "Invitacion creada con enlace manual.");
+    } else {
+      onNotice("Invitacion enviada al paciente.");
+    }
+    await onReload();
+  }
+
+  async function copyManualInviteLink() {
+    if (!manualInviteLink) return;
+    try {
+      await navigator.clipboard.writeText(manualInviteLink);
+      onNotice("Enlace copiado.");
+    } catch {
+      onNotice("No se pudo copiar automaticamente. Selecciona el enlace y copialo manualmente.");
+    }
+  }
+
+  if (role === "patient") {
+    return (
+      <div className="grid gap-4 lg:grid-cols-3">
+        <StatCard label="Peso inicial" value={`${selectedPatient?.initial_weight_kg ?? "-"} kg`} icon={Weight} />
+        <StatCard label="Peso actual" value={`${latestWeight?.weight_kg ?? selectedPatient?.current_weight_kg ?? "-"} kg`} icon={Activity} />
+        <StatCard label="Fecha de alta" value={formatDate(selectedPatient?.registered_at)} icon={CalendarDays} />
+        <PatientRecord patient={selectedPatient} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
+      <Panel>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-black">Alta de cliente</h2>
+          <UserPlus className="size-5 text-[var(--tenant-color)]" />
+        </div>
+        <form className="mt-5 space-y-3" onSubmit={invitePatient}>
+          <Field
+            label="Correo electronico"
+            type="email"
+            value={email}
+            onChange={setEmail}
+            required
+          />
+          <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
+            <Send className="size-4" />
+            Enviar invitacion
+          </button>
+        </form>
+        <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
+          El cliente completara su ficha al aceptar la invitacion. El ID interno y la fecha de registro se generan automaticamente.
+        </p>
+        {manualInviteLink && (
+          <div className="mt-4 rounded-lg border border-[#e8d9aa] bg-[#fff8df] p-3">
+            <p className="text-sm font-semibold text-[#6b5420]">
+              Limite de emails alcanzado. Envia este enlace al cliente para completar la invitacion.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <input
+                className="h-10 min-w-0 flex-1 rounded-lg border border-[#e8d9aa] bg-white px-3 text-xs text-[#3f3724]"
+                value={manualInviteLink}
+                readOnly
+                onFocus={(event) => event.currentTarget.select()}
+              />
+              <button
+                type="button"
+                className="grid size-10 shrink-0 place-items-center rounded-lg bg-[var(--tenant-color)] text-white"
+                onClick={copyManualInviteLink}
+                title="Copiar enlace"
+              >
+                <Copy className="size-4" />
+              </button>
+            </div>
+          </div>
+        )}
+      </Panel>
+
+      <Panel>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-black">Clientes activos</h2>
+          <span className="rounded-lg bg-[#eef3f0] px-3 py-1 text-sm font-semibold text-[#53605a]">
+            {patients.length}
+          </span>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {patients.map((patient) => (
+            <button
+              key={patient.id}
+              onClick={() => onSelectPatient(patient.id)}
+              className={`rounded-lg border bg-white p-4 text-left shadow-sm transition ${
+                selectedPatient?.id === patient.id
+                  ? "border-[var(--tenant-color)]"
+                  : "border-[var(--line)] hover:border-[#bfb7aa]"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-black">{patient.full_name}</p>
+                  <p className="mt-1 text-xs font-semibold text-[var(--muted)]">
+                    {patient.patient_code}
+                  </p>
+                </div>
+                <ChevronRight className="size-4 text-[var(--muted)]" />
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+                <Metric label="Edad" value={`${patient.age}`} />
+                <Metric label="Altura" value={`${patient.height_cm} cm`} />
+                <Metric label="Inicial" value={`${patient.initial_weight_kg} kg`} />
+                <Metric label="Actual" value={`${patient.current_weight_kg} kg`} />
+              </div>
+            </button>
+          ))}
+        </div>
+        {patients.length === 0 && <EmptyState text="Todavia no hay clientes dados de alta." />}
+      </Panel>
+
+      <PatientRecord patient={selectedPatient} />
+    </div>
+  );
+}
+
+function PatientRecord({ patient }: { patient: Patient | null }) {
+  if (!patient) return <Panel><EmptyState text="Selecciona un cliente." /></Panel>;
+
+  return (
+    <Panel className="xl:col-span-2">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-lg font-black">Ficha del cliente</h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Alta: {formatDate(patient.registered_at)} - ID: {patient.patient_code}
+          </p>
+        </div>
+        <span className="rounded-lg bg-[#eaf4ef] px-3 py-1 text-sm font-semibold text-[#255d50]">
+          Consentimiento registrado
+        </span>
+      </div>
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        <InfoBlock label="Alergias/intolerancias" value={patient.allergies} />
+        <InfoBlock label="Alimentos a evitar" value={patient.avoided_foods} />
+        <InfoBlock label="Ejercicio habitual" value={patient.exercise_routine} />
+        <InfoBlock label="Base de evolucion" value={`${patient.initial_weight_kg} kg desde ${formatDate(patient.registered_at)}`} />
+      </div>
+    </Panel>
+  );
+}
+
+function PlansPanel({
+  role,
+  tenant,
+  selectedPatient,
+  plans,
+  supabase,
+  onNotice,
+  onReload,
+}: {
+  role: UserRole | null;
+  tenant: Tenant;
+  selectedPatient: Patient | null;
+  plans: MealPlan[];
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const [title, setTitle] = useState("Plan semanal");
+  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [draftItems, setDraftItems] = useState<DraftMealItem[]>([
+    { dayIndex: 1, mealType: "Desayuno", title: "", description: "" },
+  ]);
+
+  async function savePlan(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedPatient) return;
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para guardar dietas reales.");
+      return;
+    }
+
+    const items = draftItems.filter((item) => item.title.trim());
+    const { data: plan, error: planError } = await supabase
+      .from("meal_plans")
+      .insert({
+        tenant_id: tenant.id,
+        patient_id: selectedPatient.id,
+        title,
+        start_date: startDate,
+        status: "published",
+      })
+      .select("id")
+      .single();
+
+    if (planError || !plan) {
+      onNotice(planError?.message ?? "No se pudo guardar la dieta.");
+      return;
+    }
+
+    const dayRows = Array.from(new Set(items.map((item) => item.dayIndex))).map((dayIndex) => ({
+      meal_plan_id: plan.id,
+      day_index: dayIndex,
+      day_label: dayLabels[dayIndex - 1],
+    }));
+
+    const { data: insertedDays, error: dayError } = await supabase
+      .from("meal_plan_days")
+      .insert(dayRows)
+      .select("id,day_index");
+
+    if (dayError || !insertedDays) {
+      onNotice(dayError?.message ?? "No se pudieron guardar los dias.");
+      return;
+    }
+
+    const mealRows = items.map((item, index) => ({
+      meal_plan_day_id: insertedDays.find((day) => day.day_index === item.dayIndex)?.id,
+      meal_type: item.mealType,
+      title: item.title,
+      description: item.description,
+      position: index + 1,
+    }));
+
+    const { error: itemError } = await supabase.from("meal_items").insert(mealRows);
+    if (itemError) {
+      onNotice(itemError.message);
+      return;
+    }
+
+    onNotice("Dieta publicada para el cliente.");
+    setDraftItems([{ dayIndex: 1, mealType: "Desayuno", title: "", description: "" }]);
+    await onReload();
+  }
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[420px_1fr]">
+      {role !== "patient" && (
+        <Panel>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-black">Crear dieta</h2>
+            <ClipboardList className="size-5 text-[var(--tenant-color)]" />
+          </div>
+          <form className="mt-5 space-y-4" onSubmit={savePlan}>
+            <Field label="Titulo" value={title} onChange={setTitle} required />
+            <Field label="Fecha inicio" type="date" value={startDate} onChange={setStartDate} required />
+            <div className="space-y-3">
+              {draftItems.map((item, index) => (
+                <div key={index} className="rounded-lg border border-[var(--line)] bg-white p-3">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <SelectField
+                      label="Dia"
+                      value={String(item.dayIndex)}
+                      onChange={(value) => updateDraftItem(index, { dayIndex: Number(value) })}
+                      options={dayLabels.map((label, dayIndex) => ({
+                        value: String(dayIndex + 1),
+                        label,
+                      }))}
+                    />
+                    <SelectField
+                      label="Comida"
+                      value={item.mealType}
+                      onChange={(value) => updateDraftItem(index, { mealType: value })}
+                      options={["Desayuno", "Media manana", "Comida", "Merienda", "Cena"].map((label) => ({
+                        value: label,
+                        label,
+                      }))}
+                    />
+                  </div>
+                  <Field
+                    label="Plato"
+                    value={item.title}
+                    onChange={(value) => updateDraftItem(index, { title: value })}
+                  />
+                  <TextArea
+                    label="Indicaciones"
+                    value={item.description}
+                    onChange={(value) => updateDraftItem(index, { description: value })}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-semibold"
+                onClick={() =>
+                  setDraftItems((current) => [
+                    ...current,
+                    { dayIndex: 1, mealType: "Comida", title: "", description: "" },
+                  ])
+                }
+              >
+                <Plus className="size-4" />
+                Anadir comida
+              </button>
+              <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
+                <Check className="size-4" />
+                Publicar
+              </button>
+            </div>
+          </form>
+        </Panel>
+      )}
+
+      <Panel className={role === "patient" ? "xl:col-span-2" : ""}>
+        <h2 className="text-lg font-black">Dieta publicada</h2>
+        <div className="mt-4 grid gap-4">
+          {plans.map((plan) => (
+            <div key={plan.id} className="rounded-lg border border-[var(--line)] bg-white p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="font-black">{plan.title}</p>
+                  <p className="text-sm text-[var(--muted)]">
+                    Inicio {formatDate(plan.start_date)} - {plan.status}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {(plan.meal_plan_days ?? []).map((day) => (
+                  <div key={day.id} className="rounded-lg bg-[#f7f5ef] p-3">
+                    <p className="font-bold">{day.day_label}</p>
+                    <div className="mt-2 space-y-2">
+                      {(day.meal_items ?? [])
+                        .sort((a, b) => a.position - b.position)
+                        .map((item) => (
+                          <div key={item.id} className="rounded-md bg-white px-3 py-2 text-sm">
+                            <p className="font-semibold">
+                              {item.meal_type}: {item.title}
+                            </p>
+                            {item.description && (
+                              <p className="mt-1 text-[var(--muted)]">{item.description}</p>
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {plans.length === 0 && <EmptyState text="No hay dietas publicadas para este cliente." />}
+        </div>
+      </Panel>
+    </div>
+  );
+
+  function updateDraftItem(index: number, patch: Partial<DraftMealItem>) {
+    setDraftItems((current) =>
+      current.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, ...patch } : item,
+      ),
+    );
+  }
+}
+
+function TrackingPanel({
+  role,
+  tenant,
+  selectedPatient,
+  weights,
+  waists,
+  exercises,
+  mealPhotos,
+  supabase,
+  onNotice,
+  onReload,
+}: {
+  role: UserRole | null;
+  tenant: Tenant;
+  selectedPatient: Patient | null;
+  weights: WeightLog[];
+  waists: WaistLog[];
+  exercises: ExerciseLog[];
+  mealPhotos: MealPhoto[];
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const [weight, setWeight] = useState("");
+  const [waist, setWaist] = useState("");
+  const [exercise, setExercise] = useState("");
+  const [duration, setDuration] = useState("");
+  const [mealType, setMealType] = useState("Comida");
+  const [mealNotes, setMealNotes] = useState("");
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+
+  const chartData = buildChartData(weights, waists);
+
+  async function saveTracking(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedPatient) return;
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para registrar datos reales.");
+      return;
+    }
+
+    const rows: PromiseLike<unknown>[] = [];
+    if (weight) {
+      rows.push(
+        supabase.from("weight_logs").insert({
+          tenant_id: tenant.id,
+          patient_id: selectedPatient.id,
+          weight_kg: Number(weight),
+          source: role === "patient" ? "patient" : "nutritionist",
+        }),
+      );
+      rows.push(
+        supabase
+          .from("patients")
+          .update({ current_weight_kg: Number(weight), updated_at: new Date().toISOString() })
+          .eq("id", selectedPatient.id),
+      );
+    }
+    if (waist) {
+      rows.push(
+        supabase.from("waist_logs").insert({
+          tenant_id: tenant.id,
+          patient_id: selectedPatient.id,
+          waist_cm: Number(waist),
+        }),
+      );
+    }
+    if (exercise) {
+      rows.push(
+        supabase.from("exercise_logs").insert({
+          tenant_id: tenant.id,
+          patient_id: selectedPatient.id,
+          activity: exercise,
+          duration_minutes: duration ? Number(duration) : null,
+          intensity: "normal",
+        }),
+      );
+    }
+
+    await Promise.all(rows);
+
+    if (photoFile) {
+      const path = `${tenant.id}/${selectedPatient.id}/meal-photos/${Date.now()}-${safeFileName(photoFile.name)}`;
+      const { error: uploadError } = await supabase.storage
+        .from("nutrios-private")
+        .upload(path, photoFile, { upsert: false });
+
+      if (uploadError) {
+        onNotice(uploadError.message);
+        return;
+      }
+
+      await supabase.from("meal_photos").insert({
+        tenant_id: tenant.id,
+        patient_id: selectedPatient.id,
+        storage_path: path,
+        meal_type: mealType,
+        notes: mealNotes,
+      });
+    }
+
+    setWeight("");
+    setWaist("");
+    setExercise("");
+    setDuration("");
+    setMealNotes("");
+    setPhotoFile(null);
+    onNotice("Seguimiento actualizado.");
+    await onReload();
+  }
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[420px_1fr]">
+      <Panel>
+        <h2 className="text-lg font-black">
+          {role === "patient" ? "Registrar datos" : "Nuevo registro"}
+        </h2>
+        <form className="mt-5 space-y-4" onSubmit={saveTracking}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Peso kg" type="number" value={weight} onChange={setWeight} step="0.1" />
+            <Field label="Cintura cm" type="number" value={waist} onChange={setWaist} step="0.1" />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Ejercicio realizado" value={exercise} onChange={setExercise} />
+            <Field label="Minutos" type="number" value={duration} onChange={setDuration} />
+          </div>
+          <SelectField
+            label="Comida fotografiada"
+            value={mealType}
+            onChange={setMealType}
+            options={["Desayuno", "Comida", "Cena", "Snack"].map((label) => ({
+              value: label,
+              label,
+            }))}
+          />
+          <TextArea label="Notas de comida" value={mealNotes} onChange={setMealNotes} />
+          <label className="block">
+            <span className="mb-1 block text-sm font-semibold text-[#39433f]">Foto</span>
+            <input
+              className="block w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm"
+              type="file"
+              accept="image/*"
+              onChange={(event) => setPhotoFile(event.target.files?.[0] ?? null)}
+            />
+          </label>
+          <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
+            <ImagePlus className="size-4" />
+            Guardar registro
+          </button>
+        </form>
+      </Panel>
+
+      <Panel>
+        <h2 className="text-lg font-black">Evolucion</h2>
+        <div className="mt-4 h-72 rounded-lg border border-[var(--line)] bg-white p-3">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5dfd3" />
+              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+              <YAxis tick={{ fontSize: 12 }} />
+              <Tooltip />
+              <Line type="monotone" dataKey="peso" stroke="#2f7d6d" strokeWidth={3} dot />
+              <Line type="monotone" dataKey="cintura" stroke="#4d6fa9" strokeWidth={3} dot />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <LogList title="Ejercicio" items={exercises.map((item) => `${formatDate(item.logged_at)} - ${item.activity}${item.duration_minutes ? `, ${item.duration_minutes} min` : ""}`)} />
+          <PhotoList photos={mealPhotos} />
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function ChatPanel({
+  tenant,
+  selectedPatient,
+  conversation,
+  messages,
+  currentUserId,
+  supabase,
+  onNotice,
+}: {
+  tenant: Tenant;
+  selectedPatient: Patient | null;
+  conversation: Conversation | null;
+  messages: ChatMessage[];
+  currentUserId: string;
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+}) {
+  const [body, setBody] = useState("");
+
+  async function sendMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedPatient || !conversation || !body.trim()) return;
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para usar el chat real.");
+      return;
+    }
+
+    const { error } = await supabase.from("chat_messages").insert({
+      tenant_id: tenant.id,
+      conversation_id: conversation.id,
+      patient_id: selectedPatient.id,
+      sender_id: currentUserId,
+      body: body.trim(),
+    });
+
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    setBody("");
+  }
+
+  return (
+    <Panel>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-black">Chat</h2>
+        <MessageCircle className="size-5 text-[var(--tenant-color)]" />
+      </div>
+      <div className="mt-5 grid max-h-[55vh] gap-3 overflow-y-auto rounded-lg border border-[var(--line)] bg-white p-4 scrollbar-thin">
+        {messages.map((message) => {
+          const mine = message.sender_id === currentUserId;
+          return (
+            <div
+              key={message.id}
+              className={`max-w-[82%] rounded-lg px-3 py-2 text-sm ${
+                mine
+                  ? "ml-auto bg-[var(--tenant-color)] text-white"
+                  : "bg-[#f0eee7] text-[#27312d]"
+              }`}
+            >
+              <p>{message.body}</p>
+              <p className={`mt-1 text-xs ${mine ? "text-white/75" : "text-[var(--muted)]"}`}>
+                {formatDateTime(message.created_at)}
+              </p>
+            </div>
+          );
+        })}
+        {messages.length === 0 && <EmptyState text="No hay mensajes todavia." />}
+      </div>
+      <form className="mt-4 flex gap-2" onSubmit={sendMessage}>
+        <input
+          className="h-11 min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-white px-3 text-sm"
+          value={body}
+          onChange={(event) => setBody(event.target.value)}
+          placeholder="Escribe un mensaje"
+        />
+        <button className="grid size-11 place-items-center rounded-lg bg-[var(--tenant-color)] text-white">
+          <Send className="size-4" />
+        </button>
+      </form>
+    </Panel>
+  );
+}
+
+function DocumentsPanel({
+  tenant,
+  role,
+  selectedPatient,
+  documents,
+  supabase,
+  onNotice,
+  onReload,
+}: {
+  tenant: Tenant;
+  role: UserRole | null;
+  selectedPatient: Patient | null;
+  documents: DocumentFile[];
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const [title, setTitle] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+
+  async function uploadDocument(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedPatient || !file) return;
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para subir documentos reales.");
+      return;
+    }
+
+    const path = `${tenant.id}/${selectedPatient.id}/documents/${Date.now()}-${safeFileName(file.name)}`;
+    const { error: uploadError } = await supabase.storage
+      .from("nutrios-private")
+      .upload(path, file, { upsert: false });
+
+    if (uploadError) {
+      onNotice(uploadError.message);
+      return;
+    }
+
+    const { error } = await supabase.from("documents").insert({
+      tenant_id: tenant.id,
+      patient_id: selectedPatient.id,
+      title: title || file.name,
+      storage_path: path,
+      content_type: file.type,
+    });
+
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    setTitle("");
+    setFile(null);
+    onNotice("Documento subido.");
+    await onReload();
+  }
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[380px_1fr]">
+      {role !== "patient" && (
+        <Panel>
+          <h2 className="text-lg font-black">Anadir documento</h2>
+          <form className="mt-5 space-y-4" onSubmit={uploadDocument}>
+            <Field label="Titulo" value={title} onChange={setTitle} />
+            <label className="block">
+              <span className="mb-1 block text-sm font-semibold text-[#39433f]">Archivo</span>
+              <input
+                className="block w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                type="file"
+                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+              />
+            </label>
+            <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
+              <FileText className="size-4" />
+              Subir
+            </button>
+          </form>
+        </Panel>
+      )}
+      <Panel className={role === "patient" ? "xl:col-span-2" : ""}>
+        <h2 className="text-lg font-black">Documentacion</h2>
+        <div className="mt-4 grid gap-3">
+          {documents.map((document) => (
+            <a
+              key={document.id}
+              href={document.signed_url}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-white p-3 text-sm"
+            >
+              <span className="min-w-0">
+                <span className="block truncate font-semibold">{document.title}</span>
+                <span className="text-[var(--muted)]">{formatDate(document.created_at)}</span>
+              </span>
+              <ChevronRight className="size-4 shrink-0 text-[var(--muted)]" />
+            </a>
+          ))}
+          {documents.length === 0 && <EmptyState text="No hay documentos para este cliente." />}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function SettingsPanel({
+  tenant,
+  supabase,
+  onTenant,
+  onNotice,
+}: {
+  tenant: Tenant;
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onTenant: (tenant: Tenant) => void;
+  onNotice: (message: string) => void;
+}) {
+  const [name, setName] = useState(tenant.name);
+  const [logoUrl, setLogoUrl] = useState(tenant.logo_url ?? "");
+  const [primaryColor, setPrimaryColor] = useState(tenant.primary_color);
+  const [privacyUrl, setPrivacyUrl] = useState(tenant.privacy_policy_url ?? "");
+
+  async function saveSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextTenant = {
+      ...tenant,
+      name,
+      logo_url: logoUrl || null,
+      primary_color: primaryColor,
+      privacy_policy_url: privacyUrl || null,
+    };
+
+    if (!supabase) {
+      onTenant(nextTenant);
+      onNotice("Marca actualizada en modo demo.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("tenants")
+      .update({
+        name,
+        logo_url: logoUrl || null,
+        primary_color: primaryColor,
+        privacy_policy_url: privacyUrl || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", tenant.id);
+
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    onTenant(nextTenant);
+    onNotice("Personalizacion guardada.");
+  }
+
+  return (
+    <Panel>
+      <h2 className="text-lg font-black">Personalizacion del nutricionista</h2>
+      <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={saveSettings}>
+        <Field label="Nombre visible" value={name} onChange={setName} required />
+        <Field label="Logo URL" value={logoUrl} onChange={setLogoUrl} />
+        <Field label="Politica de privacidad URL" value={privacyUrl} onChange={setPrivacyUrl} />
+        <label className="block">
+          <span className="mb-1 block text-sm font-semibold text-[#39433f]">Color principal</span>
+          <div className="flex h-11 items-center gap-3 rounded-lg border border-[var(--line)] bg-white px-3">
+            <input
+              type="color"
+              value={primaryColor}
+              onChange={(event) => setPrimaryColor(event.target.value)}
+              className="size-7 rounded border-0 bg-transparent p-0"
+            />
+            <span className="text-sm font-semibold">{primaryColor}</span>
+          </div>
+        </label>
+        <div className="lg:col-span-2">
+          <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
+            <Check className="size-4" />
+            Guardar marca
+          </button>
+        </div>
+      </form>
+    </Panel>
+  );
+}
+
+function Panel({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-[var(--shadow-soft)] sm:p-5 ${className}`}>
+      {children}
+    </section>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: string;
+  icon: typeof Users;
+}) {
+  return (
+    <Panel>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold text-[var(--muted)]">{label}</p>
+          <p className="mt-1 text-2xl font-black">{value}</p>
+        </div>
+        <div className="grid size-10 place-items-center rounded-lg bg-[#eaf4ef] text-[var(--tenant-color)]">
+          <Icon className="size-5" />
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="rounded-md bg-[#f6f3eb] px-2 py-1">
+      <span className="block text-xs text-[var(--muted)]">{label}</span>
+      <span className="font-semibold">{value}</span>
+    </span>
+  );
+}
+
+function InfoBlock({ label, value }: { label: string; value: string | number | null }) {
+  return (
+    <div className="rounded-lg border border-[var(--line)] bg-white p-3">
+      <p className="text-xs font-bold uppercase text-[var(--muted)]">{label}</p>
+      <p className="mt-2 text-sm leading-6 text-[#2c3732]">{value || "Sin datos"}</p>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  type = "text",
+  required = false,
+  step,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  required?: boolean;
+  step?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-sm font-semibold text-[#39433f]">{label}</span>
+      <input
+        className="h-11 w-full rounded-lg border border-[var(--line)] bg-white px-3 text-sm"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        type={type}
+        required={required}
+        step={step}
+      />
+    </label>
+  );
+}
+
+function TextArea({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-sm font-semibold text-[#39433f]">{label}</span>
+      <textarea
+        className="min-h-24 w-full resize-y rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-sm font-semibold text-[#39433f]">{label}</span>
+      <select
+        className="h-11 w-full rounded-lg border border-[var(--line)] bg-white px-3 text-sm"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-[#cfc8bb] bg-[#faf8f1] px-4 py-8 text-center text-sm font-semibold text-[var(--muted)]">
+      {text}
+    </div>
+  );
+}
+
+function LogList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div>
+      <p className="mb-2 text-sm font-black">{title}</p>
+      <div className="grid gap-2">
+        {items.map((item) => (
+          <div key={item} className="rounded-md bg-[#f7f5ef] px-3 py-2 text-sm">
+            {item}
+          </div>
+        ))}
+        {items.length === 0 && <EmptyState text="Sin registros." />}
+      </div>
+    </div>
+  );
+}
+
+function PhotoList({ photos }: { photos: MealPhoto[] }) {
+  return (
+    <div>
+      <p className="mb-2 text-sm font-black">Fotos de comidas</p>
+      <div className="grid grid-cols-2 gap-2">
+        {photos.map((photo) => (
+          <a
+            key={photo.id}
+            href={photo.signed_url}
+            target="_blank"
+            rel="noreferrer"
+            className="aspect-square overflow-hidden rounded-lg border border-[var(--line)] bg-[#f7f5ef]"
+          >
+            {photo.signed_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={photo.signed_url} alt={photo.notes ?? "Comida"} className="h-full w-full object-cover" />
+            ) : (
+              <span className="grid h-full place-items-center text-xs font-semibold text-[var(--muted)]">
+                Imagen
+              </span>
+            )}
+          </a>
+        ))}
+        {photos.length === 0 && <EmptyState text="Sin fotos." />}
+      </div>
+    </div>
+  );
+}
+
+function buildChartData(weights: WeightLog[], waists: WaistLog[]) {
+  const dates = Array.from(
+    new Set([
+      ...weights.map((item) => item.logged_at.slice(0, 10)),
+      ...waists.map((item) => item.logged_at.slice(0, 10)),
+    ]),
+  ).sort();
+
+  return dates.map((date) => ({
+    date: date.slice(5),
+    peso: weights.find((item) => item.logged_at.slice(0, 10) === date)?.weight_kg,
+    cintura: waists.find((item) => item.logged_at.slice(0, 10) === date)?.waist_cm,
+  }));
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "-";
+  return new Intl.DateTimeFormat("es-ES", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("es-ES", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function safeFileName(name: string) {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9.\-_]/g, "-")
+    .replace(/-+/g, "-");
+}
