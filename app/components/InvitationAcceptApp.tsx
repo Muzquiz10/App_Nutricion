@@ -37,7 +37,6 @@ export function InvitationAcceptApp({
   const [invitation, setInvitation] = useState<InvitationPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
-  const [hasSession, setHasSession] = useState(false);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [fullName, setFullName] = useState("");
   const [age, setAge] = useState("");
@@ -67,7 +66,6 @@ export function InvitationAcceptApp({
         const {
           data: { session },
         } = await supabase.auth.getSession();
-        setHasSession(Boolean(session));
         setSessionEmail(session?.user.email ?? null);
       }
 
@@ -87,15 +85,13 @@ export function InvitationAcceptApp({
       sessionEmail &&
       invitation.email.toLowerCase() !== sessionEmail.toLowerCase(),
   );
-  const needsEmailVerification = Boolean(invitation && !hasSession);
 
   async function signOutWrongSession() {
     if (!supabase) return;
     await supabase.auth.signOut();
-    setHasSession(false);
     setSessionEmail(null);
     setMessage(
-      "Sesion cerrada. Abre de nuevo el enlace original de invitacion desde el correo del cliente.",
+      "Sesion cerrada. Ya puedes completar esta invitacion.",
     );
   }
 
@@ -106,18 +102,12 @@ export function InvitationAcceptApp({
       return;
     }
     if (!invitation) return;
-    if (!hasSession) {
-      setMessage(
-        "Falta validar el correo. Abre el enlace completo que llego al email del cliente, no solo la URL interna de NutriOS.",
-      );
-      return;
-    }
     const {
       data: { session },
     } = await supabase.auth.getSession();
     const currentEmail = session?.user.email ?? null;
     if (
-      !currentEmail ||
+      currentEmail &&
       currentEmail.toLowerCase() !== invitation.email.toLowerCase()
     ) {
       setSessionEmail(currentEmail);
@@ -136,17 +126,13 @@ export function InvitationAcceptApp({
     }
 
     setMessage("");
-    const { error: passwordError } = await supabase.auth.updateUser({ password });
-    if (passwordError) {
-      setMessage(passwordError.message);
-      return;
-    }
-
     const response = await fetch("/api/invitations/complete", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${session?.access_token}`,
+        ...(session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : {}),
       },
       body: JSON.stringify({
         token,
@@ -157,6 +143,7 @@ export function InvitationAcceptApp({
         allergies,
         avoidedFoods,
         exerciseRoutine,
+        password,
         consentAccepted,
       }),
     });
@@ -167,7 +154,19 @@ export function InvitationAcceptApp({
       return;
     }
 
-    window.location.replace("/");
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: invitation.email,
+      password,
+    });
+
+    if (signInError) {
+      setMessage(
+        "Alta completada. Ahora inicia sesion con el correo del cliente y la contrasena que acabas de crear.",
+      );
+      return;
+    }
+
+    window.location.replace(`/n/${invitation.tenant.slug}`);
   }
 
   if (loading) {
@@ -207,7 +206,7 @@ export function InvitationAcceptApp({
           <div className="mt-5 rounded-lg border border-[#e8d9aa] bg-[#fff8df] p-4 text-sm text-[#6b5420]">
             <p className="font-semibold">La sesion activa no coincide con la invitacion.</p>
             <p className="mt-2 leading-6">
-              Esta invitacion es para {invitation?.email}, pero ahora mismo esta abierta la sesion de {sessionEmail}. Cierra sesion y vuelve a abrir el enlace original desde el correo del cliente.
+              Esta invitacion es para {invitation?.email}, pero ahora mismo esta abierta la sesion de {sessionEmail}. Cierra esta sesion para completar el alta del cliente.
             </p>
             <button
               type="button"
@@ -219,19 +218,7 @@ export function InvitationAcceptApp({
           </div>
         )}
 
-        {needsEmailVerification && (
-          <div className="mt-5 rounded-lg border border-[#e8d9aa] bg-[#fff8df] p-4 text-sm text-[#6b5420]">
-            <p className="font-semibold">Falta validar el correo del cliente.</p>
-            <p className="mt-2 leading-6">
-              En modo incognito tienes que abrir el enlace completo del email de invitacion. Ese enlace empieza por Supabase y despues redirige a NutriOS. Si abres directamente esta URL interna, NutriOS no puede saber que el correo pertenece al cliente.
-            </p>
-            <p className="mt-2 leading-6">
-              Si el enlace del email ya se uso en otra ventana, envia una invitacion nueva desde el panel del nutricionista.
-            </p>
-          </div>
-        )}
-
-        {!sessionEmailMismatch && !needsEmailVerification && (
+        {!sessionEmailMismatch && (
         <form className="mt-6 grid gap-4 md:grid-cols-2" onSubmit={completeInvitation}>
           <Field label="Nombre y apellidos" value={fullName} onChange={setFullName} required />
           <Field label="Edad" type="number" value={age} onChange={setAge} required />

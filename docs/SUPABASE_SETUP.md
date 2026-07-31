@@ -47,6 +47,14 @@ supabase/migrations/202607310001_nutritionist_panel_updates.sql
 
 Esta migracion anade el estado `active/archived` de pacientes, crea el bucket de logos y limita los registros de seguimiento para que los inserte el propio cliente.
 
+Para que el chat se actualice en vivo entre nutricionista y cliente, ejecuta tambien:
+
+```text
+supabase/migrations/202607310002_chat_realtime.sql
+```
+
+Sin esta migracion, los mensajes se guardan, pero el otro navegador podria necesitarlos ver tras recargar.
+
 ## 3. Configurar Auth
 
 En `Authentication > URL Configuration`:

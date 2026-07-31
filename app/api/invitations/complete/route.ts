@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "../../../lib/supabase/server";
 
 type CompleteInvitationBody = {
@@ -10,6 +11,7 @@ type CompleteInvitationBody = {
   allergies?: string;
   avoidedFoods?: string;
   exerciseRoutine?: string;
+  password?: string;
   consentAccepted?: boolean;
 };
 
@@ -27,19 +29,6 @@ export async function POST(request: Request) {
     ?.replace(/^Bearer\s+/i, "")
     .trim();
 
-  if (!sessionToken) {
-    return NextResponse.json({ error: "Sesion no encontrada." }, { status: 401 });
-  }
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser(sessionToken);
-
-  if (userError || !user?.email) {
-    return NextResponse.json({ error: "Sesion no valida." }, { status: 401 });
-  }
-
   const body = (await request.json()) as CompleteInvitationBody;
   if (
     !body.token ||
@@ -47,10 +36,18 @@ export async function POST(request: Request) {
     !body.age ||
     !body.heightCm ||
     !body.currentWeightKg ||
+    !body.password ||
     !body.consentAccepted
   ) {
     return NextResponse.json(
       { error: "Faltan datos obligatorios o consentimiento." },
+      { status: 400 },
+    );
+  }
+
+  if (body.password.length < 8) {
+    return NextResponse.json(
+      { error: "La contrasena debe tener al menos 8 caracteres." },
       { status: 400 },
     );
   }
@@ -78,14 +75,28 @@ export async function POST(request: Request) {
     );
   }
 
-  if (invitation.email.toLowerCase() !== user.email.toLowerCase()) {
+  const fullName = body.fullName.trim();
+  const authUserResult = await resolveInvitationUser({
+    supabase,
+    sessionToken,
+    email: invitation.email,
+    password: body.password,
+    metadata: {
+      full_name: fullName,
+      tenant_id: invitation.tenant_id,
+      invitation_token: body.token,
+      role: "patient",
+    },
+  });
+
+  if ("error" in authUserResult) {
     return NextResponse.json(
-      { error: "La invitacion pertenece a otro correo." },
-      { status: 403 },
+      { error: authUserResult.error },
+      { status: authUserResult.status },
     );
   }
 
-  const fullName = body.fullName.trim();
+  const user = authUserResult.user;
   const patientCode = `PAT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 
   const { error: profileError } = await supabase.from("profiles").upsert({
@@ -169,4 +180,147 @@ export async function POST(request: Request) {
     .eq("id", invitation.id);
 
   return NextResponse.json({ ok: true, patientId: patient.id });
+}
+
+async function resolveInvitationUser({
+  supabase,
+  sessionToken,
+  email,
+  password,
+  metadata,
+}: {
+  supabase: SupabaseClient;
+  sessionToken?: string;
+  email: string;
+  password: string;
+  metadata: Record<string, unknown>;
+}): Promise<{ user: User } | { error: string; status: number }> {
+  if (sessionToken) {
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(sessionToken);
+
+    if (error || !user?.email) {
+      return { error: "Sesion no valida.", status: 401 };
+    }
+
+    if (user.email.toLowerCase() !== email.toLowerCase()) {
+      return { error: "La invitacion pertenece a otro correo.", status: 403 };
+    }
+
+    const { data, error: updateError } =
+      await supabase.auth.admin.updateUserById(user.id, {
+        password,
+        email_confirm: true,
+        user_metadata: metadata,
+      });
+
+    if (updateError || !data.user) {
+      return {
+        error: updateError?.message ?? "No se pudo preparar el usuario.",
+        status: 500,
+      };
+    }
+
+    return { user: data.user };
+  }
+
+  const { data: createdUser, error: createError } =
+    await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: metadata,
+      app_metadata: { role: "patient" },
+    });
+
+  if (!createError && createdUser.user) {
+    return { user: createdUser.user };
+  }
+
+  if (!createError?.message.toLowerCase().includes("already")) {
+    return {
+      error: createError?.message ?? "No se pudo crear el usuario.",
+      status: 500,
+    };
+  }
+
+  const existingUser = await findAuthUserByEmail(supabase, email);
+  if (!existingUser) {
+    return {
+      error:
+        "Ese correo ya existe en Auth, pero no se pudo localizar para reutilizarlo. Borralo en Authentication > Users y vuelve a aceptar la invitacion.",
+      status: 409,
+    };
+  }
+
+  const reusable = await canReuseExistingAuthUser(supabase, existingUser.id);
+  if (!reusable) {
+    return {
+      error:
+        "Ese correo ya pertenece a un usuario activo. Usa otro correo o revisa el usuario en Supabase.",
+      status: 409,
+    };
+  }
+
+  const { data: updatedUser, error: updateError } =
+    await supabase.auth.admin.updateUserById(existingUser.id, {
+      password,
+      email_confirm: true,
+      user_metadata: metadata,
+      app_metadata: { role: "patient" },
+    });
+
+  if (updateError || !updatedUser.user) {
+    return {
+      error: updateError?.message ?? "No se pudo reutilizar el usuario.",
+      status: 500,
+    };
+  }
+
+  return { user: updatedUser.user };
+}
+
+async function findAuthUserByEmail(supabase: SupabaseClient, email: string) {
+  const normalizedEmail = email.toLowerCase();
+
+  for (let page = 1; page <= 10; page += 1) {
+    const { data, error } = await supabase.auth.admin.listUsers({
+      page,
+      perPage: 1000,
+    });
+
+    if (error) return null;
+
+    const match = data.users.find(
+      (user) => user.email?.toLowerCase() === normalizedEmail,
+    );
+    if (match) return match;
+    if (!data.nextPage) return null;
+  }
+
+  return null;
+}
+
+async function canReuseExistingAuthUser(
+  supabase: SupabaseClient,
+  userId: string,
+) {
+  const { data: patientRows } = await supabase
+    .from("patients")
+    .select("id")
+    .eq("user_id", userId)
+    .limit(1);
+
+  if ((patientRows ?? []).length > 0) return false;
+
+  const { data: membershipRows } = await supabase
+    .from("tenant_members")
+    .select("role,status")
+    .eq("user_id", userId);
+
+  return !(membershipRows ?? []).some(
+    (membership) => membership.status === "active",
+  );
 }

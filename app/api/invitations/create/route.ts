@@ -112,40 +112,14 @@ export async function POST(request: Request) {
   );
 
   if (inviteError) {
-    if (isEmailRateLimitError(inviteError)) {
-      const { data: linkData, error: linkError } =
-        await supabase.auth.admin.generateLink({
-          type: "invite",
-          email,
-          options: {
-            redirectTo,
-            data: metadata,
-          },
-        });
-
-      const actionLink = linkData.properties?.action_link;
-      if (!linkError && actionLink) {
-        return NextResponse.json({
-          ok: true,
-          delivery: "manual_link",
-          invitationId: invitation.id,
-          invitationUrl: `${appOrigin}${invitePath}`,
-          actionLink,
-          warning:
-            "Supabase ha alcanzado el limite de emails. Usa el enlace manual para esta prueba.",
-        });
-      }
-    }
-
-    await supabase
-      .from("invitations")
-      .update({ status: "revoked" })
-      .eq("id", invitation.id);
-
-    return NextResponse.json(
-      { error: toInvitationErrorMessage(inviteError.message) },
-      { status: 500 },
-    );
+    return NextResponse.json({
+      ok: true,
+      delivery: "manual_link",
+      invitationId: invitation.id,
+      invitationUrl: `${appOrigin}${invitePath}`,
+      actionLink: `${appOrigin}${invitePath}`,
+      warning: toManualInvitationWarning(inviteError.message),
+    });
   }
 
   return NextResponse.json({
@@ -156,22 +130,13 @@ export async function POST(request: Request) {
   });
 }
 
-function isEmailRateLimitError(error: { message?: string; status?: number }) {
-  return (
-    error.status === 429 ||
-    String(error.message ?? "")
-      .toLowerCase()
-      .includes("rate limit")
-  );
-}
-
-function toInvitationErrorMessage(message: string) {
+function toManualInvitationWarning(message: string) {
   const normalized = message.toLowerCase();
   if (normalized.includes("already been registered")) {
-    return "Ese correo ya existe en Supabase Auth. Borra tambien el usuario en Authentication > Users o usa otro correo para la prueba.";
+    return "Supabase no ha enviado el email porque ese correo ya existe en Auth. Usa este enlace manual para completar el alta.";
   }
   if (normalized.includes("rate limit")) {
-    return "Supabase ha alcanzado el limite de emails. Espera a que se libere el limite o configura SMTP propio.";
+    return "Supabase ha alcanzado el limite de emails. Usa este enlace manual para completar el alta.";
   }
-  return message;
+  return "Supabase no ha podido enviar el email. Usa este enlace manual para completar el alta.";
 }

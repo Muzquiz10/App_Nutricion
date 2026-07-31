@@ -17,10 +17,12 @@ import {
   LogOut,
   MessageCircle,
   Palette,
+  Pencil,
   Plus,
   RotateCcw,
   Send,
   ShieldCheck,
+  Trash2,
   Upload,
   UserPlus,
   Users,
@@ -65,6 +67,7 @@ type Patient = {
 type PendingInvitation = {
   id: string;
   email: string;
+  token: string;
   status: string;
   expires_at: string;
   created_at: string;
@@ -173,8 +176,14 @@ type CreateInvitationResponse = {
   warning?: string;
 };
 
+type SendChatMessageResponse = {
+  error?: string;
+  conversation?: Conversation;
+  message?: ChatMessage;
+};
+
 const tabs: Array<{ id: TabId; label: string; icon: typeof Users }> = [
-  { id: "patients", label: "Pacientes", icon: Users },
+  { id: "patients", label: "Clientes", icon: Users },
   { id: "plans", label: "Dietas", icon: BookOpen },
   { id: "tracking", label: "Seguimiento", icon: Activity },
   { id: "chat", label: "Chat", icon: MessageCircle },
@@ -191,6 +200,10 @@ const dayLabels = [
   "Sabado",
   "Domingo",
 ];
+
+const mealTypes = ["Desayuno", "Media manana", "Comida", "Merienda", "Cena"];
+
+const mealTypeOrder = new Map(mealTypes.map((mealType, index) => [mealType, index]));
 
 const demoTenant = (slug: string): Tenant => ({
   id: "demo-tenant",
@@ -244,6 +257,7 @@ const demoPendingInvitations: PendingInvitation[] = [
   {
     id: "demo-invite-1",
     email: "cliente.pendiente@example.com",
+    token: "demo-token",
     status: "pending",
     expires_at: new Date(Date.now() + 1000 * 60 * 60 * 24 * 10).toISOString(),
     created_at: new Date().toISOString(),
@@ -467,7 +481,7 @@ export function NutriOSApp({
     if (["owner", "nutritionist"].includes(membership.role)) {
       const { data: invitationRows } = await supabase
         .from("invitations")
-        .select("id,email,status,expires_at,created_at")
+        .select("id,email,token,status,expires_at,created_at")
         .eq("tenant_id", resolvedTenant.id)
         .eq("status", "pending")
         .gt("expires_at", new Date().toISOString())
@@ -519,6 +533,7 @@ export function NutriOSApp({
       photoRows,
       documentRows,
       conversationRows,
+      messageRows,
       planRows,
     ] = await Promise.all([
       supabase
@@ -548,6 +563,11 @@ export function NutriOSApp({
         .order("created_at", { ascending: false }),
       supabase.from("conversations").select("*").in("patient_id", patientIds),
       supabase
+        .from("chat_messages")
+        .select("*")
+        .in("patient_id", patientIds)
+        .order("created_at", { ascending: true }),
+      supabase
         .from("meal_plans")
         .select("*, meal_plan_days(*, meal_items(*))")
         .in("patient_id", patientIds)
@@ -560,6 +580,7 @@ export function NutriOSApp({
     setMealPhotos(await withSignedUrls((photoRows.data ?? []) as MealPhoto[], "storage_path"));
     setDocuments(await withSignedUrls((documentRows.data ?? []) as DocumentFile[], "storage_path"));
     setConversations((conversationRows.data ?? []) as Conversation[]);
+    setMessages((messageRows.data ?? []) as ChatMessage[]);
     setPlans((planRows.data ?? []) as MealPlan[]);
     setLoading(false);
   }, [initialTenant, selectedPatientId, supabase, tenantSlug, withSignedUrls]);
@@ -718,7 +739,9 @@ export function NutriOSApp({
                     onClick={() => setActiveTab(tab.id)}
                   >
                     <Icon className="size-4" />
-                    {tab.label}
+                    {role === "patient" && tab.id === "patients"
+                      ? "Mi Ficha Personal"
+                      : tab.label}
                   </button>
                 );
               })}
@@ -789,11 +812,24 @@ export function NutriOSApp({
               <ChatPanel
                 tenant={tenant}
                 selectedPatient={selectedPatient}
-                conversation={selectedConversation}
                 messages={patientMessages}
                 currentUserId={sessionUserId}
                 supabase={supabase}
                 onNotice={setNotice}
+                onMessageSent={(message) =>
+                  setMessages((current) =>
+                    current.some((item) => item.id === message.id)
+                      ? current
+                      : [...current, message],
+                  )
+                }
+                onConversationReady={(conversation) =>
+                  setConversations((current) =>
+                    current.some((item) => item.id === conversation.id)
+                      ? current
+                      : [...current, conversation],
+                  )
+                }
               />
             )}
             {activeTab === "documents" && (
@@ -1057,7 +1093,7 @@ function PatientsPanel({
         {manualInviteLink && (
           <div className="mt-4 rounded-lg border border-[#e8d9aa] bg-[#fff8df] p-3">
             <p className="text-sm font-semibold text-[#6b5420]">
-              Limite de emails alcanzado. Envia este enlace al cliente para completar la invitacion.
+              Enlace manual de invitacion. Envia este enlace al cliente para completar el alta.
             </p>
             <div className="mt-3 flex gap-2">
               <input
@@ -1110,7 +1146,7 @@ function PatientsPanel({
                 }`}
                 onClick={() => setPatientView(item.id as PatientListView)}
               >
-                {item.label} · {item.count}
+                {item.label} - {item.count}
               </button>
             );
           })}
@@ -1126,7 +1162,10 @@ function PatientsPanel({
           />
         )}
         {patientView === "pending" && (
-          <PendingInvitationList invitations={pendingInvitations} />
+          <PendingInvitationList
+            invitations={pendingInvitations}
+            onNotice={onNotice}
+          />
         )}
         {patientView === "archived" && (
           <PatientCards
@@ -1214,9 +1253,21 @@ function PatientCards({
 
 function PendingInvitationList({
   invitations,
+  onNotice,
 }: {
   invitations: PendingInvitation[];
+  onNotice: (message: string) => void;
 }) {
+  async function copyInvitationLink(token: string) {
+    const link = `${window.location.origin}/invitacion/${token}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      onNotice("Enlace de invitacion copiado.");
+    } catch {
+      onNotice("No se pudo copiar automaticamente. Abre el enlace y copialo desde la barra del navegador.");
+    }
+  }
+
   if (invitations.length === 0) {
     return <EmptyState text="No hay invitaciones pendientes." />;
   }
@@ -1242,6 +1293,30 @@ function PendingInvitationList({
           <p className="mt-3 text-sm text-[var(--muted)]">
             Caduca: {formatDate(invitation.expires_at)}
           </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+            <input
+              className="h-9 min-w-0 rounded-lg border border-[var(--line)] bg-[#faf8f1] px-3 text-xs text-[#3f3724]"
+              value={`/invitacion/${invitation.token}`}
+              readOnly
+              onFocus={(event) => event.currentTarget.select()}
+            />
+            <a
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-3 text-xs font-bold text-[#53605a]"
+              href={`/invitacion/${invitation.token}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Abrir
+            </a>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-3 text-xs font-bold text-white"
+              onClick={() => copyInvitationLink(invitation.token)}
+            >
+              <Copy className="size-4" />
+              Copiar
+            </button>
+          </div>
         </article>
       ))}
     </div>
@@ -1358,6 +1433,25 @@ function PlansPanel({
     await onReload();
   }
 
+  async function deletePlan(plan: MealPlan) {
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para borrar dietas reales.");
+      return;
+    }
+
+    const confirmed = window.confirm(`Quieres borrar la dieta "${plan.title}"?`);
+    if (!confirmed) return;
+
+    const { error } = await supabase.from("meal_plans").delete().eq("id", plan.id);
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    onNotice("Dieta borrada.");
+    await onReload();
+  }
+
   return (
     <div className="grid gap-5 xl:grid-cols-[420px_1fr]">
       {role !== "patient" && (
@@ -1386,7 +1480,7 @@ function PlansPanel({
                       label="Comida"
                       value={item.mealType}
                       onChange={(value) => updateDraftItem(index, { mealType: value })}
-                      options={["Desayuno", "Media manana", "Comida", "Merienda", "Cena"].map((label) => ({
+                      options={mealTypes.map((label) => ({
                         value: label,
                         label,
                       }))}
@@ -1432,37 +1526,15 @@ function PlansPanel({
         <h2 className="text-lg font-black">Dieta publicada</h2>
         <div className="mt-4 grid gap-4">
           {plans.map((plan) => (
-            <div key={plan.id} className="rounded-lg border border-[var(--line)] bg-white p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="font-black">{plan.title}</p>
-                  <p className="text-sm text-[var(--muted)]">
-                    Inicio {formatDate(plan.start_date)} - {plan.status}
-                  </p>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {(plan.meal_plan_days ?? []).map((day) => (
-                  <div key={day.id} className="rounded-lg bg-[#f7f5ef] p-3">
-                    <p className="font-bold">{day.day_label}</p>
-                    <div className="mt-2 space-y-2">
-                      {(day.meal_items ?? [])
-                        .sort((a, b) => a.position - b.position)
-                        .map((item) => (
-                          <div key={item.id} className="rounded-md bg-white px-3 py-2 text-sm">
-                            <p className="font-semibold">
-                              {item.meal_type}: {item.title}
-                            </p>
-                            {item.description && (
-                              <p className="mt-1 text-[var(--muted)]">{item.description}</p>
-                            )}
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <MealPlanCard
+              key={plan.id}
+              plan={plan}
+              role={role}
+              supabase={supabase}
+              onNotice={onNotice}
+              onReload={onReload}
+              onDeletePlan={deletePlan}
+            />
           ))}
           {plans.length === 0 && <EmptyState text="No hay dietas publicadas para este cliente." />}
         </div>
@@ -1477,6 +1549,369 @@ function PlansPanel({
       ),
     );
   }
+}
+
+function MealPlanCard({
+  plan,
+  role,
+  supabase,
+  onNotice,
+  onReload,
+  onDeletePlan,
+}: {
+  plan: MealPlan;
+  role: UserRole | null;
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+  onDeletePlan: (plan: MealPlan) => Promise<void>;
+}) {
+  const isEditable = role !== "patient";
+  const sortedDays = dayLabels.map((label, index) => {
+    const dayIndex = index + 1;
+    const existingDay =
+      (plan.meal_plan_days ?? []).find((day) => day.day_index === dayIndex) ??
+      null;
+    return { dayIndex, label, day: existingDay };
+  });
+
+  return (
+    <div className="rounded-lg border border-[var(--line)] bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="font-black">{plan.title}</p>
+          <p className="text-sm text-[var(--muted)]">
+            Inicio {formatDate(plan.start_date)} - {plan.status}
+          </p>
+        </div>
+        {isEditable && (
+          <button
+            type="button"
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#e8c7be] bg-[#fff3ef] px-3 text-xs font-bold text-[#8d3c2f]"
+            onClick={() => onDeletePlan(plan)}
+          >
+            <Trash2 className="size-4" />
+            Borrar dieta
+          </button>
+        )}
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        {sortedDays.map(({ dayIndex, label, day }) => (
+          <MealPlanDayEditor
+            key={`${plan.id}-${dayIndex}`}
+            planId={plan.id}
+            dayIndex={dayIndex}
+            dayLabel={label}
+            day={day}
+            isEditable={isEditable}
+            supabase={supabase}
+            onNotice={onNotice}
+            onReload={onReload}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MealPlanDayEditor({
+  planId,
+  dayIndex,
+  dayLabel,
+  day,
+  isEditable,
+  supabase,
+  onNotice,
+  onReload,
+}: {
+  planId: string;
+  dayIndex: number;
+  dayLabel: string;
+  day: MealPlanDay | null;
+  isEditable: boolean;
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const [newMealType, setNewMealType] = useState("Comida");
+  const [newTitle, setNewTitle] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [isAddingMeal, setIsAddingMeal] = useState(false);
+  const sortedItems = [...(day?.meal_items ?? [])].sort(
+    (a, b) =>
+      getMealTypePosition(a.meal_type) - getMealTypePosition(b.meal_type) ||
+      a.position - b.position,
+  );
+
+  async function addMeal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!newTitle.trim()) {
+      onNotice("Escribe el plato antes de anadir la comida.");
+      return;
+    }
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para editar dietas reales.");
+      return;
+    }
+
+    let dayId = day?.id;
+    if (!dayId) {
+      const { data: insertedDay, error: dayError } = await supabase
+        .from("meal_plan_days")
+        .insert({
+          meal_plan_id: planId,
+          day_index: dayIndex,
+          day_label: dayLabel,
+        })
+        .select("id")
+        .single();
+
+      if (dayError || !insertedDay) {
+        onNotice(dayError?.message ?? "No se pudo crear el dia de la dieta.");
+        return;
+      }
+
+      dayId = insertedDay.id;
+    }
+
+    const nextPosition =
+      sortedItems.reduce((max, item) => Math.max(max, item.position), 0) + 1;
+    const { error } = await supabase.from("meal_items").insert({
+      meal_plan_day_id: dayId,
+      meal_type: newMealType,
+      title: newTitle.trim(),
+      description: newDescription.trim() || null,
+      position: nextPosition,
+    });
+
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    setNewMealType("Comida");
+    setNewTitle("");
+    setNewDescription("");
+    setIsAddingMeal(false);
+    onNotice("Comida anadida a la dieta.");
+    await onReload();
+  }
+
+  return (
+    <div className="rounded-lg bg-[#f7f5ef] p-3">
+      <p className="font-bold">{dayLabel}</p>
+      <div className="mt-2 space-y-2">
+        {sortedItems.map((item) =>
+          isEditable ? (
+            <EditableMealItem
+              key={item.id}
+              item={item}
+              supabase={supabase}
+              onNotice={onNotice}
+              onReload={onReload}
+            />
+          ) : (
+            <div key={item.id} className="rounded-md bg-white px-3 py-2 text-sm">
+              <p className="font-semibold">
+                {item.meal_type}: {item.title}
+              </p>
+              {item.description && (
+                <p className="mt-1 text-[var(--muted)]">{item.description}</p>
+              )}
+            </div>
+          ),
+        )}
+        {sortedItems.length === 0 && (
+          <p className="rounded-md border border-dashed border-[#d8d1c4] px-3 py-2 text-sm text-[var(--muted)]">
+            Sin comidas para este dia.
+          </p>
+        )}
+      </div>
+      {isEditable && !isAddingMeal && (
+        <button
+          type="button"
+          className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-xs font-bold text-[#53605a]"
+          onClick={() => setIsAddingMeal(true)}
+        >
+          <Plus className="size-4" />
+          Anadir comida
+        </button>
+      )}
+      {isEditable && isAddingMeal && (
+        <form className="mt-3 rounded-md border border-[var(--line)] bg-white p-3" onSubmit={addMeal}>
+          <div className="grid gap-2">
+            <SelectField
+              label="Comida"
+              value={newMealType}
+              onChange={setNewMealType}
+              options={mealTypes.map((label) => ({ value: label, label }))}
+            />
+            <Field label="Plato" value={newTitle} onChange={setNewTitle} />
+            <TextArea
+              label="Indicaciones"
+              value={newDescription}
+              onChange={setNewDescription}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-3 text-xs font-bold text-white">
+                <Check className="size-4" />
+                Guardar
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-9 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-3 text-xs font-bold text-[#53605a]"
+                onClick={() => {
+                  setIsAddingMeal(false);
+                  setNewMealType("Comida");
+                  setNewTitle("");
+                  setNewDescription("");
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function EditableMealItem({
+  item,
+  supabase,
+  onNotice,
+  onReload,
+}: {
+  item: MealItem;
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [mealType, setMealType] = useState(item.meal_type);
+  const [title, setTitle] = useState(item.title);
+  const [description, setDescription] = useState(item.description ?? "");
+
+  async function saveMeal() {
+    if (!title.trim()) {
+      onNotice("El plato no puede quedar vacio.");
+      return;
+    }
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para editar dietas reales.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("meal_items")
+      .update({
+        meal_type: mealType,
+        title: title.trim(),
+        description: description.trim() || null,
+      })
+      .eq("id", item.id);
+
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    onNotice("Comida actualizada.");
+    setIsEditing(false);
+    await onReload();
+  }
+
+  async function deleteMeal() {
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para editar dietas reales.");
+      return;
+    }
+
+    const { error } = await supabase.from("meal_items").delete().eq("id", item.id);
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    onNotice("Comida eliminada.");
+    await onReload();
+  }
+
+  return (
+    <div className="rounded-md border border-[var(--line)] bg-white p-3 text-sm">
+      {!isEditing && (
+        <div>
+          <p className="font-semibold">
+            {item.meal_type}: {item.title}
+          </p>
+          {item.description && (
+            <p className="mt-1 text-[var(--muted)]">{item.description}</p>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-[#faf8f1] px-3 text-xs font-bold text-[#53605a]"
+              onClick={() => setIsEditing(true)}
+            >
+              <Pencil className="size-4" />
+              Modificar
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[#e8c7be] bg-[#fff3ef] px-3 text-xs font-bold text-[#8d3c2f]"
+              onClick={deleteMeal}
+            >
+              <Trash2 className="size-4" />
+              Borrar
+            </button>
+          </div>
+        </div>
+      )}
+      {isEditing && (
+        <div className="grid gap-2">
+          <SelectField
+            label="Comida"
+            value={mealType}
+            onChange={setMealType}
+            options={mealTypes.map((label) => ({ value: label, label }))}
+          />
+          <Field label="Plato" value={title} onChange={setTitle} />
+          <TextArea label="Indicaciones" value={description} onChange={setDescription} />
+          <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-3 text-xs font-bold text-white"
+            onClick={saveMeal}
+          >
+            <Check className="size-4" />
+            Guardar
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[#e8c7be] bg-[#fff3ef] px-3 text-xs font-bold text-[#8d3c2f]"
+            onClick={deleteMeal}
+          >
+            <Trash2 className="size-4" />
+            Borrar
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-9 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-3 text-xs font-bold text-[#53605a]"
+            onClick={() => {
+              setMealType(item.meal_type);
+              setTitle(item.title);
+              setDescription(item.description ?? "");
+              setIsEditing(false);
+            }}
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+      )}
+    </div>
+  );
 }
 
 function TrackingPanel({
@@ -1658,43 +2093,58 @@ function TrackingPanel({
 function ChatPanel({
   tenant,
   selectedPatient,
-  conversation,
   messages,
   currentUserId,
   supabase,
   onNotice,
+  onMessageSent,
+  onConversationReady,
 }: {
   tenant: Tenant;
   selectedPatient: Patient | null;
-  conversation: Conversation | null;
   messages: ChatMessage[];
   currentUserId: string;
   supabase: ReturnType<typeof createSupabaseBrowser>;
   onNotice: (message: string) => void;
+  onMessageSent: (message: ChatMessage) => void;
+  onConversationReady: (conversation: Conversation) => void;
 }) {
   const [body, setBody] = useState("");
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedPatient || !conversation || !body.trim()) return;
+    if (!selectedPatient || !body.trim()) return;
     if (!supabase) {
       onNotice("Modo demo: conecta Supabase para usar el chat real.");
       return;
     }
 
-    const { error } = await supabase.from("chat_messages").insert({
-      tenant_id: tenant.id,
-      conversation_id: conversation.id,
-      patient_id: selectedPatient.id,
-      sender_id: currentUserId,
-      body: body.trim(),
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    const response = await fetch("/api/chat/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session?.access_token}`,
+      },
+      body: JSON.stringify({
+        tenantId: tenant.id,
+        patientId: selectedPatient.id,
+        body,
+      }),
     });
 
-    if (error) {
-      onNotice(error.message);
+    const payload = (await response.json()) as SendChatMessageResponse;
+
+    if (!response.ok || !payload.message || !payload.conversation) {
+      onNotice(payload.error ?? "No se pudo enviar el mensaje.");
       return;
     }
 
+    onConversationReady(payload.conversation);
+    onMessageSent(payload.message);
     setBody("");
   }
 
@@ -2180,6 +2630,10 @@ function PhotoList({ photos }: { photos: MealPhoto[] }) {
 
 function isArchivedPatient(patient: Patient) {
   return patient.status === "archived";
+}
+
+function getMealTypePosition(mealType: string) {
+  return mealTypeOrder.get(mealType) ?? mealTypes.length;
 }
 
 function buildChartData(weights: WeightLog[], waists: WaistLog[]) {
