@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  Archive,
   Bell,
   BookOpen,
   CalendarDays,
@@ -17,8 +18,10 @@ import {
   MessageCircle,
   Palette,
   Plus,
+  RotateCcw,
   Send,
   ShieldCheck,
+  Upload,
   UserPlus,
   Users,
   Weight,
@@ -55,7 +58,16 @@ type Patient = {
   allergies: string | null;
   avoided_foods: string | null;
   exercise_routine: string | null;
+  status?: "active" | "archived";
   registered_at: string;
+};
+
+type PendingInvitation = {
+  id: string;
+  email: string;
+  status: string;
+  expires_at: string;
+  created_at: string;
 };
 
 type WeightLog = {
@@ -150,6 +162,7 @@ type DraftMealItem = {
 };
 
 type TabId = "patients" | "plans" | "tracking" | "chat" | "documents" | "settings";
+type PatientListView = "active" | "pending" | "archived";
 
 type CreateInvitationResponse = {
   error?: string;
@@ -204,6 +217,7 @@ const demoPatients: Patient[] = [
     allergies: "Lactosa",
     avoided_foods: "Pescado azul y brocoli",
     exercise_routine: "Camina 4 dias por semana y hace fuerza 2 dias",
+    status: "active",
     registered_at: new Date("2026-07-03T09:30:00").toISOString(),
   },
   {
@@ -221,7 +235,18 @@ const demoPatients: Patient[] = [
     allergies: "Sin alergias declaradas",
     avoided_foods: "Coliflor",
     exercise_routine: "Bicicleta los fines de semana",
+    status: "active",
     registered_at: new Date("2026-07-10T16:00:00").toISOString(),
+  },
+];
+
+const demoPendingInvitations: PendingInvitation[] = [
+  {
+    id: "demo-invite-1",
+    email: "cliente.pendiente@example.com",
+    status: "pending",
+    expires_at: new Date(Date.now() + 1000 * 60 * 60 * 24 * 10).toISOString(),
+    created_at: new Date().toISOString(),
   },
 ];
 
@@ -339,6 +364,8 @@ export function NutriOSApp({
   const [role, setRole] = useState<UserRole | null>(isDemo ? "nutritionist" : null);
   const [sessionUserId, setSessionUserId] = useState(isDemo ? "demo-nutritionist" : "");
   const [patients, setPatients] = useState<Patient[]>(demoPatients);
+  const [pendingInvitations, setPendingInvitations] =
+    useState<PendingInvitation[]>(demoPendingInvitations);
   const [selectedPatientId, setSelectedPatientId] = useState(demoPatients[0]?.id ?? "");
   const [weights, setWeights] = useState<WeightLog[]>(demoWeights);
   const [waists, setWaists] = useState<WaistLog[]>(demoWaist);
@@ -436,6 +463,19 @@ export function NutriOSApp({
     }
 
     setRole(membership.role as UserRole);
+
+    if (["owner", "nutritionist"].includes(membership.role)) {
+      const { data: invitationRows } = await supabase
+        .from("invitations")
+        .select("id,email,status,expires_at,created_at")
+        .eq("tenant_id", resolvedTenant.id)
+        .eq("status", "pending")
+        .gt("expires_at", new Date().toISOString())
+        .order("created_at", { ascending: false });
+      setPendingInvitations((invitationRows ?? []) as PendingInvitation[]);
+    } else {
+      setPendingInvitations([]);
+    }
 
     const patientQuery =
       membership.role === "patient"
@@ -685,7 +725,7 @@ export function NutriOSApp({
           </nav>
 
           <PatientSwitcher
-            patients={patients}
+            patients={patients.filter((patient) => !isArchivedPatient(patient))}
             selectedPatientId={selectedPatientId}
             onSelect={setSelectedPatientId}
             role={role}
@@ -711,6 +751,7 @@ export function NutriOSApp({
                 tenant={tenant}
                 role={role}
                 patients={patients}
+                pendingInvitations={pendingInvitations}
                 selectedPatient={selectedPatient}
                 weights={weights}
                 onSelectPatient={setSelectedPatientId}
@@ -878,6 +919,7 @@ function PatientsPanel({
   tenant,
   role,
   patients,
+  pendingInvitations,
   selectedPatient,
   weights,
   onSelectPatient,
@@ -888,6 +930,7 @@ function PatientsPanel({
   tenant: Tenant;
   role: UserRole | null;
   patients: Patient[];
+  pendingInvitations: PendingInvitation[];
   selectedPatient: Patient | null;
   weights: WeightLog[];
   onSelectPatient: (id: string) => void;
@@ -897,6 +940,9 @@ function PatientsPanel({
 }) {
   const [email, setEmail] = useState("");
   const [manualInviteLink, setManualInviteLink] = useState("");
+  const [patientView, setPatientView] = useState<PatientListView>("active");
+  const activePatients = patients.filter((patient) => !isArchivedPatient(patient));
+  const archivedPatients = patients.filter(isArchivedPatient);
   const latestWeight = selectedPatient
     ? weights
         .filter((item) => item.patient_id === selectedPatient.id)
@@ -941,6 +987,26 @@ function PatientsPanel({
     } else {
       onNotice("Invitacion enviada al paciente.");
     }
+    await onReload();
+  }
+
+  async function updatePatientStatus(patient: Patient, status: "active" | "archived") {
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para cambiar el estado del cliente.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("patients")
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq("id", patient.id);
+
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    onNotice(status === "archived" ? "Cliente movido a antiguos." : "Cliente reactivado.");
     await onReload();
   }
 
@@ -1013,23 +1079,107 @@ function PatientsPanel({
         )}
       </Panel>
 
-      <Panel>
+      <Panel className="xl:col-span-1">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-lg font-black">Clientes activos</h2>
+          <h2 className="text-lg font-black">
+            {patientView === "active" && "Clientes"}
+            {patientView === "pending" && "Pendientes de aceptar"}
+            {patientView === "archived" && "Clientes antiguos"}
+          </h2>
           <span className="rounded-lg bg-[#eef3f0] px-3 py-1 text-sm font-semibold text-[#53605a]">
-            {patients.length}
+            {patientView === "active" && activePatients.length}
+            {patientView === "pending" && pendingInvitations.length}
+            {patientView === "archived" && archivedPatients.length}
           </span>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {patients.map((patient) => (
+        <div className="mb-4 grid grid-cols-3 gap-2">
+          {[
+            { id: "active", label: "Activos", count: activePatients.length },
+            { id: "pending", label: "Pendientes", count: pendingInvitations.length },
+            { id: "archived", label: "Antiguos", count: archivedPatients.length },
+          ].map((item) => {
+            const active = patientView === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`h-10 rounded-lg border px-2 text-xs font-bold transition ${
+                  active
+                    ? "border-[var(--tenant-color)] bg-[var(--tenant-color)] text-white"
+                    : "border-[var(--line)] bg-white text-[#4a554f] hover:border-[#bfb7aa]"
+                }`}
+                onClick={() => setPatientView(item.id as PatientListView)}
+              >
+                {item.label} · {item.count}
+              </button>
+            );
+          })}
+        </div>
+
+        {patientView === "active" && (
+          <PatientCards
+            patients={activePatients}
+            selectedPatient={selectedPatient}
+            onSelectPatient={onSelectPatient}
+            onChangeStatus={updatePatientStatus}
+            nextStatus="archived"
+          />
+        )}
+        {patientView === "pending" && (
+          <PendingInvitationList invitations={pendingInvitations} />
+        )}
+        {patientView === "archived" && (
+          <PatientCards
+            patients={archivedPatients}
+            selectedPatient={selectedPatient}
+            onSelectPatient={onSelectPatient}
+            onChangeStatus={updatePatientStatus}
+            nextStatus="active"
+          />
+        )}
+      </Panel>
+
+      <PatientRecord patient={selectedPatient} />
+    </div>
+  );
+}
+
+function PatientCards({
+  patients,
+  selectedPatient,
+  onSelectPatient,
+  onChangeStatus,
+  nextStatus,
+}: {
+  patients: Patient[];
+  selectedPatient: Patient | null;
+  onSelectPatient: (id: string) => void;
+  onChangeStatus: (
+    patient: Patient,
+    status: "active" | "archived",
+  ) => Promise<void>;
+  nextStatus: "active" | "archived";
+}) {
+  if (patients.length === 0) {
+    return <EmptyState text="No hay clientes en esta vista." />;
+  }
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {patients.map((patient) => {
+        const selected = selectedPatient?.id === patient.id;
+        const Icon = nextStatus === "archived" ? Archive : RotateCcw;
+        return (
+          <article
+            key={patient.id}
+            className={`rounded-lg border bg-white p-4 shadow-sm transition ${
+              selected ? "border-[var(--tenant-color)]" : "border-[var(--line)]"
+            }`}
+          >
             <button
-              key={patient.id}
+              type="button"
               onClick={() => onSelectPatient(patient.id)}
-              className={`rounded-lg border bg-white p-4 text-left shadow-sm transition ${
-                selectedPatient?.id === patient.id
-                  ? "border-[var(--tenant-color)]"
-                  : "border-[var(--line)] hover:border-[#bfb7aa]"
-              }`}
+              className="block w-full text-left"
             >
               <div className="flex items-start justify-between gap-2">
                 <div>
@@ -1047,12 +1197,53 @@ function PatientsPanel({
                 <Metric label="Actual" value={`${patient.current_weight_kg} kg`} />
               </div>
             </button>
-          ))}
-        </div>
-        {patients.length === 0 && <EmptyState text="Todavia no hay clientes dados de alta." />}
-      </Panel>
+            <button
+              type="button"
+              className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-[#faf8f1] px-3 text-xs font-bold text-[#53605a]"
+              onClick={() => onChangeStatus(patient, nextStatus)}
+            >
+              <Icon className="size-4" />
+              {nextStatus === "archived" ? "Mover a antiguos" : "Reactivar"}
+            </button>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
 
-      <PatientRecord patient={selectedPatient} />
+function PendingInvitationList({
+  invitations,
+}: {
+  invitations: PendingInvitation[];
+}) {
+  if (invitations.length === 0) {
+    return <EmptyState text="No hay invitaciones pendientes." />;
+  }
+
+  return (
+    <div className="grid gap-3">
+      {invitations.map((invitation) => (
+        <article
+          key={invitation.id}
+          className="rounded-lg border border-[var(--line)] bg-white p-4 shadow-sm"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate font-black">{invitation.email}</p>
+              <p className="mt-1 text-xs font-semibold text-[var(--muted)]">
+                Enviada: {formatDate(invitation.created_at)}
+              </p>
+            </div>
+            <span className="shrink-0 rounded-lg bg-[#fff8df] px-2 py-1 text-xs font-bold text-[#6b5420]">
+              Pendiente
+            </span>
+          </div>
+          <p className="mt-3 text-sm text-[var(--muted)]">
+            Caduca: {formatDate(invitation.expires_at)}
+          </p>
+        </article>
+      ))}
     </div>
   );
 }
@@ -1319,6 +1510,7 @@ function TrackingPanel({
   const [mealNotes, setMealNotes] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
 
+  const canRecordTracking = role === "patient";
   const chartData = buildChartData(weights, waists);
 
   async function saveTracking(event: FormEvent<HTMLFormElement>) {
@@ -1400,45 +1592,45 @@ function TrackingPanel({
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[420px_1fr]">
-      <Panel>
-        <h2 className="text-lg font-black">
-          {role === "patient" ? "Registrar datos" : "Nuevo registro"}
-        </h2>
-        <form className="mt-5 space-y-4" onSubmit={saveTracking}>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Peso kg" type="number" value={weight} onChange={setWeight} step="0.1" />
-            <Field label="Cintura cm" type="number" value={waist} onChange={setWaist} step="0.1" />
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Ejercicio realizado" value={exercise} onChange={setExercise} />
-            <Field label="Minutos" type="number" value={duration} onChange={setDuration} />
-          </div>
-          <SelectField
-            label="Comida fotografiada"
-            value={mealType}
-            onChange={setMealType}
-            options={["Desayuno", "Comida", "Cena", "Snack"].map((label) => ({
-              value: label,
-              label,
-            }))}
-          />
-          <TextArea label="Notas de comida" value={mealNotes} onChange={setMealNotes} />
-          <label className="block">
-            <span className="mb-1 block text-sm font-semibold text-[#39433f]">Foto</span>
-            <input
-              className="block w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm"
-              type="file"
-              accept="image/*"
-              onChange={(event) => setPhotoFile(event.target.files?.[0] ?? null)}
+    <div className={`grid gap-5 ${canRecordTracking ? "xl:grid-cols-[420px_1fr]" : ""}`}>
+      {canRecordTracking && (
+        <Panel>
+          <h2 className="text-lg font-black">Registrar datos</h2>
+          <form className="mt-5 space-y-4" onSubmit={saveTracking}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Peso kg" type="number" value={weight} onChange={setWeight} step="0.1" />
+              <Field label="Cintura cm" type="number" value={waist} onChange={setWaist} step="0.1" />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Ejercicio realizado" value={exercise} onChange={setExercise} />
+              <Field label="Minutos" type="number" value={duration} onChange={setDuration} />
+            </div>
+            <SelectField
+              label="Comida fotografiada"
+              value={mealType}
+              onChange={setMealType}
+              options={["Desayuno", "Comida", "Cena", "Snack"].map((label) => ({
+                value: label,
+                label,
+              }))}
             />
-          </label>
-          <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
-            <ImagePlus className="size-4" />
-            Guardar registro
-          </button>
-        </form>
-      </Panel>
+            <TextArea label="Notas de comida" value={mealNotes} onChange={setMealNotes} />
+            <label className="block">
+              <span className="mb-1 block text-sm font-semibold text-[#39433f]">Foto</span>
+              <input
+                className="block w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm"
+                type="file"
+                accept="image/*"
+                onChange={(event) => setPhotoFile(event.target.files?.[0] ?? null)}
+              />
+            </label>
+            <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
+              <ImagePlus className="size-4" />
+              Guardar registro
+            </button>
+          </form>
+        </Panel>
+      )}
 
       <Panel>
         <h2 className="text-lg font-black">Evolucion</h2>
@@ -1664,22 +1856,63 @@ function SettingsPanel({
   onNotice: (message: string) => void;
 }) {
   const [name, setName] = useState(tenant.name);
-  const [logoUrl, setLogoUrl] = useState(tenant.logo_url ?? "");
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState(tenant.logo_url ?? "");
+  const [logoObjectUrl, setLogoObjectUrl] = useState("");
   const [primaryColor, setPrimaryColor] = useState(tenant.primary_color);
-  const [privacyUrl, setPrivacyUrl] = useState(tenant.privacy_policy_url ?? "");
+
+  useEffect(() => {
+    return () => {
+      if (logoObjectUrl) URL.revokeObjectURL(logoObjectUrl);
+    };
+  }, [logoObjectUrl]);
+
+  function handleLogoFileChange(file: File | null) {
+    if (logoObjectUrl) URL.revokeObjectURL(logoObjectUrl);
+    setLogoFile(file);
+
+    if (!file) {
+      setLogoObjectUrl("");
+      setLogoPreview(tenant.logo_url ?? "");
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    setLogoObjectUrl(objectUrl);
+    setLogoPreview(objectUrl);
+  }
 
   async function saveSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    let nextLogoUrl = tenant.logo_url;
+
+    if (logoFile && supabase) {
+      const path = `${tenant.id}/logo-${Date.now()}-${safeFileName(logoFile.name)}`;
+      const { error: uploadError } = await supabase.storage
+        .from("nutrios-branding")
+        .upload(path, logoFile, { upsert: true });
+
+      if (uploadError) {
+        onNotice(uploadError.message);
+        return;
+      }
+
+      const { data } = supabase.storage.from("nutrios-branding").getPublicUrl(path);
+      nextLogoUrl = data.publicUrl;
+    }
+
     const nextTenant = {
       ...tenant,
       name,
-      logo_url: logoUrl || null,
+      logo_url: nextLogoUrl,
       primary_color: primaryColor,
-      privacy_policy_url: privacyUrl || null,
     };
 
     if (!supabase) {
-      onTenant(nextTenant);
+      onTenant({
+        ...nextTenant,
+        logo_url: logoPreview || nextTenant.logo_url,
+      });
       onNotice("Marca actualizada en modo demo.");
       return;
     }
@@ -1688,9 +1921,8 @@ function SettingsPanel({
       .from("tenants")
       .update({
         name,
-        logo_url: logoUrl || null,
+        logo_url: nextLogoUrl,
         primary_color: primaryColor,
-        privacy_policy_url: privacyUrl || null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", tenant.id);
@@ -1701,16 +1933,39 @@ function SettingsPanel({
     }
 
     onTenant(nextTenant);
+    setLogoFile(null);
+    if (logoObjectUrl) URL.revokeObjectURL(logoObjectUrl);
+    setLogoObjectUrl("");
+    setLogoPreview(nextLogoUrl ?? "");
     onNotice("Personalizacion guardada.");
   }
 
   return (
     <Panel>
-      <h2 className="text-lg font-black">Personalizacion del nutricionista</h2>
+      <h2 className="text-lg font-black">Personalizar mi NutriOS</h2>
       <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={saveSettings}>
         <Field label="Nombre visible" value={name} onChange={setName} required />
-        <Field label="Logo URL" value={logoUrl} onChange={setLogoUrl} />
-        <Field label="Politica de privacidad URL" value={privacyUrl} onChange={setPrivacyUrl} />
+        <label className="block">
+          <span className="mb-1 block text-sm font-semibold text-[#39433f]">Logo</span>
+          <div className="flex min-h-24 items-center gap-4 rounded-lg border border-[var(--line)] bg-white p-3">
+            <div className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-lg bg-[var(--tenant-color)] text-xl font-black text-white">
+              {logoPreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={logoPreview} alt="" className="h-full w-full object-cover" />
+              ) : (
+                "N"
+              )}
+            </div>
+            <input
+              className="block min-w-0 flex-1 text-sm"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              onChange={(event) =>
+                handleLogoFileChange(event.target.files?.[0] ?? null)
+              }
+            />
+          </div>
+        </label>
         <label className="block">
           <span className="mb-1 block text-sm font-semibold text-[#39433f]">Color principal</span>
           <div className="flex h-11 items-center gap-3 rounded-lg border border-[var(--line)] bg-white px-3">
@@ -1725,8 +1980,8 @@ function SettingsPanel({
         </label>
         <div className="lg:col-span-2">
           <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
-            <Check className="size-4" />
-            Guardar marca
+            <Upload className="size-4" />
+            Guardar personalizacion
           </button>
         </div>
       </form>
@@ -1921,6 +2176,10 @@ function PhotoList({ photos }: { photos: MealPhoto[] }) {
       </div>
     </div>
   );
+}
+
+function isArchivedPatient(patient: Patient) {
+  return patient.status === "archived";
 }
 
 function buildChartData(weights: WeightLog[], waists: WaistLog[]) {

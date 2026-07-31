@@ -37,6 +37,15 @@ La `service_role key` solo debe existir en servidor. No la pongas nunca en codig
    - consentimientos GDPR.
    - politicas RLS.
    - bucket privado `nutrios-private`.
+   - bucket publico `nutrios-branding` para logos.
+
+Si ya habias ejecutado la migracion inicial antes de estos cambios, ejecuta tambien:
+
+```text
+supabase/migrations/202607310001_nutritionist_panel_updates.sql
+```
+
+Esta migracion anade el estado `active/archived` de pacientes, crea el bucket de logos y limita los registros de seguimiento para que los inserte el propio cliente.
 
 ## 3. Configurar Auth
 
