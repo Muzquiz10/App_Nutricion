@@ -416,7 +416,10 @@ export function NutriOSApp({
   const [patients, setPatients] = useState<Patient[]>(demoPatients);
   const [pendingInvitations, setPendingInvitations] =
     useState<PendingInvitation[]>(demoPendingInvitations);
-  const [selectedPatientId, setSelectedPatientId] = useState(demoPatients[0]?.id ?? "");
+  const [selectedPatientId, setSelectedPatientId] = useStoredValue(
+    `nutrios:${tenantSlug}:selected-patient`,
+    demoPatients[0]?.id ?? "",
+  );
   const [weights, setWeights] = useState<WeightLog[]>(demoWeights);
   const [waists, setWaists] = useState<WaistLog[]>(demoWaist);
   const [exercises, setExercises] = useState<ExerciseLog[]>([]);
@@ -425,7 +428,10 @@ export function NutriOSApp({
   const [conversations, setConversations] = useState<Conversation[]>([demoConversation]);
   const [messages, setMessages] = useState<ChatMessage[]>(demoMessages);
   const [plans, setPlans] = useState<MealPlan[]>([demoPlan]);
-  const [activeTab, setActiveTab] = useState<TabId>("patients");
+  const [activeTab, setActiveTab] = useStoredValue<TabId>(
+    `nutrios:${tenantSlug}:active-tab`,
+    "patients",
+  );
   const [loading, setLoading] = useState(Boolean(supabase));
   const [notice, setNotice] = useState("");
   const [workspaceError, setWorkspaceError] = useState("");
@@ -628,7 +634,7 @@ export function NutriOSApp({
     setMessages((messageRows.data ?? []) as ChatMessage[]);
     setPlans((planRows.data ?? []) as MealPlan[]);
     finishLoading();
-  }, [initialTenant, supabase, tenantSlug, withSignedUrls]);
+  }, [initialTenant, setSelectedPatientId, supabase, tenantSlug, withSignedUrls]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -1055,7 +1061,10 @@ function PatientsPanel({
   onReload: () => Promise<void>;
   supabase: ReturnType<typeof createSupabaseBrowser>;
 }) {
-  const [email, setEmail] = useState("");
+  const [inviteDraft, setInviteDraft, clearInviteDraft] = useStoredDraft(
+    `nutrios:draft:invite:${tenant.id}`,
+    { email: "" },
+  );
   const [manualInviteLink, setManualInviteLink] = useState("");
   const [patientView, setPatientView] = useState<PatientListView>("active");
   const activePatients = patients.filter((patient) => !isArchivedPatient(patient));
@@ -1087,7 +1096,7 @@ function PatientsPanel({
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
-        email,
+        email: inviteDraft.email,
         tenantId: tenant.id,
         tenantSlug: tenant.slug,
       }),
@@ -1099,7 +1108,7 @@ function PatientsPanel({
       return;
     }
 
-    setEmail("");
+    clearInviteDraft();
     if (payload.delivery === "manual_link" && payload.actionLink) {
       setManualInviteLink(payload.actionLink);
       onNotice(payload.warning ?? "Invitacion creada con enlace manual.");
@@ -1175,8 +1184,10 @@ function PatientsPanel({
           <Field
             label="Correo electronico"
             type="email"
-            value={email}
-            onChange={setEmail}
+            value={inviteDraft.email}
+            onChange={(value) =>
+              setInviteDraft((current) => ({ ...current, email: value }))
+            }
             required
           />
           <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
@@ -1714,11 +1725,20 @@ function PlansPanel({
   onNotice: (message: string) => void;
   onReload: () => Promise<void>;
 }) {
-  const [title, setTitle] = useState("Plan semanal");
-  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
-  const [draftItems, setDraftItems] = useState<DraftMealItem[]>([
-    { dayIndex: 1, mealType: "Desayuno", title: "", description: "" },
-  ]);
+  const emptyPlanDraft = useMemo(
+    () => ({
+      title: "Plan semanal",
+      startDate: new Date().toISOString().slice(0, 10),
+      draftItems: [
+        { dayIndex: 1, mealType: "Desayuno", title: "", description: "" },
+      ] as DraftMealItem[],
+    }),
+    [],
+  );
+  const [planDraft, setPlanDraft, clearPlanDraft] = useStoredValue(
+    `nutrios:draft:plan:${selectedPatient?.id ?? "none"}`,
+    emptyPlanDraft,
+  );
 
   async function savePlan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1728,14 +1748,14 @@ function PlansPanel({
       return;
     }
 
-    const items = draftItems.filter((item) => item.title.trim());
+    const items = planDraft.draftItems.filter((item) => item.title.trim());
     const { data: plan, error: planError } = await supabase
       .from("meal_plans")
       .insert({
         tenant_id: tenant.id,
         patient_id: selectedPatient.id,
-        title,
-        start_date: startDate,
+        title: planDraft.title,
+        start_date: planDraft.startDate,
         status: "published",
       })
       .select("id")
@@ -1777,7 +1797,7 @@ function PlansPanel({
     }
 
     onNotice("Dieta publicada para el cliente.");
-    setDraftItems([{ dayIndex: 1, mealType: "Desayuno", title: "", description: "" }]);
+    clearPlanDraft();
     await onReload();
   }
 
@@ -1809,10 +1829,21 @@ function PlansPanel({
             <ClipboardList className="size-5 text-[var(--tenant-color)]" />
           </div>
           <form className="mt-5 space-y-4" onSubmit={savePlan}>
-            <Field label="Titulo" value={title} onChange={setTitle} required />
-            <Field label="Fecha inicio" type="date" value={startDate} onChange={setStartDate} required />
+            <Field
+              label="Titulo"
+              value={planDraft.title}
+              onChange={(value) => updatePlanDraft({ title: value })}
+              required
+            />
+            <Field
+              label="Fecha inicio"
+              type="date"
+              value={planDraft.startDate}
+              onChange={(value) => updatePlanDraft({ startDate: value })}
+              required
+            />
             <div className="space-y-3">
-              {draftItems.map((item, index) => (
+              {planDraft.draftItems.map((item, index) => (
                 <div key={index} className="rounded-lg border border-[var(--line)] bg-white p-3">
                   <div className="grid gap-2 sm:grid-cols-2">
                     <SelectField
@@ -1852,10 +1883,13 @@ function PlansPanel({
                 type="button"
                 className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-semibold"
                 onClick={() =>
-                  setDraftItems((current) => [
+                  setPlanDraft((current) => ({
                     ...current,
-                    { dayIndex: 1, mealType: "Comida", title: "", description: "" },
-                  ])
+                    draftItems: [
+                      ...current.draftItems,
+                      { dayIndex: 1, mealType: "Comida", title: "", description: "" },
+                    ],
+                  }))
                 }
               >
                 <Plus className="size-4" />
@@ -1890,12 +1924,20 @@ function PlansPanel({
     </div>
   );
 
+  function updatePlanDraft(patch: Partial<Omit<typeof emptyPlanDraft, "draftItems">>) {
+    setPlanDraft((current) => ({
+      ...current,
+      ...patch,
+    }));
+  }
+
   function updateDraftItem(index: number, patch: Partial<DraftMealItem>) {
-    setDraftItems((current) =>
-      current.map((item, itemIndex) =>
+    setPlanDraft((current) => ({
+      ...current,
+      draftItems: current.draftItems.map((item, itemIndex) =>
         itemIndex === index ? { ...item, ...patch } : item,
       ),
-    );
+    }));
   }
 }
 
@@ -3297,10 +3339,19 @@ async function getCurrentAccessToken(
     data: { session },
   } = await supabase.auth.getSession();
 
-  if (session?.access_token) return session.access_token;
+  if (!session) return "";
+
+  const expiresAtMs = session.expires_at ? session.expires_at * 1000 : 0;
+  if (session.access_token && expiresAtMs - Date.now() > 60_000) {
+    return session.access_token;
+  }
 
   const { data, error } = await supabase.auth.refreshSession();
-  if (error) return "";
+  if (error) {
+    return expiresAtMs && expiresAtMs <= Date.now()
+      ? ""
+      : session.access_token ?? "";
+  }
 
   return data.session?.access_token ?? "";
 }
@@ -3324,39 +3375,55 @@ function useStoredDraft<T extends Record<string, string>>(
   key: string,
   initialValue: T,
 ) {
-  const [draft, setDraft] = useState<T>(() =>
-    readStoredDraft(key, initialValue),
-  );
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(key, JSON.stringify(draft));
-  }, [draft, key]);
-
-  const clearDraft = useCallback(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(key);
-    }
-    setDraft(initialValue);
-  }, [initialValue, key]);
+  const [draft, setDraft, clearDraft] = useStoredValue(key, initialValue);
 
   return [draft, setDraft, clearDraft] as const;
 }
 
-function readStoredDraft<T extends Record<string, string>>(
+function useStoredValue<T>(key: string, initialValue: T) {
+  const [value, setValue] = useState<T>(() =>
+    readStoredValue(key, initialValue),
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(key, JSON.stringify(value));
+  }, [key, value]);
+
+  const clearValue = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(key);
+    }
+    setValue(initialValue);
+  }, [initialValue, key]);
+
+  return [value, setValue, clearValue] as const;
+}
+
+function readStoredValue<T>(
   key: string,
   initialValue: T,
 ) {
   if (typeof window === "undefined") return initialValue;
 
   try {
-    const rawDraft = window.localStorage.getItem(key);
-    if (!rawDraft) return initialValue;
-    const storedDraft = JSON.parse(rawDraft) as Partial<T>;
-    return {
-      ...initialValue,
-      ...storedDraft,
-    };
+    const rawValue = window.localStorage.getItem(key);
+    if (!rawValue) return initialValue;
+    const storedValue = JSON.parse(rawValue) as T;
+    if (
+      typeof initialValue === "object" &&
+      initialValue !== null &&
+      !Array.isArray(initialValue) &&
+      typeof storedValue === "object" &&
+      storedValue !== null &&
+      !Array.isArray(storedValue)
+    ) {
+      return {
+        ...initialValue,
+        ...storedValue,
+      };
+    }
+    return storedValue;
   } catch {
     return initialValue;
   }
