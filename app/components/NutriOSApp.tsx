@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Archive,
@@ -432,6 +432,7 @@ export function NutriOSApp({
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [sendingRecovery, setSendingRecovery] = useState(false);
+  const hasResolvedWorkspace = useRef(!supabase);
 
   const selectedPatient = patients.find((patient) => patient.id === selectedPatientId) ?? null;
   const selectedConversation =
@@ -466,8 +467,14 @@ export function NutriOSApp({
 
   const loadWorkspace = useCallback(async () => {
     if (!supabase) return;
-    setLoading(true);
+    if (!hasResolvedWorkspace.current) {
+      setLoading(true);
+    }
     setWorkspaceError("");
+    const finishLoading = () => {
+      hasResolvedWorkspace.current = true;
+      setLoading(false);
+    };
 
     const {
       data: { session },
@@ -485,14 +492,14 @@ export function NutriOSApp({
       setWorkspaceError(
         `No existe ningun nutricionista configurado para ${tenantSlug}.`,
       );
-      setLoading(false);
+      finishLoading();
       return;
     }
 
     setTenant(resolvedTenant);
 
     if (!session) {
-      setLoading(false);
+      finishLoading();
       return;
     }
 
@@ -509,7 +516,7 @@ export function NutriOSApp({
     if (!membership) {
       setRole(null);
       setWorkspaceError("Tu usuario todavia no esta vinculado a este espacio.");
-      setLoading(false);
+      finishLoading();
       return;
     }
 
@@ -544,10 +551,11 @@ export function NutriOSApp({
     const { data: patientRows } = await patientQuery;
     const loadedPatients = (patientRows ?? []) as Patient[];
     setPatients(loadedPatients);
-    const nextPatientId = loadedPatients.some((patient) => patient.id === selectedPatientId)
-      ? selectedPatientId
-      : loadedPatients[0]?.id || "";
-    setSelectedPatientId(nextPatientId);
+    setSelectedPatientId((currentPatientId) =>
+      loadedPatients.some((patient) => patient.id === currentPatientId)
+        ? currentPatientId
+        : loadedPatients[0]?.id || "",
+    );
 
     const patientIds = loadedPatients.map((patient) => patient.id);
     if (patientIds.length === 0) {
@@ -559,7 +567,7 @@ export function NutriOSApp({
       setConversations([]);
       setMessages([]);
       setPlans([]);
-      setLoading(false);
+      finishLoading();
       return;
     }
 
@@ -619,8 +627,8 @@ export function NutriOSApp({
     setConversations((conversationRows.data ?? []) as Conversation[]);
     setMessages((messageRows.data ?? []) as ChatMessage[]);
     setPlans((planRows.data ?? []) as MealPlan[]);
-    setLoading(false);
-  }, [initialTenant, selectedPatientId, supabase, tenantSlug, withSignedUrls]);
+    finishLoading();
+  }, [initialTenant, supabase, tenantSlug, withSignedUrls]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -628,7 +636,8 @@ export function NutriOSApp({
     const timer = window.setTimeout(() => {
       void loadWorkspace();
     }, 0);
-    const { data } = supabase.auth.onAuthStateChange(() => {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "TOKEN_REFRESHED") return;
       void loadWorkspace();
     });
 
@@ -866,6 +875,7 @@ export function NutriOSApp({
             )}
             {activeTab === "tracking" && (
               <TrackingPanel
+                key={`tracking-${selectedPatientId || "none"}`}
                 role={role}
                 tenant={tenant}
                 selectedPatient={selectedPatient}
@@ -2223,12 +2233,21 @@ function TrackingPanel({
   onNotice: (message: string) => void;
   onReload: () => Promise<void>;
 }) {
-  const [weight, setWeight] = useState("");
-  const [waist, setWaist] = useState("");
-  const [exercise, setExercise] = useState("");
-  const [duration, setDuration] = useState("");
-  const [mealType, setMealType] = useState("Comida");
-  const [mealNotes, setMealNotes] = useState("");
+  const emptyTrackingDraft = useMemo(
+    () => ({
+      weight: "",
+      waist: "",
+      exercise: "",
+      duration: "",
+      mealType: "Comida",
+      mealNotes: "",
+    }),
+    [],
+  );
+  const [trackingDraft, setTrackingDraft, clearTrackingDraft] = useStoredDraft(
+    `nutrios:draft:tracking:${selectedPatient?.id ?? "none"}`,
+    emptyTrackingDraft,
+  );
   const [photoFile, setPhotoFile] = useState<File | null>(null);
 
   const canRecordTracking = role === "patient";
@@ -2260,38 +2279,43 @@ function TrackingPanel({
     }
 
     const rows: PromiseLike<unknown>[] = [];
-    if (weight) {
+    if (trackingDraft.weight) {
       rows.push(
         supabase.from("weight_logs").insert({
           tenant_id: tenant.id,
           patient_id: selectedPatient.id,
-          weight_kg: Number(weight),
+          weight_kg: Number(trackingDraft.weight),
           source: role === "patient" ? "patient" : "nutritionist",
         }),
       );
       rows.push(
         supabase
           .from("patients")
-          .update({ current_weight_kg: Number(weight), updated_at: new Date().toISOString() })
+          .update({
+            current_weight_kg: Number(trackingDraft.weight),
+            updated_at: new Date().toISOString(),
+          })
           .eq("id", selectedPatient.id),
       );
     }
-    if (waist) {
+    if (trackingDraft.waist) {
       rows.push(
         supabase.from("waist_logs").insert({
           tenant_id: tenant.id,
           patient_id: selectedPatient.id,
-          waist_cm: Number(waist),
+          waist_cm: Number(trackingDraft.waist),
         }),
       );
     }
-    if (exercise) {
+    if (trackingDraft.exercise) {
       rows.push(
         supabase.from("exercise_logs").insert({
           tenant_id: tenant.id,
           patient_id: selectedPatient.id,
-          activity: exercise,
-          duration_minutes: duration ? Number(duration) : null,
+          activity: trackingDraft.exercise,
+          duration_minutes: trackingDraft.duration
+            ? Number(trackingDraft.duration)
+            : null,
           intensity: "normal",
         }),
       );
@@ -2314,19 +2338,22 @@ function TrackingPanel({
         tenant_id: tenant.id,
         patient_id: selectedPatient.id,
         storage_path: path,
-        meal_type: mealType,
-        notes: mealNotes,
+        meal_type: trackingDraft.mealType,
+        notes: trackingDraft.mealNotes,
       });
     }
 
-    setWeight("");
-    setWaist("");
-    setExercise("");
-    setDuration("");
-    setMealNotes("");
+    clearTrackingDraft();
     setPhotoFile(null);
     onNotice("Seguimiento actualizado.");
     await onReload();
+  }
+
+  function updateTrackingDraft(key: keyof typeof emptyTrackingDraft, value: string) {
+    setTrackingDraft((current) => ({
+      ...current,
+      [key]: value,
+    }));
   }
 
   return (
@@ -2336,23 +2363,48 @@ function TrackingPanel({
           <h2 className="text-lg font-black">Registrar datos</h2>
           <form className="mt-5 space-y-4" onSubmit={saveTracking}>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Peso kg" type="number" value={weight} onChange={setWeight} step="0.1" />
-              <Field label="Cintura cm" type="number" value={waist} onChange={setWaist} step="0.1" />
+              <Field
+                label="Peso kg"
+                type="number"
+                value={trackingDraft.weight}
+                onChange={(value) => updateTrackingDraft("weight", value)}
+                step="0.1"
+              />
+              <Field
+                label="Cintura cm"
+                type="number"
+                value={trackingDraft.waist}
+                onChange={(value) => updateTrackingDraft("waist", value)}
+                step="0.1"
+              />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Ejercicio realizado" value={exercise} onChange={setExercise} />
-              <Field label="Minutos" type="number" value={duration} onChange={setDuration} />
+              <Field
+                label="Ejercicio realizado"
+                value={trackingDraft.exercise}
+                onChange={(value) => updateTrackingDraft("exercise", value)}
+              />
+              <Field
+                label="Minutos"
+                type="number"
+                value={trackingDraft.duration}
+                onChange={(value) => updateTrackingDraft("duration", value)}
+              />
             </div>
             <SelectField
               label="Comida fotografiada"
-              value={mealType}
-              onChange={setMealType}
+              value={trackingDraft.mealType}
+              onChange={(value) => updateTrackingDraft("mealType", value)}
               options={["Desayuno", "Comida", "Cena", "Snack"].map((label) => ({
                 value: label,
                 label,
               }))}
             />
-            <TextArea label="Notas de comida" value={mealNotes} onChange={setMealNotes} />
+            <TextArea
+              label="Notas de comida"
+              value={trackingDraft.mealNotes}
+              onChange={(value) => updateTrackingDraft("mealNotes", value)}
+            />
             <label className="block">
               <span className="mb-1 block text-sm font-semibold text-[#39433f]">Foto</span>
               <input
@@ -3170,6 +3222,48 @@ function formatSex(sex: Patient["sex"]) {
   if (sex === "male") return "Hombre";
   if (sex === "female") return "Mujer";
   return null;
+}
+
+function useStoredDraft<T extends Record<string, string>>(
+  key: string,
+  initialValue: T,
+) {
+  const [draft, setDraft] = useState<T>(() =>
+    readStoredDraft(key, initialValue),
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(key, JSON.stringify(draft));
+  }, [draft, key]);
+
+  const clearDraft = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(key);
+    }
+    setDraft(initialValue);
+  }, [initialValue, key]);
+
+  return [draft, setDraft, clearDraft] as const;
+}
+
+function readStoredDraft<T extends Record<string, string>>(
+  key: string,
+  initialValue: T,
+) {
+  if (typeof window === "undefined") return initialValue;
+
+  try {
+    const rawDraft = window.localStorage.getItem(key);
+    if (!rawDraft) return initialValue;
+    const storedDraft = JSON.parse(rawDraft) as Partial<T>;
+    return {
+      ...initialValue,
+      ...storedDraft,
+    };
+  } catch {
+    return initialValue;
+  }
 }
 
 function formatDate(value?: string | null) {
