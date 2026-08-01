@@ -8,12 +8,25 @@ type CompleteInvitationBody = {
   age?: number;
   heightCm?: number;
   currentWeightKg?: number;
+  objective?: string;
+  sex?: string;
   allergies?: string;
   avoidedFoods?: string;
   exerciseRoutine?: string;
+  exerciseHoursPerWeek?: number;
+  exerciseType?: string;
   password?: string;
   consentAccepted?: boolean;
 };
+
+const CURRENT_QUESTIONNAIRE_VERSION = 2;
+const validObjectives = new Set([
+  "Reducir peso",
+  "Ganar masa muscular",
+  "Bienestar",
+  "Aprendizaje",
+]);
+const validSexes = new Set(["male", "female"]);
 
 export async function POST(request: Request) {
   const supabase = await getSupabaseAdmin();
@@ -36,6 +49,9 @@ export async function POST(request: Request) {
     !body.age ||
     !body.heightCm ||
     !body.currentWeightKg ||
+    !body.objective ||
+    !body.sex ||
+    body.exerciseHoursPerWeek === undefined ||
     !body.password ||
     !body.consentAccepted
   ) {
@@ -48,6 +64,27 @@ export async function POST(request: Request) {
   if (body.password.length < 8) {
     return NextResponse.json(
       { error: "La contrasena debe tener al menos 8 caracteres." },
+      { status: 400 },
+    );
+  }
+
+  if (!validObjectives.has(body.objective)) {
+    return NextResponse.json(
+      { error: "Selecciona un objetivo valido." },
+      { status: 400 },
+    );
+  }
+
+  if (!validSexes.has(body.sex)) {
+    return NextResponse.json(
+      { error: "Selecciona el sexo para calcular las calorias basales." },
+      { status: 400 },
+    );
+  }
+
+  if (body.exerciseHoursPerWeek < 0 || body.exerciseHoursPerWeek > 168) {
+    return NextResponse.json(
+      { error: "Horas de ejercicio no validas." },
       { status: 400 },
     );
   }
@@ -98,6 +135,10 @@ export async function POST(request: Request) {
 
   const user = authUserResult.user;
   const patientCode = `PAT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+  const exerciseType = body.exerciseType?.trim() ?? "";
+  const exerciseRoutine =
+    body.exerciseRoutine?.trim() ||
+    buildExerciseRoutine(body.exerciseHoursPerWeek, exerciseType);
 
   const { error: profileError } = await supabase.from("profiles").upsert({
     user_id: user.id,
@@ -136,9 +177,15 @@ export async function POST(request: Request) {
       height_cm: body.heightCm,
       initial_weight_kg: body.currentWeightKg,
       current_weight_kg: body.currentWeightKg,
+      objective: body.objective,
+      sex: body.sex,
       allergies: body.allergies?.trim() ?? "",
       avoided_foods: body.avoidedFoods?.trim() ?? "",
-      exercise_routine: body.exerciseRoutine?.trim() ?? "",
+      exercise_routine: exerciseRoutine,
+      exercise_hours_per_week: body.exerciseHoursPerWeek,
+      exercise_type: exerciseType,
+      questionnaire_version: CURRENT_QUESTIONNAIRE_VERSION,
+      questionnaire_completed_at: new Date().toISOString(),
       consent_given_at: new Date().toISOString(),
       gdpr_policy_version: "2026-07-30",
     })
@@ -323,4 +370,10 @@ async function canReuseExistingAuthUser(
   return !(membershipRows ?? []).some(
     (membership) => membership.status === "active",
   );
+}
+
+function buildExerciseRoutine(hours: number, exerciseType: string) {
+  const base = `${hours} h/semana`;
+  if (!exerciseType) return base;
+  return `${base} - ${exerciseType}`;
 }

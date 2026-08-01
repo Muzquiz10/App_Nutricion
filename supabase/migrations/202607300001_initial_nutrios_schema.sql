@@ -55,9 +55,26 @@ create table if not exists public.patients (
   initial_weight_kg numeric(6,2) not null check (initial_weight_kg between 1 and 400),
   current_weight_kg numeric(6,2) not null check (current_weight_kg between 1 and 400),
   waist_cm numeric(6,2) check (waist_cm between 20 and 250),
+  objective text check (
+    objective is null
+    or objective in (
+      'Reducir peso',
+      'Ganar masa muscular',
+      'Bienestar',
+      'Aprendizaje'
+    )
+  ),
+  sex text check (sex is null or sex in ('male', 'female')),
   allergies text,
   avoided_foods text,
   exercise_routine text,
+  exercise_hours_per_week numeric(5,2) check (
+    exercise_hours_per_week is null
+    or exercise_hours_per_week between 0 and 168
+  ),
+  exercise_type text,
+  questionnaire_version integer not null default 1,
+  questionnaire_completed_at timestamptz,
   status text not null default 'active' check (status in ('active', 'archived')),
   consent_given_at timestamptz,
   gdpr_policy_version text not null default '2026-07-30',

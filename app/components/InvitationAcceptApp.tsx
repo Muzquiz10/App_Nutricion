@@ -23,6 +23,18 @@ type InvitationPayload = {
   };
 };
 
+const goalOptions = [
+  "Reducir peso",
+  "Ganar masa muscular",
+  "Bienestar",
+  "Aprendizaje",
+];
+
+const sexOptions = [
+  { value: "male", label: "Hombre" },
+  { value: "female", label: "Mujer" },
+];
+
 export function InvitationAcceptApp({
   token,
   supabaseConfig,
@@ -42,9 +54,12 @@ export function InvitationAcceptApp({
   const [age, setAge] = useState("");
   const [heightCm, setHeightCm] = useState("");
   const [currentWeightKg, setCurrentWeightKg] = useState("");
+  const [objective, setObjective] = useState(goalOptions[0]);
+  const [sex, setSex] = useState("male");
   const [allergies, setAllergies] = useState("");
   const [avoidedFoods, setAvoidedFoods] = useState("");
-  const [exerciseRoutine, setExerciseRoutine] = useState("");
+  const [exerciseHoursPerWeek, setExerciseHoursPerWeek] = useState("");
+  const [exerciseType, setExerciseType] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [consentAccepted, setConsentAccepted] = useState(false);
@@ -140,9 +155,12 @@ export function InvitationAcceptApp({
         age: Number(age),
         heightCm: Number(heightCm),
         currentWeightKg: Number(currentWeightKg),
+        objective,
+        sex,
         allergies,
         avoidedFoods,
-        exerciseRoutine,
+        exerciseHoursPerWeek: Number(exerciseHoursPerWeek),
+        exerciseType,
         password,
         consentAccepted,
       }),
@@ -224,9 +242,29 @@ export function InvitationAcceptApp({
           <Field label="Edad" type="number" value={age} onChange={setAge} required />
           <Field label="Altura cm" type="number" value={heightCm} onChange={setHeightCm} required />
           <Field label="Peso actual kg" type="number" step="0.1" value={currentWeightKg} onChange={setCurrentWeightKg} required />
+          <SelectField
+            label="Objetivo"
+            value={objective}
+            onChange={setObjective}
+            options={goalOptions.map((label) => ({ value: label, label }))}
+          />
+          <SelectField
+            label="Sexo para calculo basal"
+            value={sex}
+            onChange={setSex}
+            options={sexOptions}
+          />
           <TextArea label="Alergias/intolerancias" value={allergies} onChange={setAllergies} />
           <TextArea label="Alimentos a evitar" value={avoidedFoods} onChange={setAvoidedFoods} />
-          <TextArea label="Ejercicio y frecuencia" value={exerciseRoutine} onChange={setExerciseRoutine} />
+          <Field
+            label="Horas estimadas de ejercicio a la semana"
+            type="number"
+            step="0.5"
+            value={exerciseHoursPerWeek}
+            onChange={setExerciseHoursPerWeek}
+            required
+          />
+          <TextArea label="Tipo de ejercicio" value={exerciseType} onChange={setExerciseType} />
           <div className="grid gap-4">
             <Field label="Contrasena" type="password" value={password} onChange={setPassword} required />
             <Field label="Repetir contrasena" type="password" value={passwordConfirm} onChange={setPasswordConfirm} required />
@@ -296,6 +334,35 @@ function Field({
         required={required}
         step={step}
       />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-sm font-semibold text-[#39433f]">{label}</span>
+      <select
+        className="h-11 w-full rounded-lg border border-[var(--line)] bg-white px-3 text-sm"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }

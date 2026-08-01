@@ -55,6 +55,14 @@ supabase/migrations/202607310002_chat_realtime.sql
 
 Sin esta migracion, los mensajes se guardan, pero el otro navegador podria necesitarlos ver tras recargar.
 
+Para activar el cuestionario actualizado, objetivo, sexo para calculo basal, ejercicio separado, IMC y TMB, ejecuta tambien:
+
+```text
+supabase/migrations/202608010001_questionnaire_metrics.sql
+```
+
+Los clientes ya activos podran completar los campos nuevos desde `Mi Ficha Personal`.
+
 ## 3. Configurar Auth
 
 En `Authentication > URL Configuration`:

@@ -59,9 +59,15 @@ type Patient = {
   initial_weight_kg: number;
   current_weight_kg: number;
   waist_cm: number | null;
+  objective: string | null;
+  sex: "male" | "female" | null;
   allergies: string | null;
   avoided_foods: string | null;
   exercise_routine: string | null;
+  exercise_hours_per_week: number | null;
+  exercise_type: string | null;
+  questionnaire_version?: number;
+  questionnaire_completed_at?: string | null;
   status?: "active" | "archived";
   registered_at: string;
 };
@@ -184,6 +190,11 @@ type SendChatMessageResponse = {
   message?: ChatMessage;
 };
 
+type QuestionnaireResponse = {
+  error?: string;
+  ok?: boolean;
+};
+
 const tabs: Array<{ id: TabId; label: string; icon: typeof Users }> = [
   { id: "patients", label: "Clientes", icon: Users },
   { id: "plans", label: "Dietas", icon: BookOpen },
@@ -206,6 +217,17 @@ const dayLabels = [
 const mealTypes = ["Desayuno", "Media manana", "Comida", "Merienda", "Cena"];
 
 const mealTypeOrder = new Map(mealTypes.map((mealType, index) => [mealType, index]));
+const currentQuestionnaireVersion = 2;
+const goalOptions = [
+  "Reducir peso",
+  "Ganar masa muscular",
+  "Bienestar",
+  "Aprendizaje",
+];
+const sexOptions = [
+  { value: "male", label: "Hombre" },
+  { value: "female", label: "Mujer" },
+];
 
 const demoTenant = (slug: string): Tenant => ({
   id: "demo-tenant",
@@ -229,9 +251,15 @@ const demoPatients: Patient[] = [
     initial_weight_kg: 76.2,
     current_weight_kg: 73.4,
     waist_cm: 82,
+    objective: "Reducir peso",
+    sex: "female",
     allergies: "Lactosa",
     avoided_foods: "Pescado azul y brocoli",
     exercise_routine: "Camina 4 dias por semana y hace fuerza 2 dias",
+    exercise_hours_per_week: 5,
+    exercise_type: "Caminar y fuerza",
+    questionnaire_version: 2,
+    questionnaire_completed_at: new Date("2026-07-03T09:30:00").toISOString(),
     status: "active",
     registered_at: new Date("2026-07-03T09:30:00").toISOString(),
   },
@@ -247,9 +275,15 @@ const demoPatients: Patient[] = [
     initial_weight_kg: 91.1,
     current_weight_kg: 89.9,
     waist_cm: 96,
+    objective: "Bienestar",
+    sex: "male",
     allergies: "Sin alergias declaradas",
     avoided_foods: "Coliflor",
     exercise_routine: "Bicicleta los fines de semana",
+    exercise_hours_per_week: 2,
+    exercise_type: "Bicicleta",
+    questionnaire_version: 2,
+    questionnaire_completed_at: new Date("2026-07-10T16:00:00").toISOString(),
     status: "active",
     registered_at: new Date("2026-07-10T16:00:00").toISOString(),
   },
@@ -1094,12 +1128,26 @@ function PatientsPanel({
   }
 
   if (role === "patient") {
+    const currentWeight =
+      latestWeight?.weight_kg ?? selectedPatient?.current_weight_kg ?? null;
+    const currentBmi = selectedPatient
+      ? calculateBmi(currentWeight, selectedPatient.height_cm)
+      : null;
+
     return (
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-4">
         <StatCard label="Peso inicial" value={`${selectedPatient?.initial_weight_kg ?? "-"} kg`} icon={Weight} />
         <StatCard label="Peso actual" value={`${latestWeight?.weight_kg ?? selectedPatient?.current_weight_kg ?? "-"} kg`} icon={Activity} />
+        <StatCard label="IMC actual" value={formatOptionalNumber(currentBmi, 1)} icon={ClipboardList} />
         <StatCard label="Fecha de alta" value={formatDate(selectedPatient?.registered_at)} icon={CalendarDays} />
-        <PatientRecord patient={selectedPatient} />
+        <PatientQuestionnairePanel
+          key={selectedPatient?.id ?? "empty"}
+          patient={selectedPatient}
+          supabase={supabase}
+          onNotice={onNotice}
+          onReload={onReload}
+        />
+        <PatientRecord patient={selectedPatient} role={role} className="lg:col-span-4" />
       </div>
     );
   }
@@ -1215,7 +1263,7 @@ function PatientsPanel({
         )}
       </Panel>
 
-      <PatientRecord patient={selectedPatient} />
+      <PatientRecord patient={selectedPatient} role={role} />
     </div>
   );
 }
@@ -1263,6 +1311,11 @@ function PatientCards({
                   <p className="mt-1 text-xs font-semibold text-[var(--muted)]">
                     {patient.patient_code}
                   </p>
+                  {needsQuestionnaireUpdate(patient) && (
+                    <span className="mt-2 inline-flex rounded-md bg-[#fff8df] px-2 py-1 text-xs font-bold text-[#6b5420]">
+                      Ficha pendiente
+                    </span>
+                  )}
                 </div>
                 <ChevronRight className="size-4 text-[var(--muted)]" />
               </div>
@@ -1360,26 +1413,222 @@ function PendingInvitationList({
   );
 }
 
-function PatientRecord({ patient }: { patient: Patient | null }) {
-  if (!patient) return <Panel><EmptyState text="Selecciona un cliente." /></Panel>;
+function PatientQuestionnairePanel({
+  patient,
+  supabase,
+  onNotice,
+  onReload,
+}: {
+  patient: Patient | null;
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const [fullName, setFullName] = useState(patient?.full_name ?? "");
+  const [age, setAge] = useState(patient ? String(patient.age) : "");
+  const [heightCm, setHeightCm] = useState(patient ? String(patient.height_cm) : "");
+  const [currentWeightKg, setCurrentWeightKg] = useState(
+    patient ? String(patient.current_weight_kg) : "",
+  );
+  const [objective, setObjective] = useState<string>(patient?.objective ?? goalOptions[0]);
+  const [sex, setSex] = useState<string>(patient?.sex ?? "male");
+  const [allergies, setAllergies] = useState(patient?.allergies ?? "");
+  const [avoidedFoods, setAvoidedFoods] = useState(patient?.avoided_foods ?? "");
+  const [exerciseHoursPerWeek, setExerciseHoursPerWeek] = useState(
+    patient?.exercise_hours_per_week !== null &&
+      patient?.exercise_hours_per_week !== undefined
+      ? String(patient.exercise_hours_per_week)
+      : "",
+  );
+  const [exerciseType, setExerciseType] = useState(
+    patient?.exercise_type || patient?.exercise_routine || "",
+  );
+  const [saving, setSaving] = useState(false);
+
+  if (!patient) {
+    return (
+      <Panel className="lg:col-span-4">
+        <EmptyState text="No hay ficha vinculada a este usuario." />
+      </Panel>
+    );
+  }
+
+  const needsUpdate = needsQuestionnaireUpdate(patient);
+
+  async function saveQuestionnaire(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!supabase || !patient) {
+      onNotice("Modo demo: conecta Supabase para actualizar fichas reales.");
+      return;
+    }
+
+    setSaving(true);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    const response = await fetch("/api/patients/questionnaire", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session?.access_token}`,
+      },
+      body: JSON.stringify({
+        patientId: patient.id,
+        fullName,
+        age: Number(age),
+        heightCm: Number(heightCm),
+        currentWeightKg: Number(currentWeightKg),
+        objective,
+        sex,
+        allergies,
+        avoidedFoods,
+        exerciseHoursPerWeek: Number(exerciseHoursPerWeek),
+        exerciseType,
+      }),
+    });
+
+    const payload = (await response.json()) as QuestionnaireResponse;
+    setSaving(false);
+
+    if (!response.ok) {
+      onNotice(payload.error ?? "No se pudo actualizar la ficha.");
+      return;
+    }
+
+    onNotice("Ficha personal actualizada.");
+    await onReload();
+  }
 
   return (
-    <Panel className="xl:col-span-2">
+    <Panel className="lg:col-span-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-lg font-black">Actualizar ficha personal</h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            {needsUpdate
+              ? "Hay campos nuevos pendientes de completar."
+              : "Puedes modificar tus datos cuando cambien."}
+          </p>
+        </div>
+        <span
+          className={`rounded-lg px-3 py-1 text-sm font-semibold ${
+            needsUpdate
+              ? "bg-[#fff8df] text-[#6b5420]"
+              : "bg-[#eaf4ef] text-[#255d50]"
+          }`}
+        >
+          {needsUpdate ? "Pendiente" : "Actualizada"}
+        </span>
+      </div>
+      <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={saveQuestionnaire}>
+        <Field label="Nombre y apellidos" value={fullName} onChange={setFullName} required />
+        <Field label="Edad" type="number" value={age} onChange={setAge} required />
+        <Field label="Altura cm" type="number" value={heightCm} onChange={setHeightCm} required />
+        <Field
+          label="Peso actual kg"
+          type="number"
+          step="0.1"
+          value={currentWeightKg}
+          onChange={setCurrentWeightKg}
+          required
+        />
+        <SelectField
+          label="Objetivo"
+          value={objective}
+          onChange={setObjective}
+          options={goalOptions.map((label) => ({ value: label, label }))}
+        />
+        <SelectField
+          label="Sexo para calculo basal"
+          value={sex}
+          onChange={setSex}
+          options={sexOptions}
+        />
+        <TextArea label="Alergias/intolerancias" value={allergies} onChange={setAllergies} />
+        <TextArea label="Alimentos a evitar" value={avoidedFoods} onChange={setAvoidedFoods} />
+        <Field
+          label="Horas estimadas de ejercicio a la semana"
+          type="number"
+          step="0.5"
+          value={exerciseHoursPerWeek}
+          onChange={setExerciseHoursPerWeek}
+          required
+        />
+        <TextArea label="Tipo de ejercicio" value={exerciseType} onChange={setExerciseType} />
+        <div className="md:col-span-2">
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white disabled:opacity-60"
+            disabled={saving}
+          >
+            <Check className="size-4" />
+            {saving ? "Guardando..." : "Guardar ficha"}
+          </button>
+        </div>
+      </form>
+    </Panel>
+  );
+}
+
+function PatientRecord({
+  patient,
+  role,
+  className = "xl:col-span-2",
+}: {
+  patient: Patient | null;
+  role: UserRole | null;
+  className?: string;
+}) {
+  if (!patient) return <Panel><EmptyState text="Selecciona un cliente." /></Panel>;
+
+  const currentBmi = calculateBmi(patient.current_weight_kg, patient.height_cm);
+  const basalCalories = calculateBasalCalories(patient);
+
+  return (
+    <Panel className={className}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h2 className="text-lg font-black">Ficha del cliente</h2>
+          <h2 className="text-lg font-black">
+            {role === "patient" ? "Mi ficha personal" : "Ficha del cliente"}
+          </h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
             Alta: {formatDate(patient.registered_at)} - ID: {patient.patient_code}
           </p>
         </div>
-        <span className="rounded-lg bg-[#eaf4ef] px-3 py-1 text-sm font-semibold text-[#255d50]">
-          Consentimiento registrado
-        </span>
+        <div className="flex flex-wrap gap-2">
+          {needsQuestionnaireUpdate(patient) && (
+            <span className="rounded-lg bg-[#fff8df] px-3 py-1 text-sm font-semibold text-[#6b5420]">
+              Ficha pendiente
+            </span>
+          )}
+          <span className="rounded-lg bg-[#eaf4ef] px-3 py-1 text-sm font-semibold text-[#255d50]">
+            Consentimiento registrado
+          </span>
+        </div>
       </div>
       <div className="mt-5 grid gap-3 md:grid-cols-2">
+        <InfoBlock label="Objetivo" value={patient.objective} />
+        <InfoBlock label="IMC actual" value={formatOptionalNumber(currentBmi, 1)} />
+        {role !== "patient" && (
+          <InfoBlock
+            label="Calorias basales (TMB)"
+            value={basalCalories ? `${basalCalories} kcal/dia` : "Faltan datos para calcular"}
+          />
+        )}
+        <InfoBlock label="Sexo para calculo basal" value={formatSex(patient.sex)} />
         <InfoBlock label="Alergias/intolerancias" value={patient.allergies} />
         <InfoBlock label="Alimentos a evitar" value={patient.avoided_foods} />
-        <InfoBlock label="Ejercicio habitual" value={patient.exercise_routine} />
+        <InfoBlock
+          label="Horas ejercicio/semana"
+          value={
+            patient.exercise_hours_per_week !== null &&
+            patient.exercise_hours_per_week !== undefined
+              ? `${patient.exercise_hours_per_week} h`
+              : null
+          }
+        />
+        <InfoBlock label="Tipo de ejercicio" value={patient.exercise_type || patient.exercise_routine} />
         <InfoBlock label="Base de evolucion" value={`${patient.initial_weight_kg} kg desde ${formatDate(patient.registered_at)}`} />
       </div>
     </Panel>
@@ -1983,7 +2232,24 @@ function TrackingPanel({
   const [photoFile, setPhotoFile] = useState<File | null>(null);
 
   const canRecordTracking = role === "patient";
-  const chartData = buildChartData(weights, waists);
+  const latestWeight =
+    weights
+      .slice()
+      .sort((a, b) => new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime())[0]
+      ?.weight_kg ?? selectedPatient?.current_weight_kg ?? null;
+  const latestWaist =
+    waists
+      .slice()
+      .sort((a, b) => new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime())[0]
+      ?.waist_cm ?? selectedPatient?.waist_cm ?? null;
+  const currentBmi = selectedPatient
+    ? calculateBmi(latestWeight, selectedPatient.height_cm)
+    : null;
+  const weightChartData = buildWeightChartData(weights);
+  const waistChartData = buildWaistChartData(waists);
+  const bmiChartData = selectedPatient
+    ? buildBmiChartData(weights, selectedPatient.height_cm)
+    : [];
 
   async function saveTracking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2106,23 +2372,76 @@ function TrackingPanel({
 
       <Panel>
         <h2 className="text-lg font-black">Evolucion</h2>
-        <div className="mt-4 h-72 rounded-lg border border-[var(--line)] bg-white p-3">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5dfd3" />
-              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip />
-              <Line type="monotone" dataKey="peso" stroke="#2f7d6d" strokeWidth={3} dot />
-              <Line type="monotone" dataKey="cintura" stroke="#4d6fa9" strokeWidth={3} dot />
-            </LineChart>
-          </ResponsiveContainer>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <Metric label="Peso actual" value={latestWeight ? `${latestWeight} kg` : "-"} />
+          <Metric label="Cintura actual" value={latestWaist ? `${latestWaist} cm` : "-"} />
+          <Metric label="IMC actual" value={formatOptionalNumber(currentBmi, 1)} />
+        </div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-3">
+          <EvolutionChart
+            title="Peso"
+            data={weightChartData}
+            dataKey="peso"
+            color="#2f7d6d"
+            emptyText="Sin registros de peso."
+          />
+          <EvolutionChart
+            title="Cintura"
+            data={waistChartData}
+            dataKey="cintura"
+            color="#4d6fa9"
+            emptyText="Sin registros de cintura."
+          />
+          <EvolutionChart
+            title="IMC"
+            data={bmiChartData}
+            dataKey="imc"
+            color="#b46a4d"
+            emptyText="Sin registros de peso para calcular IMC."
+          />
         </div>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <LogList title="Ejercicio" items={exercises.map((item) => `${formatDate(item.logged_at)} - ${item.activity}${item.duration_minutes ? `, ${item.duration_minutes} min` : ""}`)} />
           <PhotoList photos={mealPhotos} />
         </div>
       </Panel>
+    </div>
+  );
+}
+
+function EvolutionChart({
+  title,
+  data,
+  dataKey,
+  color,
+  emptyText,
+}: {
+  title: string;
+  data: Array<Record<string, number | string | undefined> & { date: string }>;
+  dataKey: string;
+  color: string;
+  emptyText: string;
+}) {
+  return (
+    <div className="rounded-lg border border-[var(--line)] bg-white p-3">
+      <p className="mb-3 text-sm font-black">{title}</p>
+      {data.length === 0 ? (
+        <div className="grid h-56 place-items-center">
+          <EmptyState text={emptyText} />
+        </div>
+      ) : (
+        <div className="h-56">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5dfd3" />
+              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+              <YAxis tick={{ fontSize: 12 }} domain={["auto", "auto"]} />
+              <Tooltip />
+              <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={3} dot />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 }
@@ -2764,23 +3083,93 @@ function isArchivedPatient(patient: Patient) {
   return patient.status === "archived";
 }
 
+function needsQuestionnaireUpdate(patient: Patient) {
+  const exerciseHours = patient.exercise_hours_per_week;
+  return (
+    (patient.questionnaire_version ?? 1) < currentQuestionnaireVersion ||
+    !patient.objective ||
+    !patient.sex ||
+    exerciseHours === null ||
+    exerciseHours === undefined ||
+    (Number(exerciseHours) > 0 && !patient.exercise_type)
+  );
+}
+
 function getMealTypePosition(mealType: string) {
   return mealTypeOrder.get(mealType) ?? mealTypes.length;
 }
 
-function buildChartData(weights: WeightLog[], waists: WaistLog[]) {
-  const dates = Array.from(
-    new Set([
-      ...weights.map((item) => item.logged_at.slice(0, 10)),
-      ...waists.map((item) => item.logged_at.slice(0, 10)),
-    ]),
-  ).sort();
+function buildWeightChartData(weights: WeightLog[]) {
+  return weights
+    .slice()
+    .sort((a, b) => new Date(a.logged_at).getTime() - new Date(b.logged_at).getTime())
+    .map((item) => ({
+      date: item.logged_at.slice(5, 10),
+      peso: Number(item.weight_kg),
+    }));
+}
 
-  return dates.map((date) => ({
-    date: date.slice(5),
-    peso: weights.find((item) => item.logged_at.slice(0, 10) === date)?.weight_kg,
-    cintura: waists.find((item) => item.logged_at.slice(0, 10) === date)?.waist_cm,
-  }));
+function buildWaistChartData(waists: WaistLog[]) {
+  return waists
+    .slice()
+    .sort((a, b) => new Date(a.logged_at).getTime() - new Date(b.logged_at).getTime())
+    .map((item) => ({
+      date: item.logged_at.slice(5, 10),
+      cintura: Number(item.waist_cm),
+    }));
+}
+
+function buildBmiChartData(weights: WeightLog[], heightCm: number) {
+  return weights
+    .slice()
+    .sort((a, b) => new Date(a.logged_at).getTime() - new Date(b.logged_at).getTime())
+    .map((item) => ({
+      date: item.logged_at.slice(5, 10),
+      imc: roundNumber(calculateBmi(item.weight_kg, heightCm), 1),
+    }))
+    .filter((item): item is { date: string; imc: number } => item.imc !== null);
+}
+
+function calculateBmi(
+  weightKg: number | null | undefined,
+  heightCm: number | null | undefined,
+) {
+  const weight = Number(weightKg);
+  const height = Number(heightCm);
+  if (!weight || !height) return null;
+  const heightM = height / 100;
+  return weight / (heightM * heightM);
+}
+
+function calculateBasalCalories(patient: Patient) {
+  const weight = Number(patient.current_weight_kg);
+  const height = Number(patient.height_cm);
+  const age = Number(patient.age);
+  if (!patient.sex || !weight || !height || !age) return null;
+
+  const value =
+    patient.sex === "male"
+      ? 88.362 + 13.397 * weight + 4.799 * height - 5.677 * age
+      : 447.593 + 9.247 * weight + 3.098 * height - 4.33 * age;
+
+  return Math.round(value);
+}
+
+function roundNumber(value: number | null, digits: number) {
+  if (value === null) return null;
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function formatOptionalNumber(value: number | null, digits: number) {
+  if (value === null) return "-";
+  return value.toFixed(digits);
+}
+
+function formatSex(sex: Patient["sex"]) {
+  if (sex === "male") return "Hombre";
+  if (sex === "female") return "Mujer";
+  return null;
 }
 
 function formatDate(value?: string | null) {
