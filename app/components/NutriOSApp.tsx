@@ -12,6 +12,7 @@ import {
   ClipboardList,
   Copy,
   FileText,
+  Footprints,
   ImagePlus,
   KeyRound,
   Loader2,
@@ -103,6 +104,14 @@ type ExerciseLog = {
   duration_minutes: number | null;
   intensity: string | null;
   logged_at: string;
+};
+
+type StepLog = {
+  id: string;
+  patient_id: string;
+  steps: number;
+  logged_on: string;
+  source: "patient" | "integration";
 };
 
 type MealPhoto = {
@@ -337,6 +346,12 @@ const demoWaist: WaistLog[] = [
   { id: "c3", patient_id: "demo-patient-1", waist_cm: 82, logged_at: "2026-07-24" },
 ];
 
+const demoSteps: StepLog[] = [
+  { id: "s1", patient_id: "demo-patient-1", steps: 6800, logged_on: "2026-07-22", source: "patient" },
+  { id: "s2", patient_id: "demo-patient-1", steps: 8400, logged_on: "2026-07-23", source: "patient" },
+  { id: "s3", patient_id: "demo-patient-1", steps: 9200, logged_on: "2026-07-24", source: "patient" },
+];
+
 const demoConversation: Conversation = {
   id: "demo-conversation",
   patient_id: "demo-patient-1",
@@ -422,6 +437,7 @@ export function NutriOSApp({
   );
   const [weights, setWeights] = useState<WeightLog[]>(demoWeights);
   const [waists, setWaists] = useState<WaistLog[]>(demoWaist);
+  const [steps, setSteps] = useState<StepLog[]>(demoSteps);
   const [exercises, setExercises] = useState<ExerciseLog[]>([]);
   const [mealPhotos, setMealPhotos] = useState<MealPhoto[]>([]);
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
@@ -451,6 +467,9 @@ export function NutriOSApp({
   const patientWaists = waists
     .filter((item) => item.patient_id === selectedPatientId)
     .sort((a, b) => new Date(a.logged_at).getTime() - new Date(b.logged_at).getTime());
+  const patientSteps = steps
+    .filter((item) => item.patient_id === selectedPatientId)
+    .sort((a, b) => new Date(a.logged_on).getTime() - new Date(b.logged_on).getTime());
   const patientMessages = messages
     .filter((item) => item.conversation_id === selectedConversation?.id)
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
@@ -567,6 +586,7 @@ export function NutriOSApp({
     if (patientIds.length === 0) {
       setWeights([]);
       setWaists([]);
+      setSteps([]);
       setExercises([]);
       setMealPhotos([]);
       setDocuments([]);
@@ -580,6 +600,7 @@ export function NutriOSApp({
     const [
       weightRows,
       waistRows,
+      stepRows,
       exerciseRows,
       photoRows,
       documentRows,
@@ -597,6 +618,11 @@ export function NutriOSApp({
         .select("*")
         .in("patient_id", patientIds)
         .order("logged_at", { ascending: false }),
+      supabase
+        .from("step_logs")
+        .select("*")
+        .in("patient_id", patientIds)
+        .order("logged_on", { ascending: false }),
       supabase
         .from("exercise_logs")
         .select("*")
@@ -627,6 +653,7 @@ export function NutriOSApp({
 
     setWeights((weightRows.data ?? []) as WeightLog[]);
     setWaists((waistRows.data ?? []) as WaistLog[]);
+    setSteps((stepRows.data ?? []) as StepLog[]);
     setExercises((exerciseRows.data ?? []) as ExerciseLog[]);
     setMealPhotos(await withSignedUrls((photoRows.data ?? []) as MealPhoto[], "storage_path"));
     setDocuments(await withSignedUrls((documentRows.data ?? []) as DocumentFile[], "storage_path"));
@@ -887,6 +914,7 @@ export function NutriOSApp({
                 selectedPatient={selectedPatient}
                 weights={patientWeights}
                 waists={patientWaists}
+                steps={patientSteps}
                 exercises={exercises.filter((item) => item.patient_id === selectedPatientId)}
                 mealPhotos={mealPhotos.filter((item) => item.patient_id === selectedPatientId)}
                 supabase={supabase}
@@ -2310,6 +2338,7 @@ function TrackingPanel({
   selectedPatient,
   weights,
   waists,
+  steps,
   exercises,
   mealPhotos,
   supabase,
@@ -2321,6 +2350,7 @@ function TrackingPanel({
   selectedPatient: Patient | null;
   weights: WeightLog[];
   waists: WaistLog[];
+  steps: StepLog[];
   exercises: ExerciseLog[];
   mealPhotos: MealPhoto[];
   supabase: ReturnType<typeof createSupabaseBrowser>;
@@ -2331,6 +2361,7 @@ function TrackingPanel({
     () => ({
       weight: "",
       waist: "",
+      steps: "",
       exercise: "",
       duration: "",
       mealType: "Comida",
@@ -2355,11 +2386,13 @@ function TrackingPanel({
       .slice()
       .sort((a, b) => new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime())[0]
       ?.waist_cm ?? selectedPatient?.waist_cm ?? null;
+  const todayStepLog = steps.find((item) => item.logged_on === getLocalDateString());
   const currentBmi = selectedPatient
     ? calculateBmi(latestWeight, selectedPatient.height_cm)
     : null;
   const weightChartData = buildWeightChartData(weights);
   const waistChartData = buildWaistChartData(waists);
+  const stepChartData = buildStepChartData(steps);
   const bmiChartData = selectedPatient
     ? buildBmiChartData(weights, selectedPatient.height_cm)
     : [];
@@ -2399,6 +2432,27 @@ function TrackingPanel({
           patient_id: selectedPatient.id,
           waist_cm: Number(trackingDraft.waist),
         }),
+      );
+    }
+    if (trackingDraft.steps) {
+      const stepCount = Number(trackingDraft.steps);
+      if (!Number.isInteger(stepCount) || stepCount < 0 || stepCount > 200000) {
+        onNotice("Pasos no validos.");
+        return;
+      }
+
+      rows.push(
+        supabase.from("step_logs").upsert(
+          {
+            tenant_id: tenant.id,
+            patient_id: selectedPatient.id,
+            steps: stepCount,
+            logged_on: getLocalDateString(),
+            source: "patient",
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "patient_id,logged_on" },
+        ),
       );
     }
     if (trackingDraft.exercise) {
@@ -2464,7 +2518,10 @@ function TrackingPanel({
     <div className={`grid gap-5 ${canRecordTracking ? "xl:grid-cols-[420px_1fr]" : ""}`}>
       {canRecordTracking && (
         <Panel>
-          <h2 className="text-lg font-black">Registrar datos</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-black">Registrar datos</h2>
+            <Footprints className="size-5 text-[var(--tenant-color)]" />
+          </div>
           <form className="mt-5 space-y-4" onSubmit={saveTracking}>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field
@@ -2482,6 +2539,13 @@ function TrackingPanel({
                 step="0.1"
               />
             </div>
+            <Field
+              label="Pasos de hoy"
+              type="number"
+              value={trackingDraft.steps}
+              onChange={(value) => updateTrackingDraft("steps", value)}
+              step="1"
+            />
             <div className="grid gap-3 sm:grid-cols-2">
               <Field
                 label="Ejercicio realizado"
@@ -2528,12 +2592,13 @@ function TrackingPanel({
 
       <Panel>
         <h2 className="text-lg font-black">Evolucion</h2>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
           <Metric label="Peso actual" value={latestWeight ? `${latestWeight} kg` : "-"} />
           <Metric label="Cintura actual" value={latestWaist ? `${latestWaist} cm` : "-"} />
+          <Metric label="Pasos hoy" value={todayStepLog ? formatInteger(todayStepLog.steps) : "-"} />
           <Metric label="IMC actual" value={formatOptionalNumber(currentBmi, 1)} />
         </div>
-        <div className="mt-4 grid gap-4 xl:grid-cols-3">
+        <div className="mt-4 grid gap-4 xl:grid-cols-4">
           <EvolutionChart
             title="Peso"
             data={weightChartData}
@@ -2549,6 +2614,13 @@ function TrackingPanel({
             emptyText="Sin registros de cintura."
           />
           <EvolutionChart
+            title="Pasos"
+            data={stepChartData}
+            dataKey="pasos"
+            color="#7b7f3b"
+            emptyText="Sin registros de pasos."
+          />
+          <EvolutionChart
             title="IMC"
             data={bmiChartData}
             dataKey="imc"
@@ -2556,8 +2628,9 @@ function TrackingPanel({
             emptyText="Sin registros de peso para calcular IMC."
           />
         </div>
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
+        <div className="mt-5 grid gap-4 md:grid-cols-3">
           <LogList title="Ejercicio" items={exercises.map((item) => `${formatDate(item.logged_at)} - ${item.activity}${item.duration_minutes ? `, ${item.duration_minutes} min` : ""}`)} />
+          <LogList title="Pasos diarios" items={steps.map((item) => `${formatDate(item.logged_on)} - ${formatInteger(item.steps)} pasos`)} />
           <PhotoList photos={mealPhotos} />
         </div>
       </Panel>
@@ -3277,6 +3350,16 @@ function buildWaistChartData(waists: WaistLog[]) {
     }));
 }
 
+function buildStepChartData(steps: StepLog[]) {
+  return steps
+    .slice()
+    .sort((a, b) => new Date(a.logged_on).getTime() - new Date(b.logged_on).getTime())
+    .map((item) => ({
+      date: item.logged_on.slice(5, 10),
+      pasos: Number(item.steps),
+    }));
+}
+
 function buildBmiChartData(weights: WeightLog[], heightCm: number) {
   return weights
     .slice()
@@ -3322,6 +3405,17 @@ function roundNumber(value: number | null, digits: number) {
 function formatOptionalNumber(value: number | null, digits: number) {
   if (value === null) return "-";
   return value.toFixed(digits);
+}
+
+function formatInteger(value: number | string) {
+  return Number(value).toLocaleString("es-ES", { maximumFractionDigits: 0 });
+}
+
+function getLocalDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function formatSex(sex: Patient["sex"]) {
