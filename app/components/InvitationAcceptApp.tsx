@@ -203,7 +203,7 @@ export function InvitationAcceptApp({
       <section className="mx-auto max-w-3xl rounded-lg border border-[var(--line)] bg-[var(--panel)] p-5 shadow-[var(--shadow-soft)] sm:p-7">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold uppercase text-[var(--tenant-color)]">NutriOS</p>
+            <p className="text-sm font-bold uppercase text-[var(--tenant-color)]">NutriDesk</p>
             <h1 className="mt-1 text-2xl font-black tracking-normal text-[#17201d]">
               Alta con {invitation?.tenant.name ?? "tu nutricionista"}
             </h1>

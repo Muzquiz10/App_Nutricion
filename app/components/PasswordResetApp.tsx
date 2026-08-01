@@ -88,7 +88,7 @@ export function PasswordResetApp({
             <KeyRound className="size-5" />
           </div>
           <div>
-            <p className="text-base font-black">NutriOS</p>
+            <p className="text-base font-black">NutriDesk</p>
             <p className="text-sm text-[var(--muted)]">Nueva contrasena</p>
           </div>
         </div>

@@ -261,7 +261,7 @@ const sexOptions = [
 const demoTenant = (slug: string): Tenant => ({
   id: "demo-tenant",
   slug,
-  name: "Espacio NutriOS",
+  name: "Espacio NutriDesk",
   logo_url: null,
   primary_color: "#2f7d6d",
   privacy_policy_url: null,
@@ -793,7 +793,7 @@ export function NutriOSApp({
       <main className="nutrios-app tenant-bg flex items-center justify-center px-6">
         <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-[var(--panel)] px-5 py-4 shadow-[var(--shadow-soft)]">
           <Loader2 className="size-5 animate-spin text-[var(--tenant-color)]" />
-          <span className="text-sm font-medium">Cargando NutriOS...</span>
+          <span className="text-sm font-medium">Cargando NutriDesk...</span>
         </div>
       </main>
     );
@@ -1025,7 +1025,7 @@ function Brand({ tenant, compact }: { tenant: Tenant; compact: boolean }) {
         )}
       </div>
       <div className="min-w-0">
-        <p className="truncate text-base font-black tracking-normal">NutriOS</p>
+        <p className="truncate text-base font-black tracking-normal">NutriDesk</p>
         <p className="truncate text-sm text-[var(--muted)]">
           {compact ? tenant.name : `${tenant.name} - ${tenant.slug}`}
         </p>
@@ -3073,7 +3073,7 @@ function SettingsPanel({
       {role !== "patient" && (
         <Panel>
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-black">Personalizar mi NutriOS</h2>
+            <h2 className="text-lg font-black">Personalizar mi NutriDesk</h2>
             <Palette className="size-5 text-[var(--tenant-color)]" />
           </div>
           <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={saveSettings}>

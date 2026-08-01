@@ -1,6 +1,6 @@
-# NutriOS
+# NutriDesk
 
-NutriOS es un MVP web multitenant para nutricionistas. Cada profesional entra por su subdominio, por ejemplo `maria.tuapp.com`, y sus pacientes quedan aislados por `tenant_id` y politicas RLS en Supabase.
+NutriDesk es un MVP web para nutricionistas. Cada profesional inicia sesion con su correo y contrasena, y sus pacientes quedan aislados por `tenant_id` y politicas RLS en Supabase.
 
 ## MVP incluido
 

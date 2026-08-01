@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NutriOS",
+  title: "NutriDesk",
   description:
     "Panel web multitenant para nutricionistas y seguimiento de pacientes.",
   icons: {
