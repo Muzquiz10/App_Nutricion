@@ -181,7 +181,15 @@ type DraftMealItem = {
   description: string;
 };
 
-type TabId = "patients" | "plans" | "tracking" | "chat" | "documents" | "settings";
+type TabId =
+  | "patients"
+  | "plans"
+  | "data-entry"
+  | "stats"
+  | "tracking"
+  | "chat"
+  | "documents"
+  | "settings";
 type PatientListView = "active" | "pending" | "archived";
 
 type CreateInvitationResponse = {
@@ -204,10 +212,16 @@ type QuestionnaireResponse = {
   ok?: boolean;
 };
 
-const tabs: Array<{ id: TabId; label: string; icon: typeof Users }> = [
+const tabs: Array<{
+  id: TabId;
+  label: string;
+  icon: typeof Users;
+  patientOnly?: boolean;
+}> = [
   { id: "patients", label: "Clientes", icon: Users },
   { id: "plans", label: "Dietas", icon: BookOpen },
-  { id: "tracking", label: "Seguimiento", icon: Activity },
+  { id: "data-entry", label: "Registro de datos", icon: Plus, patientOnly: true },
+  { id: "stats", label: "Estadisticas", icon: Activity },
   { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "documents", label: "Documentos", icon: FileText },
   { id: "settings", label: "Configuracion", icon: SettingsIcon },
@@ -455,6 +469,17 @@ export function NutriOSApp({
   const [authPassword, setAuthPassword] = useState("");
   const [sendingRecovery, setSendingRecovery] = useState(false);
   const hasResolvedWorkspace = useRef(!supabase);
+
+  useEffect(() => {
+    if (activeTab === "tracking") {
+      setActiveTab(role === "patient" ? "data-entry" : "stats");
+      return;
+    }
+
+    if (activeTab === "data-entry" && role && role !== "patient") {
+      setActiveTab("stats");
+    }
+  }, [activeTab, role, setActiveTab]);
 
   const selectedPatient = patients.find((patient) => patient.id === selectedPatientId) ?? null;
   const selectedConversation =
@@ -837,6 +862,7 @@ export function NutriOSApp({
 
           <nav className="mt-5 flex gap-2 overflow-x-auto pb-1 lg:grid lg:overflow-visible lg:pb-0">
             {tabs
+              .filter((tab) => !tab.patientOnly || role === "patient")
               .map((tab) => {
                 const Icon = tab.icon;
                 const active = activeTab === tab.id;
@@ -906,11 +932,19 @@ export function NutriOSApp({
                 onReload={loadWorkspace}
               />
             )}
-            {activeTab === "tracking" && (
-              <TrackingPanel
-                key={`tracking-${selectedPatientId || "none"}`}
+            {activeTab === "data-entry" && role === "patient" && (
+              <DataEntryPanel
+                key={`data-entry-${selectedPatientId || "none"}`}
                 role={role}
                 tenant={tenant}
+                selectedPatient={selectedPatient}
+                supabase={supabase}
+                onNotice={setNotice}
+                onReload={loadWorkspace}
+              />
+            )}
+            {activeTab === "stats" && (
+              <StatsPanel
                 selectedPatient={selectedPatient}
                 weights={patientWeights}
                 waists={patientWaists}
@@ -2332,15 +2366,10 @@ function EditableMealItem({
   );
 }
 
-function TrackingPanel({
+function DataEntryPanel({
   role,
   tenant,
   selectedPatient,
-  weights,
-  waists,
-  steps,
-  exercises,
-  mealPhotos,
   supabase,
   onNotice,
   onReload,
@@ -2348,11 +2377,6 @@ function TrackingPanel({
   role: UserRole | null;
   tenant: Tenant;
   selectedPatient: Patient | null;
-  weights: WeightLog[];
-  waists: WaistLog[];
-  steps: StepLog[];
-  exercises: ExerciseLog[];
-  mealPhotos: MealPhoto[];
   supabase: ReturnType<typeof createSupabaseBrowser>;
   onNotice: (message: string) => void;
   onReload: () => Promise<void>;
@@ -2374,28 +2398,6 @@ function TrackingPanel({
     emptyTrackingDraft,
   );
   const [photoFile, setPhotoFile] = useState<File | null>(null);
-
-  const canRecordTracking = role === "patient";
-  const latestWeight =
-    weights
-      .slice()
-      .sort((a, b) => new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime())[0]
-      ?.weight_kg ?? selectedPatient?.current_weight_kg ?? null;
-  const latestWaist =
-    waists
-      .slice()
-      .sort((a, b) => new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime())[0]
-      ?.waist_cm ?? selectedPatient?.waist_cm ?? null;
-  const todayStepLog = steps.find((item) => item.logged_on === getLocalDateString());
-  const currentBmi = selectedPatient
-    ? calculateBmi(latestWeight, selectedPatient.height_cm)
-    : null;
-  const weightChartData = buildWeightChartData(weights);
-  const waistChartData = buildWaistChartData(waists);
-  const stepChartData = buildStepChartData(steps);
-  const bmiChartData = selectedPatient
-    ? buildBmiChartData(weights, selectedPatient.height_cm)
-    : [];
 
   async function saveTracking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2503,7 +2505,7 @@ function TrackingPanel({
 
     clearTrackingDraft();
     setPhotoFile(null);
-    onNotice("Seguimiento actualizado.");
+    onNotice("Registro actualizado.");
     await onReload();
   }
 
@@ -2515,126 +2517,205 @@ function TrackingPanel({
   }
 
   return (
-    <div className={`grid gap-5 ${canRecordTracking ? "xl:grid-cols-[420px_1fr]" : ""}`}>
-      {canRecordTracking && (
-        <Panel>
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-black">Registrar datos</h2>
-            <Footprints className="size-5 text-[var(--tenant-color)]" />
-          </div>
-          <form className="mt-5 space-y-4" onSubmit={saveTracking}>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field
-                label="Peso kg"
-                type="number"
-                value={trackingDraft.weight}
-                onChange={(value) => updateTrackingDraft("weight", value)}
-                step="0.1"
-              />
-              <Field
-                label="Cintura cm"
-                type="number"
-                value={trackingDraft.waist}
-                onChange={(value) => updateTrackingDraft("waist", value)}
-                step="0.1"
-              />
-            </div>
+    <Panel className="mx-auto max-w-2xl">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-black">Registro de datos</h2>
+        <Footprints className="size-5 text-[var(--tenant-color)]" />
+      </div>
+      {!selectedPatient ? (
+        <div className="mt-5">
+          <EmptyState text="No hay ficha de cliente seleccionada." />
+        </div>
+      ) : (
+        <form className="mt-5 space-y-4" onSubmit={saveTracking}>
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field
-              label="Pasos de hoy"
+              label="Peso kg"
               type="number"
-              value={trackingDraft.steps}
-              onChange={(value) => updateTrackingDraft("steps", value)}
-              step="1"
+              value={trackingDraft.weight}
+              onChange={(value) => updateTrackingDraft("weight", value)}
+              step="0.1"
             />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field
-                label="Ejercicio realizado"
-                value={trackingDraft.exercise}
-                onChange={(value) => updateTrackingDraft("exercise", value)}
-              />
-              <Field
-                label="Minutos"
-                type="number"
-                value={trackingDraft.duration}
-                onChange={(value) => updateTrackingDraft("duration", value)}
-              />
-            </div>
-            <SelectField
-              label="Comida fotografiada"
-              value={trackingDraft.mealType}
-              onChange={(value) => updateTrackingDraft("mealType", value)}
-              options={["Desayuno", "Comida", "Cena", "Snack"].map((label) => ({
-                value: label,
-                label,
-              }))}
+            <Field
+              label="Cintura cm"
+              type="number"
+              value={trackingDraft.waist}
+              onChange={(value) => updateTrackingDraft("waist", value)}
+              step="0.1"
             />
-            <TextArea
-              label="Notas de comida"
-              value={trackingDraft.mealNotes}
-              onChange={(value) => updateTrackingDraft("mealNotes", value)}
+          </div>
+          <Field
+            label="Pasos de hoy"
+            type="number"
+            value={trackingDraft.steps}
+            onChange={(value) => updateTrackingDraft("steps", value)}
+            step="1"
+          />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field
+              label="Ejercicio realizado"
+              value={trackingDraft.exercise}
+              onChange={(value) => updateTrackingDraft("exercise", value)}
             />
-            <label className="block">
-              <span className="mb-1 block text-sm font-semibold text-[#39433f]">Foto</span>
-              <input
-                className="block w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm"
-                type="file"
-                accept="image/*"
-                onChange={(event) => setPhotoFile(event.target.files?.[0] ?? null)}
-              />
-            </label>
-            <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
-              <ImagePlus className="size-4" />
-              Guardar registro
-            </button>
-          </form>
-        </Panel>
+            <Field
+              label="Minutos"
+              type="number"
+              value={trackingDraft.duration}
+              onChange={(value) => updateTrackingDraft("duration", value)}
+            />
+          </div>
+          <SelectField
+            label="Comida fotografiada"
+            value={trackingDraft.mealType}
+            onChange={(value) => updateTrackingDraft("mealType", value)}
+            options={["Desayuno", "Comida", "Cena", "Snack"].map((label) => ({
+              value: label,
+              label,
+            }))}
+          />
+          <TextArea
+            label="Notas de comida"
+            value={trackingDraft.mealNotes}
+            onChange={(value) => updateTrackingDraft("mealNotes", value)}
+          />
+          <label className="block">
+            <span className="mb-1 block text-sm font-semibold text-[#39433f]">Foto</span>
+            <input
+              className="block w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm"
+              type="file"
+              accept="image/*"
+              onChange={(event) => setPhotoFile(event.target.files?.[0] ?? null)}
+            />
+          </label>
+          <button className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
+            <ImagePlus className="size-4" />
+            Guardar registro
+          </button>
+        </form>
       )}
+    </Panel>
+  );
+}
 
-      <Panel>
-        <h2 className="text-lg font-black">Evolucion</h2>
-        <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <Metric label="Peso actual" value={latestWeight ? `${latestWeight} kg` : "-"} />
-          <Metric label="Cintura actual" value={latestWaist ? `${latestWaist} cm` : "-"} />
-          <Metric label="Pasos hoy" value={todayStepLog ? formatInteger(todayStepLog.steps) : "-"} />
-          <Metric label="IMC actual" value={formatOptionalNumber(currentBmi, 1)} />
-        </div>
-        <div className="mt-4 grid gap-4 xl:grid-cols-4">
-          <EvolutionChart
-            title="Peso"
-            data={weightChartData}
-            dataKey="peso"
-            color="#2f7d6d"
-            emptyText="Sin registros de peso."
-          />
-          <EvolutionChart
-            title="Cintura"
-            data={waistChartData}
-            dataKey="cintura"
-            color="#4d6fa9"
-            emptyText="Sin registros de cintura."
-          />
-          <EvolutionChart
-            title="Pasos"
-            data={stepChartData}
-            dataKey="pasos"
-            color="#7b7f3b"
-            emptyText="Sin registros de pasos."
-          />
-          <EvolutionChart
-            title="IMC"
-            data={bmiChartData}
-            dataKey="imc"
-            color="#b46a4d"
-            emptyText="Sin registros de peso para calcular IMC."
-          />
-        </div>
-        <div className="mt-5 grid gap-4 md:grid-cols-3">
-          <LogList title="Ejercicio" items={exercises.map((item) => `${formatDate(item.logged_at)} - ${item.activity}${item.duration_minutes ? `, ${item.duration_minutes} min` : ""}`)} />
-          <LogList title="Pasos diarios" items={steps.map((item) => `${formatDate(item.logged_on)} - ${formatInteger(item.steps)} pasos`)} />
-          <PhotoList photos={mealPhotos} />
-        </div>
-      </Panel>
-    </div>
+function StatsPanel({
+  selectedPatient,
+  weights,
+  waists,
+  steps,
+  exercises,
+  mealPhotos,
+  supabase,
+  onNotice,
+  onReload,
+}: {
+  selectedPatient: Patient | null;
+  weights: WeightLog[];
+  waists: WaistLog[];
+  steps: StepLog[];
+  exercises: ExerciseLog[];
+  mealPhotos: MealPhoto[];
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const latestWeight =
+    weights
+      .slice()
+      .sort((a, b) => new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime())[0]
+      ?.weight_kg ?? selectedPatient?.current_weight_kg ?? null;
+  const latestWaist =
+    waists
+      .slice()
+      .sort((a, b) => new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime())[0]
+      ?.waist_cm ?? selectedPatient?.waist_cm ?? null;
+  const todayStepLog = steps.find((item) => item.logged_on === getLocalDateString());
+  const currentBmi = selectedPatient
+    ? calculateBmi(latestWeight, selectedPatient.height_cm)
+    : null;
+  const weightChartData = buildWeightChartData(weights);
+  const waistChartData = buildWaistChartData(waists);
+  const stepChartData = buildStepChartData(steps);
+  const bmiChartData = selectedPatient
+    ? buildBmiChartData(weights, selectedPatient.height_cm)
+    : [];
+
+  async function deleteMealPhoto(photo: MealPhoto) {
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para borrar fotos reales.");
+      return;
+    }
+
+    const { error: deleteRowError } = await supabase
+      .from("meal_photos")
+      .delete()
+      .eq("id", photo.id);
+
+    if (deleteRowError) {
+      onNotice(deleteRowError.message);
+      return;
+    }
+
+    const { error: storageError } = await supabase.storage
+      .from("nutrios-private")
+      .remove([photo.storage_path]);
+
+    if (storageError) {
+      onNotice("Foto retirada del panel. No se pudo borrar el archivo del almacenamiento.");
+    } else {
+      onNotice("Foto eliminada.");
+    }
+
+    await onReload();
+  }
+
+  return (
+    <Panel>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-black">Estadisticas</h2>
+        <Activity className="size-5 text-[var(--tenant-color)]" />
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <Metric label="Peso actual" value={latestWeight ? `${latestWeight} kg` : "-"} />
+        <Metric label="Cintura actual" value={latestWaist ? `${latestWaist} cm` : "-"} />
+        <Metric label="Pasos hoy" value={todayStepLog ? formatInteger(todayStepLog.steps) : "-"} />
+        <Metric label="IMC actual" value={formatOptionalNumber(currentBmi, 1)} />
+      </div>
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        <EvolutionChart
+          title="Peso"
+          data={weightChartData}
+          dataKey="peso"
+          color="#2f7d6d"
+          emptyText="Sin registros de peso."
+        />
+        <EvolutionChart
+          title="Cintura"
+          data={waistChartData}
+          dataKey="cintura"
+          color="#4d6fa9"
+          emptyText="Sin registros de cintura."
+        />
+        <EvolutionChart
+          title="Pasos"
+          data={stepChartData}
+          dataKey="pasos"
+          color="#7b7f3b"
+          emptyText="Sin registros de pasos."
+        />
+        <EvolutionChart
+          title="IMC"
+          data={bmiChartData}
+          dataKey="imc"
+          color="#b46a4d"
+          emptyText="Sin registros de peso para calcular IMC."
+        />
+      </div>
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        <LogList title="Ejercicio" items={exercises.map((item) => `${formatDate(item.logged_at)} - ${item.activity}${item.duration_minutes ? `, ${item.duration_minutes} min` : ""}`)} />
+        <LogList title="Pasos diarios" items={steps.map((item) => `${formatDate(item.logged_on)} - ${formatInteger(item.steps)} pasos`)} />
+        <PhotoList photos={mealPhotos} onDeletePhoto={deleteMealPhoto} />
+      </div>
+    </Panel>
   );
 }
 
@@ -2655,11 +2736,11 @@ function EvolutionChart({
     <div className="rounded-lg border border-[var(--line)] bg-white p-3">
       <p className="mb-3 text-sm font-black">{title}</p>
       {data.length === 0 ? (
-        <div className="grid h-56 place-items-center">
+        <div className="grid h-64 place-items-center sm:h-72">
           <EmptyState text={emptyText} />
         </div>
       ) : (
-        <div className="h-56">
+        <div className="h-64 sm:h-72">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5dfd3" />
@@ -3281,30 +3362,51 @@ function LogList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function PhotoList({ photos }: { photos: MealPhoto[] }) {
+function PhotoList({
+  photos,
+  onDeletePhoto,
+}: {
+  photos: MealPhoto[];
+  onDeletePhoto?: (photo: MealPhoto) => void;
+}) {
   return (
     <div>
       <p className="mb-2 text-sm font-black">Fotos de comidas</p>
       <div className="grid grid-cols-2 gap-2">
         {photos.map((photo) => (
-          <a
-            key={photo.id}
-            href={photo.signed_url}
-            target="_blank"
-            rel="noreferrer"
-            className="aspect-square overflow-hidden rounded-lg border border-[var(--line)] bg-[#f7f5ef]"
-          >
-            {photo.signed_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={photo.signed_url} alt={photo.notes ?? "Comida"} className="h-full w-full object-cover" />
-            ) : (
-              <span className="grid h-full place-items-center text-xs font-semibold text-[var(--muted)]">
-                Imagen
-              </span>
+          <div key={photo.id} className="relative aspect-square overflow-hidden rounded-lg border border-[var(--line)] bg-[#f7f5ef]">
+            <a
+              href={photo.signed_url}
+              target="_blank"
+              rel="noreferrer"
+              className="block h-full w-full"
+            >
+              {photo.signed_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={photo.signed_url} alt={photo.notes ?? "Comida"} className="h-full w-full object-cover" />
+              ) : (
+                <span className="grid h-full place-items-center text-xs font-semibold text-[var(--muted)]">
+                  Imagen
+                </span>
+              )}
+            </a>
+            {onDeletePhoto && (
+              <button
+                type="button"
+                className="absolute right-2 top-2 grid size-8 place-items-center rounded-lg bg-white/95 text-[#8a3327] shadow-sm"
+                onClick={() => onDeletePhoto(photo)}
+                title="Borrar foto"
+              >
+                <Trash2 className="size-4" />
+              </button>
             )}
-          </a>
+          </div>
         ))}
-        {photos.length === 0 && <EmptyState text="Sin fotos." />}
+        {photos.length === 0 && (
+          <div className="col-span-2">
+            <EmptyState text="Sin fotos." />
+          </div>
+        )}
       </div>
     </div>
   );
