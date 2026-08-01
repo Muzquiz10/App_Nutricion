@@ -212,6 +212,12 @@ type QuestionnaireResponse = {
   ok?: boolean;
 };
 
+type DeleteMealPhotoResponse = {
+  error?: string;
+  ok?: boolean;
+  warning?: string;
+};
+
 const tabs: Array<{
   id: TabId;
   label: string;
@@ -2645,26 +2651,28 @@ function StatsPanel({
       return;
     }
 
-    const { error: deleteRowError } = await supabase
-      .from("meal_photos")
-      .delete()
-      .eq("id", photo.id);
-
-    if (deleteRowError) {
-      onNotice(deleteRowError.message);
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) {
+      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
       return;
     }
 
-    const { error: storageError } = await supabase.storage
-      .from("nutrios-private")
-      .remove([photo.storage_path]);
+    const response = await fetch("/api/meal-photos/delete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ photoId: photo.id }),
+    });
+    const payload = (await response.json()) as DeleteMealPhotoResponse;
 
-    if (storageError) {
-      onNotice("Foto retirada del panel. No se pudo borrar el archivo del almacenamiento.");
-    } else {
-      onNotice("Foto eliminada.");
+    if (!response.ok || payload.error) {
+      onNotice(payload.error ?? "No se pudo borrar la foto.");
+      return;
     }
 
+    onNotice(payload.warning ?? "Foto eliminada.");
     await onReload();
   }
 
