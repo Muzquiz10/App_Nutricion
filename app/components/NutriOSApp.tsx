@@ -1073,16 +1073,18 @@ function PatientsPanel({
       return;
     }
 
-    const {
-      data: { session },
-      } = await supabase.auth.getSession();
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) {
+      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+      return;
+    }
 
     setManualInviteLink("");
     const response = await fetch("/api/invitations/create", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${session?.access_token}`,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         email,
@@ -1434,24 +1436,29 @@ function PatientQuestionnairePanel({
   onNotice: (message: string) => void;
   onReload: () => Promise<void>;
 }) {
-  const [fullName, setFullName] = useState(patient?.full_name ?? "");
-  const [age, setAge] = useState(patient ? String(patient.age) : "");
-  const [heightCm, setHeightCm] = useState(patient ? String(patient.height_cm) : "");
-  const [currentWeightKg, setCurrentWeightKg] = useState(
-    patient ? String(patient.current_weight_kg) : "",
+  const emptyQuestionnaireDraft = useMemo(
+    () => ({
+      fullName: patient?.full_name ?? "",
+      age: patient ? String(patient.age) : "",
+      heightCm: patient ? String(patient.height_cm) : "",
+      currentWeightKg: patient ? String(patient.current_weight_kg) : "",
+      objective: patient?.objective ?? goalOptions[0],
+      sex: patient?.sex ?? "male",
+      allergies: patient?.allergies ?? "",
+      avoidedFoods: patient?.avoided_foods ?? "",
+      exerciseHoursPerWeek:
+        patient?.exercise_hours_per_week !== null &&
+        patient?.exercise_hours_per_week !== undefined
+          ? String(patient.exercise_hours_per_week)
+          : "",
+      exerciseType: patient?.exercise_type || patient?.exercise_routine || "",
+    }),
+    [patient],
   );
-  const [objective, setObjective] = useState<string>(patient?.objective ?? goalOptions[0]);
-  const [sex, setSex] = useState<string>(patient?.sex ?? "male");
-  const [allergies, setAllergies] = useState(patient?.allergies ?? "");
-  const [avoidedFoods, setAvoidedFoods] = useState(patient?.avoided_foods ?? "");
-  const [exerciseHoursPerWeek, setExerciseHoursPerWeek] = useState(
-    patient?.exercise_hours_per_week !== null &&
-      patient?.exercise_hours_per_week !== undefined
-      ? String(patient.exercise_hours_per_week)
-      : "",
-  );
-  const [exerciseType, setExerciseType] = useState(
-    patient?.exercise_type || patient?.exercise_routine || "",
+  const [questionnaireDraft, setQuestionnaireDraft, clearQuestionnaireDraft] =
+    useStoredDraft(
+      `nutrios:draft:questionnaire:${patient?.id ?? "none"}`,
+      emptyQuestionnaireDraft,
   );
   const [saving, setSaving] = useState(false);
 
@@ -1474,28 +1481,31 @@ function PatientQuestionnairePanel({
     }
 
     setSaving(true);
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) {
+      setSaving(false);
+      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+      return;
+    }
 
     const response = await fetch("/api/patients/questionnaire", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${session?.access_token}`,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         patientId: patient.id,
-        fullName,
-        age: Number(age),
-        heightCm: Number(heightCm),
-        currentWeightKg: Number(currentWeightKg),
-        objective,
-        sex,
-        allergies,
-        avoidedFoods,
-        exerciseHoursPerWeek: Number(exerciseHoursPerWeek),
-        exerciseType,
+        fullName: questionnaireDraft.fullName,
+        age: Number(questionnaireDraft.age),
+        heightCm: Number(questionnaireDraft.heightCm),
+        currentWeightKg: Number(questionnaireDraft.currentWeightKg),
+        objective: questionnaireDraft.objective,
+        sex: questionnaireDraft.sex,
+        allergies: questionnaireDraft.allergies,
+        avoidedFoods: questionnaireDraft.avoidedFoods,
+        exerciseHoursPerWeek: Number(questionnaireDraft.exerciseHoursPerWeek),
+        exerciseType: questionnaireDraft.exerciseType,
       }),
     });
 
@@ -1507,8 +1517,19 @@ function PatientQuestionnairePanel({
       return;
     }
 
+    clearQuestionnaireDraft();
     onNotice("Ficha personal actualizada.");
     await onReload();
+  }
+
+  function updateQuestionnaireDraft(
+    key: keyof typeof emptyQuestionnaireDraft,
+    value: string,
+  ) {
+    setQuestionnaireDraft((current) => ({
+      ...current,
+      [key]: value,
+    }));
   }
 
   return (
@@ -1533,40 +1554,71 @@ function PatientQuestionnairePanel({
         </span>
       </div>
       <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={saveQuestionnaire}>
-        <Field label="Nombre y apellidos" value={fullName} onChange={setFullName} required />
-        <Field label="Edad" type="number" value={age} onChange={setAge} required />
-        <Field label="Altura cm" type="number" value={heightCm} onChange={setHeightCm} required />
+        <Field
+          label="Nombre y apellidos"
+          value={questionnaireDraft.fullName}
+          onChange={(value) => updateQuestionnaireDraft("fullName", value)}
+          required
+        />
+        <Field
+          label="Edad"
+          type="number"
+          value={questionnaireDraft.age}
+          onChange={(value) => updateQuestionnaireDraft("age", value)}
+          required
+        />
+        <Field
+          label="Altura cm"
+          type="number"
+          value={questionnaireDraft.heightCm}
+          onChange={(value) => updateQuestionnaireDraft("heightCm", value)}
+          required
+        />
         <Field
           label="Peso actual kg"
           type="number"
           step="0.1"
-          value={currentWeightKg}
-          onChange={setCurrentWeightKg}
+          value={questionnaireDraft.currentWeightKg}
+          onChange={(value) => updateQuestionnaireDraft("currentWeightKg", value)}
           required
         />
         <SelectField
           label="Objetivo"
-          value={objective}
-          onChange={setObjective}
+          value={questionnaireDraft.objective}
+          onChange={(value) => updateQuestionnaireDraft("objective", value)}
           options={goalOptions.map((label) => ({ value: label, label }))}
         />
         <SelectField
           label="Sexo para calculo basal"
-          value={sex}
-          onChange={setSex}
+          value={questionnaireDraft.sex}
+          onChange={(value) => updateQuestionnaireDraft("sex", value)}
           options={sexOptions}
         />
-        <TextArea label="Alergias/intolerancias" value={allergies} onChange={setAllergies} />
-        <TextArea label="Alimentos a evitar" value={avoidedFoods} onChange={setAvoidedFoods} />
+        <TextArea
+          label="Alergias/intolerancias"
+          value={questionnaireDraft.allergies}
+          onChange={(value) => updateQuestionnaireDraft("allergies", value)}
+        />
+        <TextArea
+          label="Alimentos a evitar"
+          value={questionnaireDraft.avoidedFoods}
+          onChange={(value) => updateQuestionnaireDraft("avoidedFoods", value)}
+        />
         <Field
           label="Horas estimadas de ejercicio a la semana"
           type="number"
           step="0.5"
-          value={exerciseHoursPerWeek}
-          onChange={setExerciseHoursPerWeek}
+          value={questionnaireDraft.exerciseHoursPerWeek}
+          onChange={(value) =>
+            updateQuestionnaireDraft("exerciseHoursPerWeek", value)
+          }
           required
         />
-        <TextArea label="Tipo de ejercicio" value={exerciseType} onChange={setExerciseType} />
+        <TextArea
+          label="Tipo de ejercicio"
+          value={questionnaireDraft.exerciseType}
+          onChange={(value) => updateQuestionnaireDraft("exerciseType", value)}
+        />
         <div className="md:col-span-2">
           <button
             className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white disabled:opacity-60"
@@ -2321,7 +2373,12 @@ function TrackingPanel({
       );
     }
 
-    await Promise.all(rows);
+    const trackingResults = await Promise.all(rows);
+    const trackingError = findSupabaseResponseError(trackingResults);
+    if (trackingError) {
+      onNotice(trackingError);
+      return;
+    }
 
     if (photoFile) {
       const path = `${tenant.id}/${selectedPatient.id}/meal-photos/${Date.now()}-${safeFileName(photoFile.name)}`;
@@ -2334,13 +2391,18 @@ function TrackingPanel({
         return;
       }
 
-      await supabase.from("meal_photos").insert({
+      const photoInsert = await supabase.from("meal_photos").insert({
         tenant_id: tenant.id,
         patient_id: selectedPatient.id,
         storage_path: path,
         meal_type: trackingDraft.mealType,
         notes: trackingDraft.mealNotes,
       });
+
+      if (photoInsert.error) {
+        onNotice(photoInsert.error.message);
+        return;
+      }
     }
 
     clearTrackingDraft();
@@ -2527,15 +2589,17 @@ function ChatPanel({
       return;
     }
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) {
+      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+      return;
+    }
 
     const response = await fetch("/api/chat/send", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${session?.access_token}`,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         tenantId: tenant.id,
@@ -3222,6 +3286,38 @@ function formatSex(sex: Patient["sex"]) {
   if (sex === "male") return "Hombre";
   if (sex === "female") return "Mujer";
   return null;
+}
+
+async function getCurrentAccessToken(
+  supabase: ReturnType<typeof createSupabaseBrowser>,
+) {
+  if (!supabase) return "";
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (session?.access_token) return session.access_token;
+
+  const { data, error } = await supabase.auth.refreshSession();
+  if (error) return "";
+
+  return data.session?.access_token ?? "";
+}
+
+function findSupabaseResponseError(responses: unknown[]) {
+  for (const response of responses) {
+    if (
+      typeof response === "object" &&
+      response !== null &&
+      "error" in response
+    ) {
+      const error = (response as { error?: { message?: string } | null }).error;
+      if (error?.message) return error.message;
+    }
+  }
+
+  return "";
 }
 
 function useStoredDraft<T extends Record<string, string>>(
