@@ -66,6 +66,8 @@ http://localhost:3000
 Redirect URLs:
 http://localhost:3000/auth/callback
 http://localhost:3000/**
+https://nutrios.egmanalytics.com/auth/callback
+https://nutrios.egmanalytics.com/**
 https://*.tuapp.com/auth/callback
 https://*.tuapp.com/**
 ```
@@ -73,6 +75,8 @@ https://*.tuapp.com/**
 En `Authentication > Providers > Email`, deja activo Email. Para una app cerrada por invitacion, desactiva el registro publico si tu panel lo permite.
 
 Supabase permite enviar invitaciones desde servidor con `auth.admin.inviteUserByEmail`. La app ya lo llama desde `/api/invitations/create`.
+
+El enlace de "Has olvidado tu contrasena?" usa el mismo callback y despues lleva al usuario a `/auth/reset-password` para crear una nueva contrasena.
 
 Durante pruebas, Supabase puede mostrar `email rate limit exceeded` porque el SMTP incluido tiene un limite muy bajo. En ese caso NutriOS creara la invitacion igualmente y mostrara un enlace manual de Supabase para copiarlo y enviarlo al cliente. Para produccion configura SMTP propio en `Authentication > SMTP Settings`.
 

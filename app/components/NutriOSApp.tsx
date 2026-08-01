@@ -13,6 +13,7 @@ import {
   Copy,
   FileText,
   ImagePlus,
+  KeyRound,
   Loader2,
   LogOut,
   MessageCircle,
@@ -21,6 +22,7 @@ import {
   Plus,
   RotateCcw,
   Send,
+  Settings as SettingsIcon,
   ShieldCheck,
   Trash2,
   Upload,
@@ -188,7 +190,7 @@ const tabs: Array<{ id: TabId; label: string; icon: typeof Users }> = [
   { id: "tracking", label: "Seguimiento", icon: Activity },
   { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "documents", label: "Documentos", icon: FileText },
-  { id: "settings", label: "Marca", icon: Palette },
+  { id: "settings", label: "Configuracion", icon: SettingsIcon },
 ];
 
 const dayLabels = [
@@ -395,6 +397,7 @@ export function NutriOSApp({
   const [workspaceError, setWorkspaceError] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
+  const [sendingRecovery, setSendingRecovery] = useState(false);
 
   const selectedPatient = patients.find((patient) => patient.id === selectedPatientId) ?? null;
   const selectedConversation =
@@ -640,6 +643,32 @@ export function NutriOSApp({
     setNotice(error ? error.message : "Sesion iniciada.");
   }
 
+  async function handlePasswordRecovery() {
+    if (!supabase) return;
+    setNotice("");
+
+    const email = authEmail.trim();
+    if (!email) {
+      setNotice("Introduce tu correo electronico para enviarte el enlace de recuperacion.");
+      return;
+    }
+
+    setSendingRecovery(true);
+    const resetPath = `/auth/reset-password?next=${encodeURIComponent(`/n/${tenantSlug}`)}`;
+    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(resetPath)}`;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo,
+    });
+    setSendingRecovery(false);
+
+    if (error) {
+      setNotice(error.message);
+      return;
+    }
+
+    setNotice("Te hemos enviado un email para crear una nueva contrasena.");
+  }
+
   async function handleLogout() {
     if (!supabase) return;
     await supabase.auth.signOut();
@@ -683,6 +712,14 @@ export function NutriOSApp({
               onChange={setAuthPassword}
               required
             />
+            <button
+              type="button"
+              className="text-sm font-semibold text-[var(--tenant-color)] hover:underline"
+              onClick={handlePasswordRecovery}
+              disabled={sendingRecovery}
+            >
+              {sendingRecovery ? "Enviando enlace..." : "Has olvidado tu contrasena?"}
+            </button>
             <button className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
               <ChevronRight className="size-4" />
               Entrar
@@ -724,7 +761,6 @@ export function NutriOSApp({
 
           <nav className="mt-5 flex gap-2 overflow-x-auto pb-1 lg:grid lg:overflow-visible lg:pb-0">
             {tabs
-              .filter((tab) => role !== "patient" || tab.id !== "settings")
               .map((tab) => {
                 const Icon = tab.icon;
                 const active = activeTab === tab.id;
@@ -846,6 +882,7 @@ export function NutriOSApp({
             {activeTab === "settings" && (
               <SettingsPanel
                 tenant={tenant}
+                role={role}
                 supabase={supabase}
                 onTenant={setTenant}
                 onNotice={setNotice}
@@ -2296,11 +2333,13 @@ function DocumentsPanel({
 
 function SettingsPanel({
   tenant,
+  role,
   supabase,
   onTenant,
   onNotice,
 }: {
   tenant: Tenant;
+  role: UserRole | null;
   supabase: ReturnType<typeof createSupabaseBrowser>;
   onTenant: (tenant: Tenant) => void;
   onNotice: (message: string) => void;
@@ -2391,49 +2430,142 @@ function SettingsPanel({
   }
 
   return (
-    <Panel>
-      <h2 className="text-lg font-black">Personalizar mi NutriOS</h2>
-      <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={saveSettings}>
-        <Field label="Nombre visible" value={name} onChange={setName} required />
-        <label className="block">
-          <span className="mb-1 block text-sm font-semibold text-[#39433f]">Logo</span>
-          <div className="flex min-h-24 items-center gap-4 rounded-lg border border-[var(--line)] bg-white p-3">
-            <div className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-lg bg-[var(--tenant-color)] text-xl font-black text-white">
-              {logoPreview ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={logoPreview} alt="" className="h-full w-full object-cover" />
-              ) : (
-                "N"
-              )}
+    <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
+      {role !== "patient" && (
+        <Panel>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-black">Personalizar mi NutriOS</h2>
+            <Palette className="size-5 text-[var(--tenant-color)]" />
+          </div>
+          <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={saveSettings}>
+            <Field label="Nombre visible" value={name} onChange={setName} required />
+            <label className="block">
+              <span className="mb-1 block text-sm font-semibold text-[#39433f]">Logo</span>
+              <div className="flex min-h-24 items-center gap-4 rounded-lg border border-[var(--line)] bg-white p-3">
+                <div className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-lg bg-[var(--tenant-color)] text-xl font-black text-white">
+                  {logoPreview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={logoPreview} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    "N"
+                  )}
+                </div>
+                <input
+                  className="block min-w-0 flex-1 text-sm"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  onChange={(event) =>
+                    handleLogoFileChange(event.target.files?.[0] ?? null)
+                  }
+                />
+              </div>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-sm font-semibold text-[#39433f]">Color principal</span>
+              <div className="flex h-11 items-center gap-3 rounded-lg border border-[var(--line)] bg-white px-3">
+                <input
+                  type="color"
+                  value={primaryColor}
+                  onChange={(event) => setPrimaryColor(event.target.value)}
+                  className="size-7 rounded border-0 bg-transparent p-0"
+                />
+                <span className="text-sm font-semibold">{primaryColor}</span>
+              </div>
+            </label>
+            <div className="lg:col-span-2">
+              <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
+                <Upload className="size-4" />
+                Guardar personalizacion
+              </button>
             </div>
-            <input
-              className="block min-w-0 flex-1 text-sm"
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/svg+xml"
-              onChange={(event) =>
-                handleLogoFileChange(event.target.files?.[0] ?? null)
-              }
-            />
-          </div>
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-sm font-semibold text-[#39433f]">Color principal</span>
-          <div className="flex h-11 items-center gap-3 rounded-lg border border-[var(--line)] bg-white px-3">
-            <input
-              type="color"
-              value={primaryColor}
-              onChange={(event) => setPrimaryColor(event.target.value)}
-              className="size-7 rounded border-0 bg-transparent p-0"
-            />
-            <span className="text-sm font-semibold">{primaryColor}</span>
-          </div>
-        </label>
-        <div className="lg:col-span-2">
-          <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
-            <Upload className="size-4" />
-            Guardar personalizacion
-          </button>
-        </div>
+          </form>
+        </Panel>
+      )}
+
+      <AccountSecurityPanel
+        supabase={supabase}
+        onNotice={onNotice}
+        className={role === "patient" ? "xl:col-span-2" : ""}
+      />
+    </div>
+  );
+}
+
+function AccountSecurityPanel({
+  supabase,
+  onNotice,
+  className = "",
+}: {
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  className?: string;
+}) {
+  const [newPassword, setNewPassword] = useState("");
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function updatePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para cambiar contrasenas reales.");
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      onNotice("La contrasena debe tener al menos 8 caracteres.");
+      return;
+    }
+
+    if (newPassword !== newPasswordConfirm) {
+      onNotice("Las contrasenas no coinciden.");
+      return;
+    }
+
+    setSaving(true);
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+    setSaving(false);
+
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    setNewPassword("");
+    setNewPasswordConfirm("");
+    onNotice("Contrasena actualizada.");
+  }
+
+  return (
+    <Panel className={className}>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-black">Configuracion</h2>
+        <KeyRound className="size-5 text-[var(--tenant-color)]" />
+      </div>
+      <form className="mt-5 space-y-4" onSubmit={updatePassword}>
+        <Field
+          label="Nueva contrasena"
+          type="password"
+          value={newPassword}
+          onChange={setNewPassword}
+          required
+        />
+        <Field
+          label="Repetir nueva contrasena"
+          type="password"
+          value={newPasswordConfirm}
+          onChange={setNewPasswordConfirm}
+          required
+        />
+        <button
+          className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white disabled:opacity-60"
+          disabled={saving}
+        >
+          <KeyRound className="size-4" />
+          {saving ? "Guardando..." : "Cambiar contrasena"}
+        </button>
       </form>
     </Panel>
   );
