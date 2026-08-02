@@ -1045,8 +1045,11 @@ function Header({
   selectedPatient: Patient | null;
 }) {
   return (
-    <header className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-4">
+    <header className="flex flex-col gap-4">
+      <div className="flex justify-end sm:hidden">
+        <HeaderLogoWithSlogan />
+      </div>
+      <div className="flex items-start justify-between gap-8">
         <div className="min-w-0">
           <p className="text-sm font-semibold uppercase text-[var(--tenant-color)]">
             {role === "patient" ? "Area paciente" : "Panel nutricionista"}
@@ -1055,7 +1058,9 @@ function Header({
             {selectedPatient ? selectedPatient.full_name : tenant.name}
           </h1>
         </div>
-        <HeaderLogoWithSlogan />
+        <div className="hidden shrink-0 sm:block">
+          <HeaderLogoWithSlogan />
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 sm:justify-end">
         <Pill icon={ShieldCheck} label="GDPR preparado" />
@@ -1067,12 +1072,12 @@ function Header({
 
 function HeaderLogoWithSlogan() {
   return (
-    <div className="ml-auto flex h-14 w-[min(42vw,13rem)] shrink-0 items-center justify-end rounded-lg bg-white/75 px-2 shadow-sm ring-1 ring-[var(--line)] sm:h-16 sm:w-56 sm:px-3">
+    <div className="ml-auto flex items-center justify-end">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={APP_LOGO_WITH_SLOGAN_SRC}
         alt="DietDesk. Menos gestion. Mas nutricion."
-        className="h-full max-h-12 w-full object-contain object-right"
+        className="h-auto w-[min(82vw,20rem)] select-none object-contain object-right sm:w-72 lg:w-80"
       />
     </div>
   );
