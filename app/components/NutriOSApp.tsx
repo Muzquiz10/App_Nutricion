@@ -221,6 +221,7 @@ type DraftMealItem = {
 type TabId =
   | "patients"
   | "plans"
+  | "goals"
   | "data-entry"
   | "stats"
   | "tracking"
@@ -260,9 +261,11 @@ const tabs: Array<{
   label: string;
   icon: typeof Users;
   patientOnly?: boolean;
+  nutritionistOnly?: boolean;
 }> = [
   { id: "patients", label: "Clientes", icon: Users },
   { id: "plans", label: "Dietas", icon: BookOpen },
+  { id: "goals", label: "Objetivos", icon: Target, nutritionistOnly: true },
   { id: "data-entry", label: "Registro de datos", icon: Plus, patientOnly: true },
   { id: "stats", label: "Estadisticas", icon: Activity },
   { id: "chat", label: "Chat", icon: MessageCircle },
@@ -295,11 +298,16 @@ const systemGoalDefinitions: Record<
   weight_logged: { title: "Registrar peso", unit: null },
   activity_logged: { title: "Realizar actividad", unit: null },
 };
-const goalTypeOptions: Array<{ value: GoalType; label: string }> = [
-  { value: "steps_daily", label: "Pasos diarios" },
+const goalCreationOptions: Array<{
+  value: Exclude<GoalType, "steps_daily">;
+  label: string;
+}> = [
   { value: "weight_logged", label: "Registro de peso" },
   { value: "activity_logged", label: "Actividad realizada" },
   { value: "custom", label: "Objetivo personalizado" },
+];
+const measurableGoalOptions: Array<{ value: "steps_daily"; label: string }> = [
+  { value: "steps_daily", label: "Pasos diarios" },
 ];
 const goalStatusOptions: Array<{ value: GoalStatus; label: string }> = [
   { value: "fulfilled", label: "Cumplido" },
@@ -619,6 +627,10 @@ export function NutriOSApp({
     }
 
     if (activeTab === "data-entry" && role && role !== "patient") {
+      setActiveTab("stats");
+    }
+
+    if (activeTab === "goals" && role === "patient") {
       setActiveTab("stats");
     }
   }, [activeTab, role, setActiveTab]);
@@ -1013,6 +1025,7 @@ export function NutriOSApp({
           <nav className="mt-5 flex gap-2 overflow-x-auto pb-1 lg:grid lg:overflow-visible lg:pb-0">
             {tabs
               .filter((tab) => !tab.patientOnly || role === "patient")
+              .filter((tab) => !tab.nutritionistOnly || role !== "patient")
               .map((tab) => {
                 const Icon = tab.icon;
                 const active = activeTab === tab.id;
@@ -1057,16 +1070,11 @@ export function NutriOSApp({
           )}
           <GoalsPanel
             tenant={tenant}
-            role={role}
             selectedPatient={selectedPatient}
-            patients={patients}
             goals={goals}
             weights={weights}
             steps={steps}
             exercises={exercises}
-            supabase={supabase}
-            onNotice={setNotice}
-            onReload={loadWorkspace}
           />
 
           <div className="mt-5">
@@ -1090,6 +1098,16 @@ export function NutriOSApp({
                 tenant={tenant}
                 selectedPatient={selectedPatient}
                 plans={patientPlans}
+                supabase={supabase}
+                onNotice={setNotice}
+                onReload={loadWorkspace}
+              />
+            )}
+            {activeTab === "goals" && role !== "patient" && (
+              <GoalsManagementPanel
+                patients={patients}
+                selectedPatient={selectedPatient}
+                goals={goals}
                 supabase={supabase}
                 onNotice={setNotice}
                 onReload={loadWorkspace}
@@ -1172,47 +1190,23 @@ export function NutriOSApp({
 
 function GoalsPanel({
   tenant,
-  role,
   selectedPatient,
-  patients,
   goals,
   weights,
   steps,
   exercises,
-  supabase,
-  onNotice,
-  onReload,
 }: {
   tenant: Tenant;
-  role: UserRole | null;
   selectedPatient: Patient | null;
-  patients: Patient[];
   goals: PatientGoal[];
   weights: WeightLog[];
   steps: StepLog[];
   exercises: ExerciseLog[];
-  supabase: ReturnType<typeof createSupabaseBrowser>;
-  onNotice: (message: string) => void;
-  onReload: () => Promise<void>;
 }) {
   const [isOpen, setIsOpen] = useStoredValue(
     `nutrios:${tenant.slug}:goals-panel-open`,
     true,
   );
-  const [stepTargetsByPatient, setStepTargetsByPatient] = useState<Record<string, string>>({});
-  const [customTitle, setCustomTitle] = useState("");
-  const [customStatus, setCustomStatus] =
-    useState<GoalStatus>("in_progress");
-  const [bulkGoalType, setBulkGoalType] = useState<GoalType>("steps_daily");
-  const [bulkStepTarget, setBulkStepTarget] = useState("8000");
-  const [bulkCustomTitle, setBulkCustomTitle] = useState("");
-  const [bulkCustomStatus, setBulkCustomStatus] =
-    useState<GoalStatus>("in_progress");
-  const [bulkPatientIds, setBulkPatientIds] = useState<string[]>([]);
-  const activePatients = patients.filter((patient) => !isArchivedPatient(patient));
-  const patientGoals = selectedPatient
-    ? goals.filter((goal) => goal.patient_id === selectedPatient.id)
-    : [];
   const goalSummaries = selectedPatient
     ? buildGoalSummaries({
         patient: selectedPatient,
@@ -1222,22 +1216,105 @@ function GoalsPanel({
         exercises,
       })
     : [];
-  const selectedStepGoal = patientGoals.find(
-    (goal) => goal.goal_type === "steps_daily",
+
+  return (
+    <Panel className="mt-5">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 text-left"
+        onClick={() => setIsOpen((current) => !current)}
+        aria-expanded={isOpen}
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#eaf4ef] text-[var(--tenant-color)]">
+            <Target className="size-5" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="truncate text-lg font-black">Objetivos de hoy</h2>
+            <p className="truncate text-sm text-[var(--muted)]">
+              {selectedPatient
+                ? selectedPatient.full_name
+                : "Selecciona un cliente para ver su cumplimiento"}
+            </p>
+          </div>
+        </div>
+        <ChevronRight
+          className={`size-5 shrink-0 text-[var(--muted)] transition ${
+            isOpen ? "rotate-90" : ""
+          }`}
+        />
+      </button>
+
+      {isOpen && (
+        <div className="mt-4">
+          {!selectedPatient ? (
+            <EmptyState text="No hay cliente seleccionado." />
+          ) : (
+            <>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {goalSummaries.map((summary) => (
+                  <GoalStatusCard key={summary.id} summary={summary} />
+                ))}
+                {goalSummaries.length === 0 && (
+                  <EmptyState text="Sin objetivos activos para hoy." />
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </Panel>
   );
-  const stepTarget = selectedPatient
-    ? stepTargetsByPatient[selectedPatient.id] ??
-      (selectedStepGoal?.target_value
-        ? String(Math.round(Number(selectedStepGoal.target_value)))
-        : "8000")
-    : "8000";
-  const selectedBulkPatientIds =
-    bulkPatientIds.length > 0
-      ? bulkPatientIds
-      : selectedPatient
-        ? [selectedPatient.id]
-        : [];
-  const canManageGoals = role === "owner" || role === "nutritionist";
+}
+
+function GoalsManagementPanel({
+  patients,
+  selectedPatient,
+  goals,
+  supabase,
+  onNotice,
+  onReload,
+}: {
+  patients: Patient[];
+  selectedPatient: Patient | null;
+  goals: PatientGoal[];
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const activePatients = patients.filter((patient) => !isArchivedPatient(patient));
+  const [goalTypeToCreate, setGoalTypeToCreate] =
+    useState<Exclude<GoalType, "steps_daily">>("weight_logged");
+  const [createPatientIds, setCreatePatientIds] = useState<string[]>(() =>
+    selectedPatient ? [selectedPatient.id] : [],
+  );
+  const [customTitle, setCustomTitle] = useState("");
+  const [customStatus, setCustomStatus] =
+    useState<GoalStatus>("in_progress");
+  const [measuredGoalType, setMeasuredGoalType] =
+    useState<"steps_daily">("steps_daily");
+  const [measuredPatientId, setMeasuredPatientId] = useState(
+    selectedPatient?.id ?? "",
+  );
+  const [measuredValue, setMeasuredValue] = useState("8000");
+  const [managedPatientId, setManagedPatientId] = useState(
+    selectedPatient?.id ?? "",
+  );
+  const measuredPatient =
+    activePatients.find((patient) => patient.id === measuredPatientId) ??
+    selectedPatient ??
+    activePatients[0] ??
+    null;
+  const managedPatient =
+    activePatients.find((patient) => patient.id === managedPatientId) ??
+    selectedPatient ??
+    activePatients[0] ??
+    null;
+  const managedPatientGoals = managedPatient
+    ? goals
+        .filter((goal) => goal.patient_id === managedPatient.id)
+        .sort(compareGoals)
+    : [];
 
   async function saveSystemGoalForPatients(
     goalType: Exclude<GoalType, "custom">,
@@ -1304,7 +1381,7 @@ function GoalsPanel({
       onNotice(
         uniquePatientIds.length === 1
           ? "Objetivo actualizado."
-          : "Objetivos activados para los clientes seleccionados.",
+          : "Objetivos actualizados para los clientes seleccionados.",
       );
       await onReload();
     } catch (error) {
@@ -1312,32 +1389,14 @@ function GoalsPanel({
     }
   }
 
-  function updateSelectedStepTarget(value: string) {
-    if (!selectedPatient) return;
-    setStepTargetsByPatient((current) => ({
-      ...current,
-      [selectedPatient.id]: value,
-    }));
-  }
+  async function createGoal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
 
-  async function saveSelectedStepsGoal() {
-    if (!selectedPatient) return;
-    const targetValue = Number(stepTarget);
-    if (!Number.isInteger(targetValue) || targetValue < 1 || targetValue > 200000) {
-      onNotice("El objetivo de pasos debe estar entre 1 y 200000.");
+    if (goalTypeToCreate !== "custom") {
+      await saveSystemGoalForPatients(goalTypeToCreate, createPatientIds);
       return;
     }
-    await saveSystemGoalForPatients("steps_daily", [selectedPatient.id], targetValue);
-  }
 
-  async function saveSelectedSystemGoal(goalType: Exclude<GoalType, "custom">) {
-    if (!selectedPatient) return;
-    await saveSystemGoalForPatients(goalType, [selectedPatient.id]);
-  }
-
-  async function createCustomGoal(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selectedPatient) return;
     if (!supabase) {
       onNotice("Modo demo: conecta Supabase para guardar objetivos reales.");
       return;
@@ -1345,20 +1404,31 @@ function GoalsPanel({
 
     const title = customTitle.trim();
     if (!title) {
-      onNotice("Indica el nombre del objetivo.");
+      onNotice("Indica el nombre del objetivo personalizado.");
       return;
     }
 
-    const { error } = await supabase.from("patient_goals").insert({
-      tenant_id: selectedPatient.tenant_id,
-      patient_id: selectedPatient.id,
-      goal_type: "custom",
-      title,
-      target_value: null,
-      unit: null,
-      is_active: true,
-      custom_status: customStatus,
-    });
+    const patientsById = new Map(patients.map((patient) => [patient.id, patient]));
+    const rows = createPatientIds
+      .map((patientId) => patientsById.get(patientId))
+      .filter((patient): patient is Patient => Boolean(patient))
+      .map((patient) => ({
+        tenant_id: patient.tenant_id,
+        patient_id: patient.id,
+        goal_type: "custom" as GoalType,
+        title,
+        target_value: null,
+        unit: null,
+        is_active: true,
+        custom_status: customStatus,
+      }));
+
+    if (rows.length === 0) {
+      onNotice("Selecciona al menos un cliente.");
+      return;
+    }
+
+    const { error } = await supabase.from("patient_goals").insert(rows);
 
     if (error) {
       onNotice(error.message);
@@ -1367,8 +1437,24 @@ function GoalsPanel({
 
     setCustomTitle("");
     setCustomStatus("in_progress");
-    onNotice("Objetivo personalizado anadido.");
+    onNotice("Objetivo creado para los clientes seleccionados.");
     await onReload();
+  }
+
+  async function updateMeasuredGoal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!measuredPatient) {
+      onNotice("Selecciona un cliente.");
+      return;
+    }
+
+    const targetValue = Number(measuredValue);
+    if (!Number.isInteger(targetValue) || targetValue < 1 || targetValue > 200000) {
+      onNotice("El objetivo de pasos debe estar entre 1 y 200000.");
+      return;
+    }
+
+    await saveSystemGoalForPatients(measuredGoalType, [measuredPatient.id], targetValue);
   }
 
   async function toggleGoal(goal: PatientGoal, isActive: boolean) {
@@ -1428,275 +1514,128 @@ function GoalsPanel({
     await onReload();
   }
 
-  function toggleBulkPatient(patientId: string, checked: boolean) {
-    setBulkPatientIds(
+  function toggleCreatePatient(patientId: string, checked: boolean) {
+    setCreatePatientIds((current) =>
       checked
-        ? Array.from(new Set([...selectedBulkPatientIds, patientId]))
-        : selectedBulkPatientIds.filter((id) => id !== patientId),
-    );
-  }
-
-  async function activateBulkGoals(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const selectedIds = selectedBulkPatientIds.filter((patientId) =>
-      activePatients.some((patient) => patient.id === patientId),
-    );
-
-    if (bulkGoalType === "custom") {
-      if (!supabase) {
-        onNotice("Modo demo: conecta Supabase para guardar objetivos reales.");
-        return;
-      }
-
-      const title = bulkCustomTitle.trim();
-      if (!title) {
-        onNotice("Indica el nombre del objetivo personalizado.");
-        return;
-      }
-      if (selectedIds.length === 0) {
-        onNotice("Selecciona al menos un cliente.");
-        return;
-      }
-
-      const patientsById = new Map(patients.map((patient) => [patient.id, patient]));
-      const rows = selectedIds
-        .map((patientId) => patientsById.get(patientId))
-        .filter((patient): patient is Patient => Boolean(patient))
-        .map((patient) => ({
-          tenant_id: patient.tenant_id,
-          patient_id: patient.id,
-          goal_type: "custom" as GoalType,
-          title,
-          target_value: null,
-          unit: null,
-          is_active: true,
-          custom_status: bulkCustomStatus,
-        }));
-
-      const { error } = await supabase.from("patient_goals").insert(rows);
-      if (error) {
-        onNotice(error.message);
-        return;
-      }
-
-      setBulkCustomTitle("");
-      onNotice("Objetivo personalizado activado para los clientes seleccionados.");
-      await onReload();
-      return;
-    }
-
-    const targetValue =
-      bulkGoalType === "steps_daily" ? Number(bulkStepTarget) : null;
-    if (
-      bulkGoalType === "steps_daily" &&
-      (!Number.isInteger(targetValue) || targetValue < 1 || targetValue > 200000)
-    ) {
-      onNotice("El objetivo de pasos debe estar entre 1 y 200000.");
-      return;
-    }
-
-    await saveSystemGoalForPatients(
-      bulkGoalType,
-      selectedIds,
-      targetValue,
+        ? Array.from(new Set([...current, patientId]))
+        : current.filter((id) => id !== patientId),
     );
   }
 
   return (
-    <Panel className="mt-5">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between gap-3 text-left"
-        onClick={() => setIsOpen((current) => !current)}
-        aria-expanded={isOpen}
-      >
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#eaf4ef] text-[var(--tenant-color)]">
-            <Target className="size-5" />
-          </span>
-          <div className="min-w-0">
-            <h2 className="truncate text-lg font-black">Objetivos de hoy</h2>
-            <p className="truncate text-sm text-[var(--muted)]">
-              {selectedPatient
-                ? selectedPatient.full_name
-                : "Selecciona un cliente para ver su cumplimiento"}
-            </p>
-          </div>
+    <div className="grid gap-4 xl:grid-cols-3">
+      <Panel>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-black">Crear objetivos</h2>
+          <Target className="size-5 text-[var(--tenant-color)]" />
         </div>
-        <ChevronRight
-          className={`size-5 shrink-0 text-[var(--muted)] transition ${
-            isOpen ? "rotate-90" : ""
-          }`}
-        />
-      </button>
-
-      {isOpen && (
-        <div className="mt-4">
-          {!selectedPatient ? (
-            <EmptyState text="No hay cliente seleccionado." />
-          ) : (
+        <form className="mt-5 grid gap-4" onSubmit={createGoal}>
+          <SelectField
+            label="Tipo de objetivo"
+            value={goalTypeToCreate}
+            onChange={(value) =>
+              setGoalTypeToCreate(value as Exclude<GoalType, "steps_daily">)
+            }
+            options={goalCreationOptions}
+          />
+          {goalTypeToCreate === "custom" && (
             <>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {goalSummaries.map((summary) => (
-                  <GoalStatusCard key={summary.id} summary={summary} />
-                ))}
-                {goalSummaries.length === 0 && (
-                  <EmptyState text="Sin objetivos activos para hoy." />
-                )}
-              </div>
-
-              {canManageGoals && (
-                <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                  <div className="rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3">
-                    <p className="text-sm font-black">Objetivos del cliente</p>
-                    <div className="mt-3 grid gap-3">
-                      <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
-                        <Field
-                          label="Objetivo diario de pasos"
-                          type="number"
-                          value={stepTarget}
-                          onChange={updateSelectedStepTarget}
-                          step="1"
-                        />
-                        <button
-                          type="button"
-                          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white"
-                          onClick={saveSelectedStepsGoal}
-                        >
-                          <Footprints className="size-4" />
-                          Activar
-                        </button>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-semibold text-[#39433f]"
-                          onClick={() => saveSelectedSystemGoal("weight_logged")}
-                        >
-                          <Weight className="size-4 text-[var(--tenant-color)]" />
-                          Registrar peso
-                        </button>
-                        <button
-                          type="button"
-                          className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-semibold text-[#39433f]"
-                          onClick={() => saveSelectedSystemGoal("activity_logged")}
-                        >
-                          <Activity className="size-4 text-[var(--tenant-color)]" />
-                          Realizar actividad
-                        </button>
-                      </div>
-                    </div>
-
-                    <form className="mt-4 grid gap-3" onSubmit={createCustomGoal}>
-                      <Field
-                        label="Nuevo objetivo personalizado"
-                        value={customTitle}
-                        onChange={setCustomTitle}
-                      />
-                      <SelectField
-                        label="Estado inicial"
-                        value={customStatus}
-                        onChange={(value) => setCustomStatus(value as GoalStatus)}
-                        options={goalStatusOptions}
-                      />
-                      <button className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
-                        <Plus className="size-4" />
-                        Anadir objetivo
-                      </button>
-                    </form>
-
-                    <div className="mt-4 grid gap-2">
-                      {patientGoals.map((goal) => (
-                        <GoalManagementRow
-                          key={goal.id}
-                          goal={goal}
-                          onToggle={toggleGoal}
-                          onStatusChange={updateCustomGoalStatus}
-                          onDelete={deleteCustomGoal}
-                        />
-                      ))}
-                      {patientGoals.length === 0 && (
-                        <EmptyState text="Este cliente todavia no tiene objetivos configurados." />
-                      )}
-                    </div>
-                  </div>
-
-                  <form
-                    className="rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3"
-                    onSubmit={activateBulkGoals}
-                  >
-                    <p className="text-sm font-black">Activar para varios clientes</p>
-                    <div className="mt-3 grid gap-3">
-                      <SelectField
-                        label="Objetivo"
-                        value={bulkGoalType}
-                        onChange={(value) => setBulkGoalType(value as GoalType)}
-                        options={goalTypeOptions}
-                      />
-                      {bulkGoalType === "steps_daily" && (
-                        <Field
-                          label="Pasos diarios"
-                          type="number"
-                          value={bulkStepTarget}
-                          onChange={setBulkStepTarget}
-                          step="1"
-                        />
-                      )}
-                      {bulkGoalType === "custom" && (
-                        <>
-                          <Field
-                            label="Nombre del objetivo"
-                            value={bulkCustomTitle}
-                            onChange={setBulkCustomTitle}
-                          />
-                          <SelectField
-                            label="Estado inicial"
-                            value={bulkCustomStatus}
-                            onChange={(value) =>
-                              setBulkCustomStatus(value as GoalStatus)
-                            }
-                            options={goalStatusOptions}
-                          />
-                        </>
-                      )}
-                      <div className="max-h-52 overflow-auto rounded-lg border border-[var(--line)] bg-white">
-                        {activePatients.map((patient) => (
-                          <label
-                            key={patient.id}
-                            className="flex items-center gap-2 border-b border-[var(--line)] px-3 py-2 text-sm last:border-b-0"
-                          >
-                            <input
-                              type="checkbox"
-                              className="size-4 accent-[var(--tenant-color)]"
-                              checked={selectedBulkPatientIds.includes(patient.id)}
-                              onChange={(event) =>
-                                toggleBulkPatient(patient.id, event.target.checked)
-                              }
-                            />
-                            <span className="min-w-0 truncate font-semibold">
-                              {patient.full_name}
-                            </span>
-                          </label>
-                        ))}
-                        {activePatients.length === 0 && (
-                          <div className="p-3">
-                            <EmptyState text="No hay clientes activos." />
-                          </div>
-                        )}
-                      </div>
-                      <button className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
-                        <Target className="size-4" />
-                        Activar para seleccionados
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              )}
+              <Field
+                label="Nombre del objetivo"
+                value={customTitle}
+                onChange={setCustomTitle}
+              />
+              <SelectField
+                label="Estado inicial"
+                value={customStatus}
+                onChange={(value) => setCustomStatus(value as GoalStatus)}
+                options={goalStatusOptions}
+              />
             </>
           )}
+          <PatientCheckboxList
+            patients={activePatients}
+            selectedPatientIds={createPatientIds}
+            onToggle={toggleCreatePatient}
+            onSelectAll={() =>
+              setCreatePatientIds(activePatients.map((patient) => patient.id))
+            }
+            onClear={() => setCreatePatientIds([])}
+          />
+          <button className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
+            <Plus className="size-4" />
+            Crear objetivo
+          </button>
+        </form>
+      </Panel>
+
+      <Panel>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-black">Actualizar objetivos</h2>
+          <Footprints className="size-5 text-[var(--tenant-color)]" />
         </div>
-      )}
-    </Panel>
+        <form className="mt-5 grid gap-4" onSubmit={updateMeasuredGoal}>
+          <SelectField
+            label="Objetivo"
+            value={measuredGoalType}
+            onChange={(value) => setMeasuredGoalType(value as "steps_daily")}
+            options={measurableGoalOptions}
+          />
+          <SelectField
+            label="Cliente"
+            value={measuredPatient?.id ?? ""}
+            onChange={setMeasuredPatientId}
+            options={activePatients.map((patient) => ({
+              value: patient.id,
+              label: patient.full_name,
+            }))}
+          />
+          <Field
+            label="Pasos diarios"
+            type="number"
+            value={measuredValue}
+            onChange={setMeasuredValue}
+            step="1"
+          />
+          <button className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
+            <Check className="size-4" />
+            Actualizar objetivo
+          </button>
+        </form>
+      </Panel>
+
+      <Panel>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-black">Activar o desactivar</h2>
+          <ClipboardList className="size-5 text-[var(--tenant-color)]" />
+        </div>
+        <div className="mt-5 grid gap-4">
+          <SelectField
+            label="Cliente"
+            value={managedPatient?.id ?? ""}
+            onChange={setManagedPatientId}
+            options={activePatients.map((patient) => ({
+              value: patient.id,
+              label: patient.full_name,
+            }))}
+          />
+          <div className="grid gap-2">
+            {managedPatientGoals.map((goal) => (
+              <GoalManagementRow
+                key={goal.id}
+                goal={goal}
+                onToggle={toggleGoal}
+                onStatusChange={updateCustomGoalStatus}
+                onDelete={deleteCustomGoal}
+              />
+            ))}
+            {managedPatientGoals.length === 0 && (
+              <EmptyState text="Este cliente todavia no tiene objetivos configurados." />
+            )}
+          </div>
+        </div>
+      </Panel>
+    </div>
   );
 }
 
@@ -1774,6 +1713,67 @@ function GoalManagementRow({
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function PatientCheckboxList({
+  patients,
+  selectedPatientIds,
+  onToggle,
+  onSelectAll,
+  onClear,
+}: {
+  patients: Patient[];
+  selectedPatientIds: string[];
+  onToggle: (patientId: string, checked: boolean) => void;
+  onSelectAll: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-sm font-semibold text-[#39433f]">Clientes</span>
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            className="text-xs font-black text-[var(--tenant-color)]"
+            onClick={onSelectAll}
+          >
+            Todos
+          </button>
+          <button
+            type="button"
+            className="text-xs font-black text-[var(--muted)]"
+            onClick={onClear}
+          >
+            Limpiar
+          </button>
+        </div>
+      </div>
+      <div className="max-h-56 overflow-auto rounded-lg border border-[var(--line)] bg-white">
+        {patients.map((patient) => (
+          <label
+            key={patient.id}
+            className="flex items-center gap-2 border-b border-[var(--line)] px-3 py-2 text-sm last:border-b-0"
+          >
+            <input
+              type="checkbox"
+              className="size-4 accent-[var(--tenant-color)]"
+              checked={selectedPatientIds.includes(patient.id)}
+              onChange={(event) => onToggle(patient.id, event.target.checked)}
+            />
+            <span className="min-w-0 truncate font-semibold">
+              {patient.full_name}
+            </span>
+          </label>
+        ))}
+        {patients.length === 0 && (
+          <div className="p-3">
+            <EmptyState text="No hay clientes activos." />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
