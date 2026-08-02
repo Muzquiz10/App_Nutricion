@@ -902,7 +902,6 @@ export function NutriOSApp({
             onSelect={setSelectedPatientId}
             role={role}
           />
-          <NutritionistLogoWithSlogan role={role} />
         </aside>
 
         <section className="min-w-0 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
@@ -1036,21 +1035,6 @@ function Brand({ tenant, compact }: { tenant: Tenant; compact: boolean }) {
   );
 }
 
-function NutritionistLogoWithSlogan({ role }: { role: UserRole | null }) {
-  if (role === "patient") return null;
-
-  return (
-    <div className="mt-6 hidden rounded-lg border border-[var(--line)] bg-white/80 p-3 lg:block">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={APP_LOGO_WITH_SLOGAN_SRC}
-        alt="DietDesk. Menos gestion. Mas nutricion."
-        className="h-auto max-h-20 w-full object-contain"
-      />
-    </div>
-  );
-}
-
 function Header({
   tenant,
   role,
@@ -1061,20 +1045,36 @@ function Header({
   selectedPatient: Patient | null;
 }) {
   return (
-    <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <p className="text-sm font-semibold uppercase text-[var(--tenant-color)]">
-          {role === "patient" ? "Area paciente" : "Panel nutricionista"}
-        </p>
-        <h1 className="mt-1 text-2xl font-black tracking-normal text-[#17201d] sm:text-3xl">
-          {selectedPatient ? selectedPatient.full_name : tenant.name}
-        </h1>
+    <header className="flex flex-col gap-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold uppercase text-[var(--tenant-color)]">
+            {role === "patient" ? "Area paciente" : "Panel nutricionista"}
+          </p>
+          <h1 className="mt-1 truncate text-2xl font-black tracking-normal text-[#17201d] sm:text-3xl">
+            {selectedPatient ? selectedPatient.full_name : tenant.name}
+          </h1>
+        </div>
+        <HeaderLogoWithSlogan />
       </div>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
         <Pill icon={ShieldCheck} label="GDPR preparado" />
         <Pill icon={Bell} label="Chat en tiempo real" />
       </div>
     </header>
+  );
+}
+
+function HeaderLogoWithSlogan() {
+  return (
+    <div className="ml-auto flex h-14 w-[min(42vw,13rem)] shrink-0 items-center justify-end rounded-lg bg-white/75 px-2 shadow-sm ring-1 ring-[var(--line)] sm:h-16 sm:w-56 sm:px-3">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={APP_LOGO_WITH_SLOGAN_SRC}
+        alt="DietDesk. Menos gestion. Mas nutricion."
+        className="h-full max-h-12 w-full object-contain object-right"
+      />
+    </div>
   );
 }
 
