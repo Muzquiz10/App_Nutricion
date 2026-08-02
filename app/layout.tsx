@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { APP_ICON_SRC, APP_NAME } from "./lib/brand";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,12 +14,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NutriDesk",
+  title: APP_NAME,
   description:
     "Panel web multitenant para nutricionistas y seguimiento de pacientes.",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: APP_ICON_SRC,
+    shortcut: APP_ICON_SRC,
   },
 };
 

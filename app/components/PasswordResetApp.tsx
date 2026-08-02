@@ -1,11 +1,12 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ChevronRight, KeyRound, Loader2 } from "lucide-react";
+import { ChevronRight, Loader2 } from "lucide-react";
 import {
   createSupabaseBrowser,
   type SupabasePublicConfig,
 } from "../lib/supabase/browser";
+import { APP_ICON_SRC, APP_NAME } from "../lib/brand";
 
 export function PasswordResetApp({
   supabaseConfig,
@@ -84,11 +85,12 @@ export function PasswordResetApp({
     <main className="nutrios-app tenant-bg flex min-h-screen items-center justify-center px-4">
       <section className="w-full max-w-md rounded-lg border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[var(--shadow-soft)]">
         <div className="flex items-center gap-3">
-          <div className="grid size-11 place-items-center rounded-lg bg-[var(--tenant-color)] text-white">
-            <KeyRound className="size-5" />
+          <div className="grid size-11 place-items-center overflow-hidden rounded-lg bg-white p-1.5 shadow-sm ring-1 ring-[var(--line)]">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={APP_ICON_SRC} alt="" className="h-full w-full object-contain" />
           </div>
           <div>
-            <p className="text-base font-black">NutriDesk</p>
+            <p className="text-base font-black">{APP_NAME}</p>
             <p className="text-sm text-[var(--muted)]">Nueva contrasena</p>
           </div>
         </div>

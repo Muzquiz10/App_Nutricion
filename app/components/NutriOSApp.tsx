@@ -44,6 +44,11 @@ import {
   createSupabaseBrowser,
   type SupabasePublicConfig,
 } from "../lib/supabase/browser";
+import {
+  APP_ICON_SRC,
+  APP_LOGO_WITH_SLOGAN_SRC,
+  APP_NAME,
+} from "../lib/brand";
 import type { Tenant } from "../lib/types";
 
 type UserRole = "owner" | "nutritionist" | "patient";
@@ -261,7 +266,7 @@ const sexOptions = [
 const demoTenant = (slug: string): Tenant => ({
   id: "demo-tenant",
   slug,
-  name: "Espacio NutriDesk",
+  name: `Espacio ${APP_NAME}`,
   logo_url: null,
   primary_color: "#2f7d6d",
   privacy_policy_url: null,
@@ -793,7 +798,7 @@ export function NutriOSApp({
       <main className="nutrios-app tenant-bg flex items-center justify-center px-6">
         <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-[var(--panel)] px-5 py-4 shadow-[var(--shadow-soft)]">
           <Loader2 className="size-5 animate-spin text-[var(--tenant-color)]" />
-          <span className="text-sm font-medium">Cargando NutriDesk...</span>
+          <span className="text-sm font-medium">Cargando {APP_NAME}...</span>
         </div>
       </main>
     );
@@ -897,6 +902,7 @@ export function NutriOSApp({
             onSelect={setSelectedPatientId}
             role={role}
           />
+          <NutritionistLogoWithSlogan role={role} />
         </aside>
 
         <section className="min-w-0 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
@@ -1016,20 +1022,31 @@ export function NutriOSApp({
 function Brand({ tenant, compact }: { tenant: Tenant; compact: boolean }) {
   return (
     <div className="flex items-center gap-3">
-      <div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg bg-[var(--tenant-color)] text-base font-black text-white">
-        {tenant.logo_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={tenant.logo_url} alt="" className="h-full w-full object-cover" />
-        ) : (
-          "N"
-        )}
+      <div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-1.5 shadow-sm ring-1 ring-[var(--line)]">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={APP_ICON_SRC} alt="" className="h-full w-full object-contain" />
       </div>
       <div className="min-w-0">
-        <p className="truncate text-base font-black tracking-normal">NutriDesk</p>
+        <p className="truncate text-base font-black tracking-normal">{APP_NAME}</p>
         <p className="truncate text-sm text-[var(--muted)]">
           {compact ? tenant.name : `${tenant.name} - ${tenant.slug}`}
         </p>
       </div>
+    </div>
+  );
+}
+
+function NutritionistLogoWithSlogan({ role }: { role: UserRole | null }) {
+  if (role === "patient") return null;
+
+  return (
+    <div className="mt-6 hidden rounded-lg border border-[var(--line)] bg-white/80 p-3 lg:block">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={APP_LOGO_WITH_SLOGAN_SRC}
+        alt="DietDesk. Menos gestion. Mas nutricion."
+        className="h-auto max-h-20 w-full object-contain"
+      />
     </div>
   );
 }
@@ -3073,7 +3090,7 @@ function SettingsPanel({
       {role !== "patient" && (
         <Panel>
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-black">Personalizar mi NutriDesk</h2>
+            <h2 className="text-lg font-black">Personalizar mi {APP_NAME}</h2>
             <Palette className="size-5 text-[var(--tenant-color)]" />
           </div>
           <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={saveSettings}>
@@ -3086,7 +3103,8 @@ function SettingsPanel({
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={logoPreview} alt="" className="h-full w-full object-cover" />
                   ) : (
-                    "N"
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={APP_ICON_SRC} alt="" className="h-full w-full object-contain bg-white p-2" />
                   )}
                 </div>
                 <input
