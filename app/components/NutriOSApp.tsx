@@ -131,6 +131,7 @@ type GoalType =
   | "custom";
 
 type GoalStatus = "fulfilled" | "in_progress" | "not_fulfilled";
+type CustomGoalInputType = "check" | "number" | "minutes" | "sleep_hours";
 
 type PatientGoal = {
   id: string;
@@ -142,6 +143,7 @@ type PatientGoal = {
   unit: string | null;
   is_active: boolean;
   custom_status: GoalStatus;
+  custom_input_type?: CustomGoalInputType | null;
   created_at: string;
   updated_at: string;
 };
@@ -149,6 +151,19 @@ type PatientGoal = {
 type GoalSummary = PatientGoal & {
   status: GoalStatus;
   detail: string;
+};
+
+type PatientGoalLog = {
+  id: string;
+  tenant_id: string;
+  patient_id: string;
+  goal_id: string;
+  logged_on: string;
+  status: GoalStatus;
+  value: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 type MealPhoto = {
@@ -309,10 +324,16 @@ const goalCreationOptions: Array<{
 const measurableGoalOptions: Array<{ value: "steps_daily"; label: string }> = [
   { value: "steps_daily", label: "Pasos diarios" },
 ];
-const goalStatusOptions: Array<{ value: GoalStatus; label: string }> = [
-  { value: "fulfilled", label: "Cumplido" },
-  { value: "in_progress", label: "En proceso" },
-  { value: "not_fulfilled", label: "No cumplido" },
+const customGoalInputOptions: Array<{ value: CustomGoalInputType; label: string }> = [
+  { value: "check", label: "Marcar hecho o no" },
+  { value: "number", label: "Indicar una cifra" },
+  { value: "minutes", label: "Tiempo en minutos" },
+  { value: "sleep_hours", label: "Horas de sueno" },
+];
+const checkGoalStatusOptions: Array<{ value: string; label: string }> = [
+  { value: "", label: "Sin cambios" },
+  { value: "fulfilled", label: "Hecho" },
+  { value: "not_fulfilled", label: "No hecho" },
 ];
 const goalStatusMeta: Record<
   GoalStatus,
@@ -484,6 +505,7 @@ const demoGoals: PatientGoal[] = [
     unit: "pasos",
     is_active: true,
     custom_status: "in_progress",
+    custom_input_type: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -497,6 +519,7 @@ const demoGoals: PatientGoal[] = [
     unit: null,
     is_active: true,
     custom_status: "in_progress",
+    custom_input_type: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -507,9 +530,25 @@ const demoGoals: PatientGoal[] = [
     goal_type: "custom",
     title: "Preparar comidas de la semana",
     target_value: null,
-    unit: null,
+    unit: "hecho",
     is_active: true,
     custom_status: "fulfilled",
+    custom_input_type: "check",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+];
+
+const demoGoalLogs: PatientGoalLog[] = [
+  {
+    id: "goal-log-demo-custom",
+    tenant_id: "demo-tenant",
+    patient_id: "demo-patient-1",
+    goal_id: "goal-demo-custom",
+    logged_on: getLocalDateString(),
+    status: "fulfilled",
+    value: null,
+    notes: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -602,6 +641,7 @@ export function NutriOSApp({
   const [waists, setWaists] = useState<WaistLog[]>(demoWaist);
   const [steps, setSteps] = useState<StepLog[]>(demoSteps);
   const [goals, setGoals] = useState<PatientGoal[]>(demoGoals);
+  const [goalLogs, setGoalLogs] = useState<PatientGoalLog[]>(demoGoalLogs);
   const [exercises, setExercises] = useState<ExerciseLog[]>([]);
   const [mealPhotos, setMealPhotos] = useState<MealPhoto[]>([]);
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
@@ -649,6 +689,9 @@ export function NutriOSApp({
   const patientSteps = steps
     .filter((item) => item.patient_id === selectedPatientId)
     .sort((a, b) => new Date(a.logged_on).getTime() - new Date(b.logged_on).getTime());
+  const patientGoalLogs = goalLogs
+    .filter((item) => item.patient_id === selectedPatientId)
+    .sort((a, b) => b.logged_on.localeCompare(a.logged_on));
   const patientMessages = messages
     .filter((item) => item.conversation_id === selectedConversation?.id)
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
@@ -767,6 +810,7 @@ export function NutriOSApp({
       setWaists([]);
       setSteps([]);
       setGoals([]);
+      setGoalLogs([]);
       setExercises([]);
       setMealPhotos([]);
       setDocuments([]);
@@ -788,6 +832,7 @@ export function NutriOSApp({
       messageRows,
       planRows,
       goalRows,
+      goalLogRows,
     ] = await Promise.all([
       supabase
         .from("weight_logs")
@@ -835,12 +880,18 @@ export function NutriOSApp({
         .select("*")
         .in("patient_id", patientIds)
         .order("created_at", { ascending: true }),
+      supabase
+        .from("patient_goal_logs")
+        .select("*")
+        .in("patient_id", patientIds)
+        .order("logged_on", { ascending: false }),
     ]);
 
     setWeights((weightRows.data ?? []) as WeightLog[]);
     setWaists((waistRows.data ?? []) as WaistLog[]);
     setSteps((stepRows.data ?? []) as StepLog[]);
     setGoals((goalRows.data ?? []) as PatientGoal[]);
+    setGoalLogs((goalLogRows.data ?? []) as PatientGoalLog[]);
     setExercises((exerciseRows.data ?? []) as ExerciseLog[]);
     setMealPhotos(await withSignedUrls((photoRows.data ?? []) as MealPhoto[], "storage_path"));
     setDocuments(await withSignedUrls((documentRows.data ?? []) as DocumentFile[], "storage_path"));
@@ -1075,6 +1126,7 @@ export function NutriOSApp({
             weights={weights}
             steps={steps}
             exercises={exercises}
+            goalLogs={goalLogs}
           />
 
           <div className="mt-5">
@@ -1120,6 +1172,8 @@ export function NutriOSApp({
                 tenant={tenant}
                 selectedPatient={selectedPatient}
                 supabase={supabase}
+                goals={goals.filter((goal) => goal.patient_id === selectedPatientId)}
+                goalLogs={patientGoalLogs}
                 onNotice={setNotice}
                 onReload={loadWorkspace}
               />
@@ -1195,6 +1249,7 @@ function GoalsPanel({
   weights,
   steps,
   exercises,
+  goalLogs,
 }: {
   tenant: Tenant;
   selectedPatient: Patient | null;
@@ -1202,6 +1257,7 @@ function GoalsPanel({
   weights: WeightLog[];
   steps: StepLog[];
   exercises: ExerciseLog[];
+  goalLogs: PatientGoalLog[];
 }) {
   const [isOpen, setIsOpen] = useStoredValue(
     `nutrios:${tenant.slug}:goals-panel-open`,
@@ -1214,6 +1270,7 @@ function GoalsPanel({
         weights,
         steps,
         exercises,
+        goalLogs,
       })
     : [];
 
@@ -1289,8 +1346,9 @@ function GoalsManagementPanel({
     selectedPatient ? [selectedPatient.id] : [],
   );
   const [customTitle, setCustomTitle] = useState("");
-  const [customStatus, setCustomStatus] =
-    useState<GoalStatus>("in_progress");
+  const [customInputType, setCustomInputType] =
+    useState<CustomGoalInputType>("check");
+  const [customTargetValue, setCustomTargetValue] = useState("");
   const [measuredGoalType, setMeasuredGoalType] =
     useState<"steps_daily">("steps_daily");
   const [measuredPatientId, setMeasuredPatientId] = useState(
@@ -1408,6 +1466,16 @@ function GoalsManagementPanel({
       return;
     }
 
+    const targetValue =
+      customInputType === "check" ? null : Number(customTargetValue);
+    if (
+      customInputType !== "check" &&
+      (!Number.isFinite(targetValue) || targetValue <= 0)
+    ) {
+      onNotice("Indica el objetivo numerico que debe cumplir el cliente.");
+      return;
+    }
+
     const patientsById = new Map(patients.map((patient) => [patient.id, patient]));
     const rows = createPatientIds
       .map((patientId) => patientsById.get(patientId))
@@ -1417,10 +1485,11 @@ function GoalsManagementPanel({
         patient_id: patient.id,
         goal_type: "custom" as GoalType,
         title,
-        target_value: null,
-        unit: null,
+        target_value: targetValue,
+        unit: getCustomGoalUnit(customInputType),
         is_active: true,
-        custom_status: customStatus,
+        custom_status: "in_progress" as GoalStatus,
+        custom_input_type: customInputType,
       }));
 
     if (rows.length === 0) {
@@ -1436,7 +1505,8 @@ function GoalsManagementPanel({
     }
 
     setCustomTitle("");
-    setCustomStatus("in_progress");
+    setCustomInputType("check");
+    setCustomTargetValue("");
     onNotice("Objetivo creado para los clientes seleccionados.");
     await onReload();
   }
@@ -1474,26 +1544,6 @@ function GoalsManagementPanel({
     }
 
     onNotice(isActive ? "Objetivo activado." : "Objetivo desactivado.");
-    await onReload();
-  }
-
-  async function updateCustomGoalStatus(goal: PatientGoal, status: GoalStatus) {
-    if (!supabase) {
-      onNotice("Modo demo: conecta Supabase para guardar objetivos reales.");
-      return;
-    }
-
-    const { error } = await supabase
-      .from("patient_goals")
-      .update({ custom_status: status, updated_at: new Date().toISOString() })
-      .eq("id", goal.id);
-
-    if (error) {
-      onNotice(error.message);
-      return;
-    }
-
-    onNotice("Estado del objetivo actualizado.");
     await onReload();
   }
 
@@ -1546,11 +1596,20 @@ function GoalsManagementPanel({
                 onChange={setCustomTitle}
               />
               <SelectField
-                label="Estado inicial"
-                value={customStatus}
-                onChange={(value) => setCustomStatus(value as GoalStatus)}
-                options={goalStatusOptions}
+                label="Como lo registra el cliente"
+                value={customInputType}
+                onChange={(value) => setCustomInputType(value as CustomGoalInputType)}
+                options={customGoalInputOptions}
               />
+              {customInputType !== "check" && (
+                <Field
+                  label={getCustomGoalTargetLabel(customInputType)}
+                  type="number"
+                  value={customTargetValue}
+                  onChange={setCustomTargetValue}
+                  step={customInputType === "minutes" ? "1" : "0.1"}
+                />
+              )}
             </>
           )}
           <PatientCheckboxList
@@ -1625,7 +1684,6 @@ function GoalsManagementPanel({
                 key={goal.id}
                 goal={goal}
                 onToggle={toggleGoal}
-                onStatusChange={updateCustomGoalStatus}
                 onDelete={deleteCustomGoal}
               />
             ))}
@@ -1666,27 +1724,25 @@ function GoalStatusCard({ summary }: { summary: GoalSummary }) {
 function GoalManagementRow({
   goal,
   onToggle,
-  onStatusChange,
   onDelete,
 }: {
   goal: PatientGoal;
   onToggle: (goal: PatientGoal, isActive: boolean) => Promise<void>;
-  onStatusChange: (goal: PatientGoal, status: GoalStatus) => Promise<void>;
   onDelete: (goal: PatientGoal) => Promise<void>;
 }) {
   return (
-    <div className="rounded-lg border border-[var(--line)] bg-white p-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="min-w-0 rounded-lg border border-[var(--line)] bg-white p-3">
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
         <div className="min-w-0">
-          <p className="truncate text-sm font-black">{goal.title}</p>
+          <p className="break-words text-sm font-black leading-5">{goal.title}</p>
           <p className="mt-1 text-xs font-semibold text-[var(--muted)]">
             {formatGoalType(goal)}{goal.is_active ? " activo" : " inactivo"}
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
+        <div className="flex min-w-0 flex-wrap gap-2 sm:justify-end">
           <button
             type="button"
-            className="inline-flex h-9 items-center rounded-lg border border-[var(--line)] bg-[#fbfaf6] px-3 text-xs font-black text-[#39433f]"
+            className="inline-flex h-9 min-w-0 items-center rounded-lg border border-[var(--line)] bg-[#fbfaf6] px-3 text-xs font-black text-[#39433f]"
             onClick={() => onToggle(goal, !goal.is_active)}
           >
             {goal.is_active ? "Desactivar" : "Activar"}
@@ -1703,16 +1759,6 @@ function GoalManagementRow({
           )}
         </div>
       </div>
-      {goal.goal_type === "custom" && (
-        <div className="mt-3">
-          <SelectField
-            label="Estado manual"
-            value={goal.custom_status}
-            onChange={(value) => onStatusChange(goal, value as GoalStatus)}
-            options={goalStatusOptions}
-          />
-        </div>
-      )}
     </div>
   );
 }
@@ -3169,6 +3215,8 @@ function DataEntryPanel({
   tenant,
   selectedPatient,
   supabase,
+  goals,
+  goalLogs,
   onNotice,
   onReload,
 }: {
@@ -3176,6 +3224,8 @@ function DataEntryPanel({
   tenant: Tenant;
   selectedPatient: Patient | null;
   supabase: ReturnType<typeof createSupabaseBrowser>;
+  goals: PatientGoal[];
+  goalLogs: PatientGoalLog[];
   onNotice: (message: string) => void;
   onReload: () => Promise<void>;
 }) {
@@ -3195,9 +3245,22 @@ function DataEntryPanel({
     `nutrios:draft:tracking:${selectedPatient?.id ?? "none"}`,
     emptyTrackingDraft,
   );
+  const [customGoalDrafts, setCustomGoalDrafts, clearCustomGoalDrafts] =
+    useStoredValue<Record<string, string>>(
+      `nutrios:draft:custom-goals:${selectedPatient?.id ?? "none"}`,
+      {},
+    );
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const activeCustomGoals = goals
+    .filter(
+      (goal) =>
+        goal.patient_id === selectedPatient?.id &&
+        goal.goal_type === "custom" &&
+        goal.is_active,
+    )
+    .sort(compareGoals);
 
   async function saveTracking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -3270,6 +3333,38 @@ function DataEntryPanel({
         }),
       );
     }
+    for (const goal of activeCustomGoals) {
+      const rawValue = customGoalDrafts[goal.id];
+      if (rawValue === undefined || rawValue === "") continue;
+
+      const inputType = getCustomGoalInputType(goal);
+      const isCheckGoal = inputType === "check";
+      const numericValue = isCheckGoal ? null : Number(rawValue);
+
+      if (!isCheckGoal && (!Number.isFinite(numericValue) || numericValue < 0)) {
+        onNotice(`Valor no valido para ${goal.title}.`);
+        return;
+      }
+
+      const status = isCheckGoal
+        ? (rawValue as GoalStatus)
+        : deriveNumericCustomGoalStatus(goal, numericValue);
+
+      rows.push(
+        supabase.from("patient_goal_logs").upsert(
+          {
+            tenant_id: tenant.id,
+            patient_id: selectedPatient.id,
+            goal_id: goal.id,
+            logged_on: getLocalDateString(),
+            status,
+            value: numericValue,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "goal_id,logged_on" },
+        ),
+      );
+    }
 
     const trackingResults = await Promise.all(rows);
     const trackingError = findSupabaseResponseError(trackingResults);
@@ -3281,7 +3376,8 @@ function DataEntryPanel({
     if (photoFile) {
       const loggedAt = new Date().toISOString();
       const photoDay = getLocalDateString(new Date(loggedAt));
-      const path = `${tenant.id}/${selectedPatient.id}/meal-photos/${photoDay}/${Date.now()}-${safeFileName(photoFile.name)}`;
+      const photoTimestamp = loggedAt.replace(/\D/g, "");
+      const path = `${tenant.id}/${selectedPatient.id}/meal-photos/${photoDay}/${photoTimestamp}-${safeFileName(photoFile.name)}`;
       const { error: uploadError } = await supabase.storage
         .from("nutrios-private")
         .upload(path, photoFile, { upsert: false });
@@ -3307,6 +3403,7 @@ function DataEntryPanel({
     }
 
     clearTrackingDraft();
+    clearCustomGoalDrafts();
     setPhotoFile(null);
     if (galleryInputRef.current) galleryInputRef.current.value = "";
     if (cameraInputRef.current) cameraInputRef.current.value = "";
@@ -3318,6 +3415,13 @@ function DataEntryPanel({
     setTrackingDraft((current) => ({
       ...current,
       [key]: value,
+    }));
+  }
+
+  function updateCustomGoalDraft(goalId: string, value: string) {
+    setCustomGoalDrafts((current) => ({
+      ...current,
+      [goalId]: value,
     }));
   }
 
@@ -3383,6 +3487,51 @@ function DataEntryPanel({
             value={trackingDraft.mealNotes}
             onChange={(value) => updateTrackingDraft("mealNotes", value)}
           />
+          {activeCustomGoals.length > 0 && (
+            <div className="rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3">
+              <p className="text-sm font-black">Objetivos personalizados</p>
+              <div className="mt-3 grid gap-3">
+                {activeCustomGoals.map((goal) => {
+                  const todayLog = getTodayGoalLog(goal, goalLogs);
+                  const inputType = getCustomGoalInputType(goal);
+                  const draftValue = customGoalDrafts[goal.id] ?? "";
+
+                  return (
+                    <div
+                      key={goal.id}
+                      className="rounded-lg border border-[var(--line)] bg-white p-3"
+                    >
+                      <div className="mb-3 min-w-0">
+                        <p className="break-words text-sm font-black">{goal.title}</p>
+                        <p className="mt-1 text-xs font-semibold text-[var(--muted)]">
+                          {formatCustomGoalDefinition(goal)}
+                        </p>
+                        <p className="mt-1 text-xs text-[var(--muted)]">
+                          Hoy: {formatCustomGoalLog(todayLog, goal)}
+                        </p>
+                      </div>
+                      {inputType === "check" ? (
+                        <SelectField
+                          label="Registro de hoy"
+                          value={draftValue}
+                          onChange={(value) => updateCustomGoalDraft(goal.id, value)}
+                          options={checkGoalStatusOptions}
+                        />
+                      ) : (
+                        <Field
+                          label={getCustomGoalInputLabel(goal)}
+                          type="number"
+                          value={draftValue}
+                          onChange={(value) => updateCustomGoalDraft(goal.id, value)}
+                          step={inputType === "minutes" ? "1" : "0.1"}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div>
             <span className="mb-1 block text-sm font-semibold text-[#39433f]">Foto</span>
             <div className="grid gap-2 sm:grid-cols-2">
@@ -4332,19 +4481,21 @@ function buildGoalSummaries({
   weights,
   steps,
   exercises,
+  goalLogs,
 }: {
   patient: Patient;
   goals: PatientGoal[];
   weights: WeightLog[];
   steps: StepLog[];
   exercises: ExerciseLog[];
+  goalLogs: PatientGoalLog[];
 }) {
   return goals
     .filter((goal) => goal.patient_id === patient.id && goal.is_active)
     .sort(compareGoals)
     .map((goal) => ({
       ...goal,
-      ...evaluateGoalStatus(goal, weights, steps, exercises),
+      ...evaluateGoalStatus(goal, weights, steps, exercises, goalLogs),
     }));
 }
 
@@ -4353,6 +4504,7 @@ function evaluateGoalStatus(
   weights: WeightLog[],
   steps: StepLog[],
   exercises: ExerciseLog[],
+  goalLogs: PatientGoalLog[],
 ): Pick<GoalSummary, "status" | "detail"> {
   const today = getLocalDateString();
 
@@ -4410,10 +4562,10 @@ function evaluateGoalStatus(
     };
   }
 
-  return {
-    status: goal.custom_status,
-    detail: "Estado indicado por el nutricionista",
-  };
+  const todayGoalLog = goalLogs.find(
+    (item) => item.goal_id === goal.id && item.logged_on === today,
+  );
+  return evaluateCustomGoalStatus(goal, todayGoalLog);
 }
 
 function compareGoals(first: PatientGoal, second: PatientGoal) {
@@ -4438,7 +4590,114 @@ function formatGoalType(goal: PatientGoal) {
 
   if (goal.goal_type === "weight_logged") return "Registro de peso -";
   if (goal.goal_type === "activity_logged") return "Actividad -";
-  return "Personalizado -";
+  return `${formatCustomGoalDefinition(goal)} -`;
+}
+
+function getCustomGoalInputType(goal: PatientGoal): CustomGoalInputType {
+  return goal.custom_input_type ?? "check";
+}
+
+function getCustomGoalUnit(inputType: CustomGoalInputType) {
+  if (inputType === "minutes") return "min";
+  if (inputType === "sleep_hours") return "h";
+  if (inputType === "number") return "cifra";
+  return "hecho";
+}
+
+function getCustomGoalTargetLabel(inputType: CustomGoalInputType) {
+  if (inputType === "minutes") return "Minutos objetivo";
+  if (inputType === "sleep_hours") return "Horas objetivo";
+  return "Cifra objetivo";
+}
+
+function getCustomGoalInputLabel(goal: PatientGoal) {
+  const inputType = getCustomGoalInputType(goal);
+  if (inputType === "minutes") return "Minutos de hoy";
+  if (inputType === "sleep_hours") return "Horas de sueno";
+  return "Cifra de hoy";
+}
+
+function formatCustomGoalDefinition(goal: PatientGoal) {
+  const inputType = getCustomGoalInputType(goal);
+  const target = Number(goal.target_value) || 0;
+
+  if (inputType === "check") return "Marcar hecho o no";
+  if (inputType === "minutes") return target ? `${formatInteger(target)} min objetivo` : "Minutos";
+  if (inputType === "sleep_hours") return target ? `${target} h objetivo` : "Horas de sueno";
+  return target ? `${target} objetivo` : "Cifra";
+}
+
+function getTodayGoalLog(goal: PatientGoal, goalLogs: PatientGoalLog[]) {
+  const today = getLocalDateString();
+  return (
+    goalLogs.find(
+      (item) => item.goal_id === goal.id && item.logged_on === today,
+    ) ?? null
+  );
+}
+
+function formatCustomGoalLog(
+  goalLog: PatientGoalLog | null,
+  goal: PatientGoal,
+) {
+  if (!goalLog) return "Sin registrar";
+
+  const inputType = getCustomGoalInputType(goal);
+  if (inputType === "check") {
+    return goalLog.status === "fulfilled" ? "Hecho" : "No hecho";
+  }
+
+  if (goalLog.value === null || goalLog.value === undefined) return "Sin registrar";
+  return formatCustomGoalValue(goalLog.value, inputType);
+}
+
+function formatCustomGoalValue(value: number, inputType: CustomGoalInputType) {
+  if (inputType === "minutes") return `${formatInteger(value)} min`;
+  if (inputType === "sleep_hours") return `${value} h`;
+  return `${value}`;
+}
+
+function deriveNumericCustomGoalStatus(goal: PatientGoal, value: number | null) {
+  const amount = Number(value ?? 0);
+  const target = Number(goal.target_value) || 0;
+
+  if (target > 0 && amount >= target) return "fulfilled";
+  if (amount > 0) return target > 0 ? "in_progress" : "fulfilled";
+  return "not_fulfilled";
+}
+
+function evaluateCustomGoalStatus(
+  goal: PatientGoal,
+  goalLog: PatientGoalLog | null | undefined,
+): Pick<GoalSummary, "status" | "detail"> {
+  const inputType = getCustomGoalInputType(goal);
+
+  if (!goalLog) {
+    return {
+      status: "not_fulfilled",
+      detail: "Pendiente de registrar hoy",
+    };
+  }
+
+  if (inputType === "check") {
+    return {
+      status: goalLog.status,
+      detail: goalLog.status === "fulfilled" ? "Marcado como hecho" : "Marcado como no hecho",
+    };
+  }
+
+  const value = Number(goalLog.value ?? 0);
+  const target = Number(goal.target_value) || 0;
+  const status = deriveNumericCustomGoalStatus(goal, value);
+  const valueLabel = formatCustomGoalValue(value, inputType);
+  const targetLabel = target
+    ? formatCustomGoalValue(target, inputType)
+    : "";
+
+  return {
+    status,
+    detail: targetLabel ? `${valueLabel} de ${targetLabel}` : valueLabel,
+  };
 }
 
 function getLogDateKey(value: string) {
