@@ -1159,10 +1159,12 @@ function PatientsPanel({
   const [patientView, setPatientView] = useState<PatientListView>("active");
   const activePatients = patients.filter((patient) => !isArchivedPatient(patient));
   const archivedPatients = patients.filter(isArchivedPatient);
-  const latestWeight = selectedPatient
-    ? weights
-        .filter((item) => item.patient_id === selectedPatient.id)
-        .sort((a, b) => new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime())[0]
+  const selectedPatientWeights = selectedPatient
+    ? weights.filter((item) => item.patient_id === selectedPatient.id)
+    : [];
+  const currentWeight = getCurrentWeightKg(selectedPatient, selectedPatientWeights);
+  const currentBmi = selectedPatient
+    ? calculateBmi(currentWeight, selectedPatient.height_cm)
     : null;
 
   async function invitePatient(event: FormEvent<HTMLFormElement>) {
@@ -1239,16 +1241,10 @@ function PatientsPanel({
   }
 
   if (role === "patient") {
-    const currentWeight =
-      latestWeight?.weight_kg ?? selectedPatient?.current_weight_kg ?? null;
-    const currentBmi = selectedPatient
-      ? calculateBmi(currentWeight, selectedPatient.height_cm)
-      : null;
-
     return (
       <div className="grid gap-4 lg:grid-cols-4">
         <StatCard label="Peso inicial" value={`${selectedPatient?.initial_weight_kg ?? "-"} kg`} icon={Weight} />
-        <StatCard label="Peso actual" value={`${latestWeight?.weight_kg ?? selectedPatient?.current_weight_kg ?? "-"} kg`} icon={Activity} />
+        <StatCard label="Peso actual" value={`${currentWeight ?? "-"} kg`} icon={Activity} />
         <StatCard label="IMC actual" value={formatOptionalNumber(currentBmi, 1)} icon={ClipboardList} />
         <StatCard label="Fecha de alta" value={formatDate(selectedPatient?.registered_at)} icon={CalendarDays} />
         <PatientQuestionnairePanel
@@ -1258,7 +1254,12 @@ function PatientsPanel({
           onNotice={onNotice}
           onReload={onReload}
         />
-        <PatientRecord patient={selectedPatient} role={role} className="lg:col-span-4" />
+        <PatientRecord
+          patient={selectedPatient}
+          role={role}
+          weights={selectedPatientWeights}
+          className="lg:col-span-4"
+        />
       </div>
     );
   }
@@ -1376,7 +1377,11 @@ function PatientsPanel({
         )}
       </Panel>
 
-      <PatientRecord patient={selectedPatient} role={role} />
+      <PatientRecord
+        patient={selectedPatient}
+        role={role}
+        weights={selectedPatientWeights}
+      />
     </div>
   );
 }
@@ -1737,16 +1742,20 @@ function PatientQuestionnairePanel({
 function PatientRecord({
   patient,
   role,
+  weights,
   className = "xl:col-span-2",
 }: {
   patient: Patient | null;
   role: UserRole | null;
+  weights: WeightLog[];
   className?: string;
 }) {
   if (!patient) return <Panel><EmptyState text="Selecciona un cliente." /></Panel>;
 
-  const currentBmi = calculateBmi(patient.current_weight_kg, patient.height_cm);
-  const basalCalories = calculateBasalCalories(patient);
+  const currentWeight = getCurrentWeightKg(patient, weights);
+  const initialBmi = calculateBmi(patient.initial_weight_kg, patient.height_cm);
+  const currentBmi = calculateBmi(currentWeight, patient.height_cm);
+  const basalCalories = calculateBasalCalories(patient, currentWeight);
 
   return (
     <Panel className={className}>
@@ -1772,10 +1781,11 @@ function PatientRecord({
       </div>
       <div className="mt-5 grid gap-3 md:grid-cols-2">
         <InfoBlock label="Objetivo" value={patient.objective} />
+        <InfoBlock label="IMC inicial" value={formatOptionalNumber(initialBmi, 1)} />
         <InfoBlock label="IMC actual" value={formatOptionalNumber(currentBmi, 1)} />
         {role !== "patient" && (
           <InfoBlock
-            label="Calorias basales (TMB)"
+            label="Calorias basales actuales (TMB)"
             value={basalCalories ? `${basalCalories} kcal/dia` : "Faltan datos para calcular"}
           />
         )}
@@ -2660,6 +2670,9 @@ function StatsPanel({
   const currentBmi = selectedPatient
     ? calculateBmi(latestWeight, selectedPatient.height_cm)
     : null;
+  const initialBmi = selectedPatient
+    ? calculateBmi(selectedPatient.initial_weight_kg, selectedPatient.height_cm)
+    : null;
   const weightChartData = buildWeightChartData(weights);
   const waistChartData = buildWaistChartData(waists);
   const stepChartData = buildStepChartData(steps);
@@ -2704,10 +2717,11 @@ function StatsPanel({
         <h2 className="text-lg font-black">Estadisticas</h2>
         <Activity className="size-5 text-[var(--tenant-color)]" />
       </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-4">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Metric label="Peso actual" value={latestWeight ? `${latestWeight} kg` : "-"} />
         <Metric label="Cintura actual" value={latestWaist ? `${latestWaist} cm` : "-"} />
         <Metric label="Pasos hoy" value={todayStepLog ? formatInteger(todayStepLog.steps) : "-"} />
+        <Metric label="IMC inicial" value={formatOptionalNumber(initialBmi, 1)} />
         <Metric label="IMC actual" value={formatOptionalNumber(currentBmi, 1)} />
       </div>
       <div className="mt-5 grid gap-4 xl:grid-cols-2">
@@ -3504,6 +3518,19 @@ function buildBmiChartData(weights: WeightLog[], heightCm: number) {
     .filter((item): item is { date: string; imc: number } => item.imc !== null);
 }
 
+function getLatestWeightLog(weights: WeightLog[]) {
+  return (
+    weights
+      .slice()
+      .sort((a, b) => new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime())[0] ??
+    null
+  );
+}
+
+function getCurrentWeightKg(patient: Patient | null, weights: WeightLog[]) {
+  return getLatestWeightLog(weights)?.weight_kg ?? patient?.current_weight_kg ?? null;
+}
+
 function calculateBmi(
   weightKg: number | null | undefined,
   heightCm: number | null | undefined,
@@ -3515,8 +3542,11 @@ function calculateBmi(
   return weight / (heightM * heightM);
 }
 
-function calculateBasalCalories(patient: Patient) {
-  const weight = Number(patient.current_weight_kg);
+function calculateBasalCalories(
+  patient: Patient,
+  currentWeightKg: number | null | undefined = patient.current_weight_kg,
+) {
+  const weight = Number(currentWeightKg);
   const height = Number(patient.height_cm);
   const age = Number(patient.age);
   if (!patient.sex || !weight || !height || !age) return null;
