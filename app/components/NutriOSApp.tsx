@@ -7,6 +7,7 @@ import {
   Bell,
   BookOpen,
   CalendarDays,
+  Camera,
   Check,
   ChevronRight,
   ClipboardList,
@@ -2440,6 +2441,8 @@ function DataEntryPanel({
     emptyTrackingDraft,
   );
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   async function saveTracking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2550,6 +2553,8 @@ function DataEntryPanel({
 
     clearTrackingDraft();
     setPhotoFile(null);
+    if (galleryInputRef.current) galleryInputRef.current.value = "";
+    if (cameraInputRef.current) cameraInputRef.current.value = "";
     onNotice("Registro actualizado.");
     await onReload();
   }
@@ -2623,15 +2628,45 @@ function DataEntryPanel({
             value={trackingDraft.mealNotes}
             onChange={(value) => updateTrackingDraft("mealNotes", value)}
           />
-          <label className="block">
+          <div>
             <span className="mb-1 block text-sm font-semibold text-[#39433f]">Foto</span>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-semibold text-[#39433f] transition hover:border-[var(--tenant-color)]"
+                onClick={() => galleryInputRef.current?.click()}
+              >
+                <ImagePlus className="size-4 text-[var(--tenant-color)]" />
+                Elegir foto
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-semibold text-[#39433f] transition hover:border-[var(--tenant-color)]"
+                onClick={() => cameraInputRef.current?.click()}
+              >
+                <Camera className="size-4 text-[var(--tenant-color)]" />
+                Abrir camara
+              </button>
+            </div>
             <input
-              className="block w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm"
+              ref={galleryInputRef}
+              className="sr-only"
               type="file"
               accept="image/*"
               onChange={(event) => setPhotoFile(event.target.files?.[0] ?? null)}
             />
-          </label>
+            <input
+              ref={cameraInputRef}
+              className="sr-only"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(event) => setPhotoFile(event.target.files?.[0] ?? null)}
+            />
+            <p className="mt-2 truncate text-xs font-semibold text-[var(--muted)]">
+              {photoFile ? photoFile.name : "Sin foto seleccionada."}
+            </p>
+          </div>
           <button className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
             <ImagePlus className="size-4" />
             Guardar registro
@@ -3424,18 +3459,21 @@ function PhotoList({
   onDeletePhoto?: (photo: MealPhoto) => void;
 }) {
   const groupedPhotos = groupMealPhotosByDay(photos);
+  const todayDateKey = getLocalDateString();
 
   return (
     <div>
       <p className="mb-2 text-sm font-black">Fotos de comidas</p>
       <div className="grid gap-4">
         {groupedPhotos.map((group) => (
-          <section
+          <details
             key={group.dateKey}
-            className="rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3"
+            className="group rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3"
+            open={group.dateKey === todayDateKey}
           >
-            <div className="mb-3 flex items-center justify-between gap-3">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
               <div className="flex min-w-0 items-center gap-2">
+                <ChevronRight className="size-4 shrink-0 text-[var(--muted)] transition group-open:rotate-90" />
                 <CalendarDays className="size-4 shrink-0 text-[var(--tenant-color)]" />
                 <p className="truncate text-sm font-black">
                   {formatPhotoDayLabel(group.dateKey)}
@@ -3444,8 +3482,8 @@ function PhotoList({
               <span className="shrink-0 rounded-md bg-white px-2 py-1 text-xs font-bold text-[var(--muted)]">
                 {formatPhotoCount(group.photos.length)}
               </span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            </summary>
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
               {group.photos.map((photo) => (
                 <PhotoCard
                   key={photo.id}
@@ -3454,7 +3492,7 @@ function PhotoList({
                 />
               ))}
             </div>
-          </section>
+          </details>
         ))}
         {photos.length === 0 && <EmptyState text="Sin fotos." />}
       </div>
