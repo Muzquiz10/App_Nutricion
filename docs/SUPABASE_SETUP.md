@@ -45,7 +45,7 @@ Si ya habias ejecutado la migracion inicial antes de estos cambios, ejecuta tamb
 supabase/migrations/202607310001_nutritionist_panel_updates.sql
 ```
 
-Esta migracion anade el estado `active/archived` de pacientes, crea el bucket de logos y limita los registros de seguimiento para que los inserte el propio cliente.
+Esta migracion anade el estado de pacientes, crea el bucket de logos y limita los registros de seguimiento para que los inserte el propio cliente.
 
 Para que el chat se actualice en vivo entre nutricionista y cliente, ejecuta tambien:
 
@@ -62,6 +62,14 @@ supabase/migrations/202608010001_questionnaire_metrics.sql
 ```
 
 Los clientes ya activos podran completar los campos nuevos desde `Mi Ficha Personal`.
+
+Para usar clientes antiguos como estado inactivo real, ejecuta tambien:
+
+```text
+supabase/migrations/202608020003_patient_inactive_status.sql
+```
+
+Esta migracion cambia los pacientes antiguos de `archived` a `inactive`. Cuando un nutricionista mueve un cliente a antiguos, DietDesk desactiva tambien su acceso en ese nutricionista y permite reactivarlo despues.
 
 ## 3. Configurar Auth
 

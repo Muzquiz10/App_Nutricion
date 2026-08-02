@@ -79,7 +79,7 @@ type Patient = {
   exercise_type: string | null;
   questionnaire_version?: number;
   questionnaire_completed_at?: string | null;
-  status?: "active" | "archived";
+  status?: "active" | "inactive" | "archived";
   registered_at: string;
 };
 
@@ -243,7 +243,7 @@ type TabId =
   | "chat"
   | "documents"
   | "settings";
-type PatientListView = "active" | "pending" | "archived";
+type PatientListView = "active" | "pending" | "inactive";
 
 type CreateInvitationResponse = {
   error?: string;
@@ -269,6 +269,13 @@ type DeleteMealPhotoResponse = {
   error?: string;
   ok?: boolean;
   warning?: string;
+};
+
+type UpdatePatientStatusResponse = {
+  error?: string;
+  ok?: boolean;
+  patientName?: string;
+  status?: "active" | "inactive";
 };
 
 const tabs: Array<{
@@ -1100,7 +1107,7 @@ export function NutriOSApp({
           </nav>
 
           <PatientSwitcher
-            patients={patients.filter((patient) => !isArchivedPatient(patient))}
+            patients={patients.filter(isActivePatient)}
             selectedPatientId={selectedPatientId}
             onSelect={setSelectedPatientId}
             role={role}
@@ -1339,7 +1346,7 @@ function GoalsManagementPanel({
   onNotice: (message: string) => void;
   onReload: () => Promise<void>;
 }) {
-  const activePatients = patients.filter((patient) => !isArchivedPatient(patient));
+  const activePatients = patients.filter(isActivePatient);
   const [goalTypeToCreate, setGoalTypeToCreate] =
     useState<Exclude<GoalType, "steps_daily">>("weight_logged");
   const [createPatientIds, setCreatePatientIds] = useState<string[]>(() =>
@@ -1963,8 +1970,8 @@ function PatientsPanel({
   );
   const [manualInviteLink, setManualInviteLink] = useState("");
   const [patientView, setPatientView] = useState<PatientListView>("active");
-  const activePatients = patients.filter((patient) => !isArchivedPatient(patient));
-  const archivedPatients = patients.filter(isArchivedPatient);
+  const activePatients = patients.filter(isActivePatient);
+  const inactivePatients = patients.filter(isInactivePatient);
   const selectedPatientWeights = selectedPatient
     ? weights.filter((item) => item.patient_id === selectedPatient.id)
     : [];
@@ -2016,23 +2023,43 @@ function PatientsPanel({
     await onReload();
   }
 
-  async function updatePatientStatus(patient: Patient, status: "active" | "archived") {
+  async function updatePatientStatus(patient: Patient, status: "active" | "inactive") {
     if (!supabase) {
       onNotice("Modo demo: conecta Supabase para cambiar el estado del cliente.");
       return;
     }
 
-    const { error } = await supabase
-      .from("patients")
-      .update({ status, updated_at: new Date().toISOString() })
-      .eq("id", patient.id);
-
-    if (error) {
-      onNotice(error.message);
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) {
+      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
       return;
     }
 
-    onNotice(status === "archived" ? "Cliente movido a antiguos." : "Cliente reactivado.");
+    const response = await fetch("/api/patients/status", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        patientId: patient.id,
+        status,
+      }),
+    });
+
+    const payload = (await response.json()) as UpdatePatientStatusResponse;
+
+    if (!response.ok) {
+      onNotice(payload.error ?? "No se pudo cambiar el estado del cliente.");
+      return;
+    }
+
+    const patientName = payload.patientName ?? patient.full_name;
+    onNotice(
+      status === "inactive"
+        ? `${patientName} se ha movido a clientes antiguos.`
+        : `${patientName} vuelve a estar activo.`,
+    );
     await onReload();
   }
 
@@ -2125,19 +2152,19 @@ function PatientsPanel({
           <h2 className="text-lg font-black">
             {patientView === "active" && "Clientes"}
             {patientView === "pending" && "Pendientes de aceptar"}
-            {patientView === "archived" && "Clientes antiguos"}
+            {patientView === "inactive" && "Clientes antiguos"}
           </h2>
           <span className="rounded-lg bg-[#eef3f0] px-3 py-1 text-sm font-semibold text-[#53605a]">
             {patientView === "active" && activePatients.length}
             {patientView === "pending" && pendingInvitations.length}
-            {patientView === "archived" && archivedPatients.length}
+            {patientView === "inactive" && inactivePatients.length}
           </span>
         </div>
         <div className="mb-4 grid grid-cols-3 gap-2">
           {[
             { id: "active", label: "Activos", count: activePatients.length },
             { id: "pending", label: "Pendientes", count: pendingInvitations.length },
-            { id: "archived", label: "Antiguos", count: archivedPatients.length },
+            { id: "inactive", label: "Antiguos", count: inactivePatients.length },
           ].map((item) => {
             const active = patientView === item.id;
             return (
@@ -2163,7 +2190,7 @@ function PatientsPanel({
             selectedPatient={selectedPatient}
             onSelectPatient={onSelectPatient}
             onChangeStatus={updatePatientStatus}
-            nextStatus="archived"
+            nextStatus="inactive"
           />
         )}
         {patientView === "pending" && (
@@ -2172,9 +2199,9 @@ function PatientsPanel({
             onNotice={onNotice}
           />
         )}
-        {patientView === "archived" && (
+        {patientView === "inactive" && (
           <PatientCards
-            patients={archivedPatients}
+            patients={inactivePatients}
             selectedPatient={selectedPatient}
             onSelectPatient={onSelectPatient}
             onChangeStatus={updatePatientStatus}
@@ -2204,9 +2231,9 @@ function PatientCards({
   onSelectPatient: (id: string) => void;
   onChangeStatus: (
     patient: Patient,
-    status: "active" | "archived",
+    status: "active" | "inactive",
   ) => Promise<void>;
-  nextStatus: "active" | "archived";
+  nextStatus: "active" | "inactive";
 }) {
   if (patients.length === 0) {
     return <EmptyState text="No hay clientes en esta vista." />;
@@ -2216,7 +2243,8 @@ function PatientCards({
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {patients.map((patient) => {
         const selected = selectedPatient?.id === patient.id;
-        const Icon = nextStatus === "archived" ? Archive : RotateCcw;
+        const Icon = nextStatus === "inactive" ? Archive : RotateCcw;
+        const inactive = isInactivePatient(patient);
         return (
           <article
             key={patient.id}
@@ -2235,6 +2263,15 @@ function PatientCards({
                   <p className="mt-1 text-xs font-semibold text-[var(--muted)]">
                     {patient.patient_code}
                   </p>
+                  <span
+                    className={`mt-2 inline-flex rounded-md px-2 py-1 text-xs font-bold ${
+                      inactive
+                        ? "bg-[#f5eee3] text-[#795548]"
+                        : "bg-[#effaf5] text-[#255d50]"
+                    }`}
+                  >
+                    {inactive ? "Antiguo/inactivo" : "Activo"}
+                  </span>
                   {needsQuestionnaireUpdate(patient) && (
                     <span className="mt-2 inline-flex rounded-md bg-[#fff8df] px-2 py-1 text-xs font-bold text-[#6b5420]">
                       Ficha pendiente
@@ -2256,7 +2293,7 @@ function PatientCards({
               onClick={() => onChangeStatus(patient, nextStatus)}
             >
               <Icon className="size-4" />
-              {nextStatus === "archived" ? "Mover a antiguos" : "Reactivar"}
+              {nextStatus === "inactive" ? "Mover a antiguos" : "Pasar a activo"}
             </button>
           </article>
         );
@@ -4459,8 +4496,12 @@ function PhotoCard({
   );
 }
 
-function isArchivedPatient(patient: Patient) {
-  return patient.status === "archived";
+function isActivePatient(patient: Patient) {
+  return !isInactivePatient(patient);
+}
+
+function isInactivePatient(patient: Patient) {
+  return patient.status === "inactive" || patient.status === "archived";
 }
 
 function needsQuestionnaireUpdate(patient: Patient) {
