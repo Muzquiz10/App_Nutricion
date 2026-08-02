@@ -1,4 +1,4 @@
-# Configuracion de Supabase para NutriOS
+# Configuración de Supabase para NutriOS
 
 ## 1. Crear el proyecto
 
@@ -84,7 +84,7 @@ En `Authentication > Providers > Email`, deja activo Email. Para una app cerrada
 
 Supabase permite enviar invitaciones desde servidor con `auth.admin.inviteUserByEmail`. La app ya lo llama desde `/api/invitations/create`.
 
-El enlace de "Has olvidado tu contrasena?" usa el mismo callback y despues lleva al usuario a `/auth/reset-password` para crear una nueva contrasena.
+El enlace de "Has olvidado tu contraseña?" usa el mismo callback y después lleva al usuario a `/auth/reset-password` para crear una nueva contraseña.
 
 Durante pruebas, Supabase puede mostrar `email rate limit exceeded` porque el SMTP incluido tiene un limite muy bajo. En ese caso NutriOS creara la invitacion igualmente y mostrara un enlace manual de Supabase para copiarlo y enviarlo al cliente. Para produccion configura SMTP propio en `Authentication > SMTP Settings`.
 
@@ -150,7 +150,7 @@ Cuando el paciente acepta, NutriOS le pide:
 - alergias/intolerancias
 - alimentos a evitar
 - ejercicio
-- contrasena
+- contraseña
 - consentimiento de tratamiento de datos
 
 El ID interno del paciente, la fecha de registro y el primer registro de peso se generan en servidor.

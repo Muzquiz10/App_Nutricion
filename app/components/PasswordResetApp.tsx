@@ -57,12 +57,12 @@ export function PasswordResetApp({
     if (!supabase) return;
 
     if (password.length < 8) {
-      setMessage("La contrasena debe tener al menos 8 caracteres.");
+      setMessage("La contraseña debe tener al menos 8 caracteres.");
       return;
     }
 
     if (password !== passwordConfirm) {
-      setMessage("Las contrasenas no coinciden.");
+      setMessage("Las contraseñas no coinciden.");
       return;
     }
 
@@ -75,7 +75,7 @@ export function PasswordResetApp({
       return;
     }
 
-    setMessage("Contrasena actualizada. Redirigiendo...");
+    setMessage("Contraseña actualizada. Redirigiendo...");
     window.setTimeout(() => {
       window.location.replace(nextPath);
     }, 900);
@@ -91,7 +91,7 @@ export function PasswordResetApp({
           </div>
           <div>
             <p className="text-base font-black">{APP_NAME}</p>
-            <p className="text-sm text-[var(--muted)]">Nueva contrasena</p>
+            <p className="text-sm text-[var(--muted)]">Nueva contraseña</p>
           </div>
         </div>
 
@@ -103,12 +103,12 @@ export function PasswordResetApp({
         ) : (
           <form className="mt-8 space-y-4" onSubmit={savePassword}>
             <PasswordField
-              label="Nueva contrasena"
+              label="Nueva contraseña"
               value={password}
               onChange={setPassword}
             />
             <PasswordField
-              label="Repetir nueva contrasena"
+              label="Repetir nueva contraseña"
               value={passwordConfirm}
               onChange={setPasswordConfirm}
             />
@@ -117,7 +117,7 @@ export function PasswordResetApp({
               disabled={saving || Boolean(message && message.startsWith("Abre esta pantalla"))}
             >
               <ChevronRight className="size-4" />
-              {saving ? "Guardando..." : "Guardar contrasena"}
+              {saving ? "Guardando..." : "Guardar contraseña"}
             </button>
           </form>
         )}

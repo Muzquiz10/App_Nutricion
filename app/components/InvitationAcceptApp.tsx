@@ -133,11 +133,11 @@ export function InvitationAcceptApp({
       return;
     }
     if (password.length < 8) {
-      setMessage("La contrasena debe tener al menos 8 caracteres.");
+      setMessage("La contraseña debe tener al menos 8 caracteres.");
       return;
     }
     if (password !== passwordConfirm) {
-      setMessage("Las contrasenas no coinciden.");
+      setMessage("Las contraseñas no coinciden.");
       return;
     }
 
@@ -180,7 +180,7 @@ export function InvitationAcceptApp({
 
     if (signInError) {
       setMessage(
-        "Alta completada. Ahora inicia sesion con el correo del cliente y la contrasena que acabas de crear.",
+        "Alta completada. Ahora inicia sesión con el correo del cliente y la contraseña que acabas de crear.",
       );
       return;
     }
@@ -273,8 +273,8 @@ export function InvitationAcceptApp({
           />
           <TextArea label="Tipo de ejercicio" value={exerciseType} onChange={setExerciseType} />
           <div className="grid gap-4">
-            <Field label="Contrasena" type="password" value={password} onChange={setPassword} required />
-            <Field label="Repetir contrasena" type="password" value={passwordConfirm} onChange={setPasswordConfirm} required />
+            <Field label="Contraseña" type="password" value={password} onChange={setPassword} required />
+            <Field label="Repetir contraseña" type="password" value={passwordConfirm} onChange={setPasswordConfirm} required />
           </div>
           <label className="md:col-span-2 flex items-start gap-3 rounded-lg border border-[var(--line)] bg-white p-3 text-sm">
             <input

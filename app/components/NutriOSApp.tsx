@@ -282,23 +282,23 @@ const tabs: Array<{
   { id: "plans", label: "Dietas", icon: BookOpen },
   { id: "goals", label: "Objetivos", icon: Target, nutritionistOnly: true },
   { id: "data-entry", label: "Registro de datos", icon: Plus, patientOnly: true },
-  { id: "stats", label: "Estadisticas", icon: Activity },
+  { id: "stats", label: "Estadísticas", icon: Activity },
   { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "documents", label: "Documentos", icon: FileText },
-  { id: "settings", label: "Configuracion", icon: SettingsIcon },
+  { id: "settings", label: "Configuración", icon: SettingsIcon },
 ];
 
 const dayLabels = [
   "Lunes",
   "Martes",
-  "Miercoles",
+  "Miércoles",
   "Jueves",
   "Viernes",
-  "Sabado",
+  "Sábado",
   "Domingo",
 ];
 
-const mealTypes = ["Desayuno", "Media manana", "Comida", "Merienda", "Cena"];
+const mealTypes = ["Desayuno", "Media mañana", "Comida", "Merienda", "Cena"];
 const mealPhotoTypes = [...mealTypes, "Snack"];
 
 const mealTypeOrder = new Map(mealTypes.map((mealType, index) => [mealType, index]));
@@ -325,10 +325,10 @@ const measurableGoalOptions: Array<{ value: "steps_daily"; label: string }> = [
   { value: "steps_daily", label: "Pasos diarios" },
 ];
 const customGoalInputOptions: Array<{ value: CustomGoalInputType; label: string }> = [
-  { value: "check", label: "Marcar hecho o no" },
-  { value: "number", label: "Indicar una cifra" },
+  { value: "check", label: "Sí/No" },
+  { value: "number", label: "Numérico" },
   { value: "minutes", label: "Tiempo en minutos" },
-  { value: "sleep_hours", label: "Horas de sueno" },
+  { value: "sleep_hours", label: "Horas de sueño" },
 ];
 const checkGoalStatusOptions: Array<{ value: string; label: string }> = [
   { value: "", label: "Sin cambios" },
@@ -596,7 +596,7 @@ const demoPlan: MealPlan = {
           id: "item-1",
           meal_type: "Desayuno",
           title: "Yogur sin lactosa con avena",
-          description: "Anadir frutos rojos y nueces.",
+          description: "Añadir frutos rojos y nueces.",
           position: 1,
         },
         {
@@ -963,7 +963,7 @@ export function NutriOSApp({
 
     const email = authEmail.trim();
     if (!email) {
-      setNotice("Introduce tu correo electronico para enviarte el enlace de recuperacion.");
+      setNotice("Introduce tu correo electrónico para enviarte el enlace de recuperación.");
       return;
     }
 
@@ -980,7 +980,7 @@ export function NutriOSApp({
       return;
     }
 
-    setNotice("Te hemos enviado un email para crear una nueva contrasena.");
+    setNotice("Te hemos enviado un email para crear una nueva contraseña.");
   }
 
   async function handleLogout() {
@@ -1013,14 +1013,14 @@ export function NutriOSApp({
           <Brand tenant={tenant} compact={false} />
           <form className="mt-8 space-y-4" onSubmit={handleLogin}>
             <Field
-              label="Correo electronico"
+              label="Correo electrónico"
               type="email"
               value={authEmail}
               onChange={setAuthEmail}
               required
             />
             <Field
-              label="Contrasena"
+              label="Contraseña"
               type="password"
               value={authPassword}
               onChange={setAuthPassword}
@@ -1032,7 +1032,7 @@ export function NutriOSApp({
               onClick={handlePasswordRecovery}
               disabled={sendingRecovery}
             >
-              {sendingRecovery ? "Enviando enlace..." : "Has olvidado tu contrasena?"}
+              {sendingRecovery ? "Enviando enlace..." : "Has olvidado tu contraseña?"}
             </button>
             <button className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
               <ChevronRight className="size-4" />
@@ -1596,7 +1596,7 @@ function GoalsManagementPanel({
                 onChange={setCustomTitle}
               />
               <SelectField
-                label="Como lo registra el cliente"
+                label="Indicar unidad de medición"
                 value={customInputType}
                 onChange={(value) => setCustomInputType(value as CustomGoalInputType)}
                 options={customGoalInputOptions}
@@ -2799,7 +2799,7 @@ function PlansPanel({
                 }
               >
                 <Plus className="size-4" />
-                Anadir comida
+                Añadir comida
               </button>
               <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
                 <Check className="size-4" />
@@ -2942,7 +2942,7 @@ function MealPlanDayEditor({
   async function addMeal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!newTitle.trim()) {
-      onNotice("Escribe el plato antes de anadir la comida.");
+      onNotice("Escribe el plato antes de añadir la comida.");
       return;
     }
     if (!supabase) {
@@ -3030,7 +3030,7 @@ function MealPlanDayEditor({
           onClick={() => setIsAddingMeal(true)}
         >
           <Plus className="size-4" />
-          Anadir comida
+          Añadir comida
         </button>
       )}
       {isEditable && isAddingMeal && (
@@ -3660,7 +3660,7 @@ function StatsPanel({
   return (
     <Panel>
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-black">Estadisticas</h2>
+        <h2 className="text-lg font-black">Estadísticas</h2>
         <Activity className="size-5 text-[var(--tenant-color)]" />
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -3911,7 +3911,7 @@ function DocumentsPanel({
     <div className="grid gap-5 xl:grid-cols-[380px_1fr]">
       {role !== "patient" && (
         <Panel>
-          <h2 className="text-lg font-black">Anadir documento</h2>
+          <h2 className="text-lg font-black">Añadir documento</h2>
           <form className="mt-5 space-y-4" onSubmit={uploadDocument}>
             <Field label="Titulo" value={title} onChange={setTitle} />
             <label className="block">
@@ -4132,17 +4132,17 @@ function AccountSecurityPanel({
     event.preventDefault();
 
     if (!supabase) {
-      onNotice("Modo demo: conecta Supabase para cambiar contrasenas reales.");
+      onNotice("Modo demo: conecta Supabase para cambiar contraseñas reales.");
       return;
     }
 
     if (newPassword.length < 8) {
-      onNotice("La contrasena debe tener al menos 8 caracteres.");
+      onNotice("La contraseña debe tener al menos 8 caracteres.");
       return;
     }
 
     if (newPassword !== newPasswordConfirm) {
-      onNotice("Las contrasenas no coinciden.");
+      onNotice("Las contraseñas no coinciden.");
       return;
     }
 
@@ -4159,25 +4159,25 @@ function AccountSecurityPanel({
 
     setNewPassword("");
     setNewPasswordConfirm("");
-    onNotice("Contrasena actualizada.");
+    onNotice("Contraseña actualizada.");
   }
 
   return (
     <Panel className={className}>
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-black">Configuracion</h2>
+        <h2 className="text-lg font-black">Configuración</h2>
         <KeyRound className="size-5 text-[var(--tenant-color)]" />
       </div>
       <form className="mt-5 space-y-4" onSubmit={updatePassword}>
         <Field
-          label="Nueva contrasena"
+          label="Nueva contraseña"
           type="password"
           value={newPassword}
           onChange={setNewPassword}
           required
         />
         <Field
-          label="Repetir nueva contrasena"
+          label="Repetir nueva contraseña"
           type="password"
           value={newPasswordConfirm}
           onChange={setNewPasswordConfirm}
@@ -4188,7 +4188,7 @@ function AccountSecurityPanel({
           disabled={saving}
         >
           <KeyRound className="size-4" />
-          {saving ? "Guardando..." : "Cambiar contrasena"}
+          {saving ? "Guardando..." : "Cambiar contraseña"}
         </button>
       </form>
     </Panel>
@@ -4613,7 +4613,7 @@ function getCustomGoalTargetLabel(inputType: CustomGoalInputType) {
 function getCustomGoalInputLabel(goal: PatientGoal) {
   const inputType = getCustomGoalInputType(goal);
   if (inputType === "minutes") return "Minutos de hoy";
-  if (inputType === "sleep_hours") return "Horas de sueno";
+  if (inputType === "sleep_hours") return "Horas de sueño";
   return "Cifra de hoy";
 }
 
@@ -4621,9 +4621,9 @@ function formatCustomGoalDefinition(goal: PatientGoal) {
   const inputType = getCustomGoalInputType(goal);
   const target = Number(goal.target_value) || 0;
 
-  if (inputType === "check") return "Marcar hecho o no";
+  if (inputType === "check") return "Sí/No";
   if (inputType === "minutes") return target ? `${formatInteger(target)} min objetivo` : "Minutos";
-  if (inputType === "sleep_hours") return target ? `${target} h objetivo` : "Horas de sueno";
+  if (inputType === "sleep_hours") return target ? `${target} h objetivo` : "Horas de sueño";
   return target ? `${target} objetivo` : "Cifra";
 }
 
