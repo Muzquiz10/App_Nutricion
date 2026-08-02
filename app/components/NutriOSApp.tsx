@@ -249,8 +249,12 @@ const dayLabels = [
 ];
 
 const mealTypes = ["Desayuno", "Media manana", "Comida", "Merienda", "Cena"];
+const mealPhotoTypes = [...mealTypes, "Snack"];
 
 const mealTypeOrder = new Map(mealTypes.map((mealType, index) => [mealType, index]));
+const mealPhotoTypeOrder = new Map(
+  mealPhotoTypes.map((mealType, index) => [mealType, index]),
+);
 const currentQuestionnaireVersion = 2;
 const goalOptions = [
   "Reducir peso",
@@ -2517,7 +2521,9 @@ function DataEntryPanel({
     }
 
     if (photoFile) {
-      const path = `${tenant.id}/${selectedPatient.id}/meal-photos/${Date.now()}-${safeFileName(photoFile.name)}`;
+      const loggedAt = new Date().toISOString();
+      const photoDay = getLocalDateString(new Date(loggedAt));
+      const path = `${tenant.id}/${selectedPatient.id}/meal-photos/${photoDay}/${Date.now()}-${safeFileName(photoFile.name)}`;
       const { error: uploadError } = await supabase.storage
         .from("nutrios-private")
         .upload(path, photoFile, { upsert: false });
@@ -2533,6 +2539,7 @@ function DataEntryPanel({
         storage_path: path,
         meal_type: trackingDraft.mealType,
         notes: trackingDraft.mealNotes,
+        logged_at: loggedAt,
       });
 
       if (photoInsert.error) {
@@ -2606,7 +2613,7 @@ function DataEntryPanel({
             label="Comida fotografiada"
             value={trackingDraft.mealType}
             onChange={(value) => updateTrackingDraft("mealType", value)}
-            options={["Desayuno", "Comida", "Cena", "Snack"].map((label) => ({
+            options={mealPhotoTypes.map((label) => ({
               value: label,
               label,
             }))}
@@ -2754,10 +2761,12 @@ function StatsPanel({
           emptyText="Sin registros de peso para calcular IMC."
         />
       </div>
-      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <LogList title="Ejercicio" items={exercises.map((item) => `${formatDate(item.logged_at)} - ${item.activity}${item.duration_minutes ? `, ${item.duration_minutes} min` : ""}`)} />
         <LogList title="Pasos diarios" items={steps.map((item) => `${formatDate(item.logged_on)} - ${formatInteger(item.steps)} pasos`)} />
-        <PhotoList photos={mealPhotos} onDeletePhoto={deleteMealPhoto} />
+        <div className="lg:col-span-2">
+          <PhotoList photos={mealPhotos} onDeletePhoto={deleteMealPhoto} />
+        </div>
       </div>
     </Panel>
   );
@@ -3414,43 +3423,94 @@ function PhotoList({
   photos: MealPhoto[];
   onDeletePhoto?: (photo: MealPhoto) => void;
 }) {
+  const groupedPhotos = groupMealPhotosByDay(photos);
+
   return (
     <div>
       <p className="mb-2 text-sm font-black">Fotos de comidas</p>
-      <div className="grid grid-cols-2 gap-2">
-        {photos.map((photo) => (
-          <div key={photo.id} className="relative aspect-square overflow-hidden rounded-lg border border-[var(--line)] bg-[#f7f5ef]">
-            <a
-              href={photo.signed_url}
-              target="_blank"
-              rel="noreferrer"
-              className="block h-full w-full"
-            >
-              {photo.signed_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={photo.signed_url} alt={photo.notes ?? "Comida"} className="h-full w-full object-cover" />
-              ) : (
-                <span className="grid h-full place-items-center text-xs font-semibold text-[var(--muted)]">
-                  Imagen
-                </span>
-              )}
-            </a>
-            {onDeletePhoto && (
-              <button
-                type="button"
-                className="absolute right-2 top-2 grid size-8 place-items-center rounded-lg bg-white/95 text-[#8a3327] shadow-sm"
-                onClick={() => onDeletePhoto(photo)}
-                title="Borrar foto"
-              >
-                <Trash2 className="size-4" />
-              </button>
-            )}
-          </div>
+      <div className="grid gap-4">
+        {groupedPhotos.map((group) => (
+          <section
+            key={group.dateKey}
+            className="rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3"
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <CalendarDays className="size-4 shrink-0 text-[var(--tenant-color)]" />
+                <p className="truncate text-sm font-black">
+                  {formatPhotoDayLabel(group.dateKey)}
+                </p>
+              </div>
+              <span className="shrink-0 rounded-md bg-white px-2 py-1 text-xs font-bold text-[var(--muted)]">
+                {formatPhotoCount(group.photos.length)}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {group.photos.map((photo) => (
+                <PhotoCard
+                  key={photo.id}
+                  photo={photo}
+                  onDeletePhoto={onDeletePhoto}
+                />
+              ))}
+            </div>
+          </section>
         ))}
-        {photos.length === 0 && (
-          <div className="col-span-2">
-            <EmptyState text="Sin fotos." />
-          </div>
+        {photos.length === 0 && <EmptyState text="Sin fotos." />}
+      </div>
+    </div>
+  );
+}
+
+function PhotoCard({
+  photo,
+  onDeletePhoto,
+}: {
+  photo: MealPhoto;
+  onDeletePhoto?: (photo: MealPhoto) => void;
+}) {
+  const mealType = photo.meal_type || "Sin tipo";
+
+  return (
+    <div className="relative aspect-square overflow-hidden rounded-lg border border-[var(--line)] bg-[#f7f5ef] shadow-sm">
+      <a
+        href={photo.signed_url}
+        target="_blank"
+        rel="noreferrer"
+        className="block h-full w-full"
+      >
+        {photo.signed_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={photo.signed_url}
+            alt={`${mealType}${photo.notes ? ` - ${photo.notes}` : ""}`}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <span className="grid h-full place-items-center text-xs font-semibold text-[var(--muted)]">
+            Imagen
+          </span>
+        )}
+      </a>
+      <span className="absolute left-2 top-2 max-w-[calc(100%-3rem)] truncate rounded-md bg-white/95 px-2 py-1 text-[11px] font-black text-[#24342f] shadow-sm">
+        {mealType}
+      </span>
+      {onDeletePhoto && (
+        <button
+          type="button"
+          className="absolute right-2 top-2 grid size-8 place-items-center rounded-lg bg-white/95 text-[#8a3327] shadow-sm"
+          onClick={() => onDeletePhoto(photo)}
+          title="Borrar foto"
+        >
+          <Trash2 className="size-4" />
+        </button>
+      )}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#17201d]/85 to-transparent px-2 pb-2 pt-8 text-white">
+        <p className="text-xs font-bold">{formatPhotoTime(photo.logged_at)}</p>
+        {photo.notes && (
+          <p className="mt-0.5 max-h-8 overflow-hidden text-xs leading-4 text-white/85">
+            {photo.notes}
+          </p>
         )}
       </div>
     </div>
@@ -3475,6 +3535,33 @@ function needsQuestionnaireUpdate(patient: Patient) {
 
 function getMealTypePosition(mealType: string) {
   return mealTypeOrder.get(mealType) ?? mealTypes.length;
+}
+
+function getMealPhotoTypePosition(mealType: string | null) {
+  return mealPhotoTypeOrder.get(mealType ?? "") ?? mealPhotoTypes.length;
+}
+
+function groupMealPhotosByDay(photos: MealPhoto[]) {
+  const groups = new Map<string, MealPhoto[]>();
+
+  for (const photo of photos) {
+    const dateKey = getLocalDateString(new Date(photo.logged_at));
+    groups.set(dateKey, [...(groups.get(dateKey) ?? []), photo]);
+  }
+
+  return Array.from(groups.entries())
+    .map(([dateKey, groupPhotos]) => ({
+      dateKey,
+      photos: groupPhotos
+        .slice()
+        .sort(
+          (a, b) =>
+            getMealPhotoTypePosition(a.meal_type) -
+              getMealPhotoTypePosition(b.meal_type) ||
+            new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime(),
+        ),
+    }))
+    .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
 }
 
 function buildWeightChartData(weights: WeightLog[]) {
@@ -3702,6 +3789,27 @@ function formatDateTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatPhotoDayLabel(dateKey: string) {
+  const today = getLocalDateString();
+  const yesterday = getLocalDateString(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  const formattedDate = formatDate(`${dateKey}T12:00:00`);
+
+  if (dateKey === today) return `Hoy - ${formattedDate}`;
+  if (dateKey === yesterday) return `Ayer - ${formattedDate}`;
+  return formattedDate;
+}
+
+function formatPhotoTime(value: string) {
+  return new Intl.DateTimeFormat("es-ES", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function formatPhotoCount(count: number) {
+  return `${count} foto${count === 1 ? "" : "s"}`;
 }
 
 function safeFileName(name: string) {
