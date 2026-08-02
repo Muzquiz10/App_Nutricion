@@ -1,6 +1,6 @@
-# NutriDesk
+# DietDesk
 
-NutriDesk es un MVP web para nutricionistas. Cada profesional inicia sesion con su correo y contrasena, y sus pacientes quedan aislados por `tenant_id` y politicas RLS en Supabase.
+DietDesk es un MVP web para nutricionistas. Cada profesional inicia sesion con su correo y contrasena, y sus pacientes quedan aislados por `tenant_id` y politicas RLS en Supabase.
 
 ## MVP incluido
 

@@ -22,14 +22,14 @@ async function render() {
   );
 }
 
-test("server-renders NutriDesk", async () => {
+test("server-renders DietDesk", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>NutriDesk<\/title>/i);
-  assert.match(html, /NutriDesk/);
+  assert.match(html, /<title>DietDesk<\/title>/i);
+  assert.match(html, /DietDesk/);
   assert.doesNotMatch(html, /Your site is taking shape/);
   assert.doesNotMatch(html, /react-loading-skeleton/);
 });
