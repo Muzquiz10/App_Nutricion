@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+  viewBox="0 0 512 512"
+  role="img"
+  aria-labelledby="title desc">
+  <title id="title">DietDesk icono</title>
+  <desc id="desc">Icono vectorial editable de DietDesk inspirado en la referencia aprobada, en azul pastel y azul marino.</desc>
+
+  <g id="DietDesk-icono" inkscape:groupmode="layer" inkscape:label="DietDesk icono">
+    <g id="forma-superior" inkscape:label="Forma superior azul pastel">
+      <path
+        id="top-pastel-shape"
+        fill="#8BD8F7"
+        d="M88 42H224C329 42 410 123 416 226C364 221 325 222 291 235C268 243 248 260 223 254C178 243 135 210 76 199V54C76 47.37 81.37 42 88 42Z"/>
+    </g>
+
+    <g id="forma-izquierda" inkscape:label="Forma izquierda azul marino">
+      <path
+        id="left-navy-shape"
+        fill="#0B2F4A"
+        d="M76 216C132 226 171 254 202 288C147 304 105 352 76 413V216Z"/>
+    </g>
+
+    <g id="forma-inferior" inkscape:label="Forma inferior azul marino">
+      <path
+        id="bottom-navy-shape"
+        fill="#0B2F4A"
+        d="M232 278C278 235 339 218 417 231V267C417 377 334 462 224 462H128C178 437 209 397 218 342C221 320 225 296 232 278Z"/>
+    </g>
+
+    <g id="hoja-inferior" inkscape:label="Hoja inferior azul pastel">
+      <path
+        id="leaf-shape"
+        fill="#8BD8F7"
+        stroke="#FFFFFF"
+        stroke-width="14"
+        stroke-linejoin="round"
+        d="M76 462C86 387 134 323 220 288C213 358 190 409 146 437C125 451 101 459 76 462Z"/>
+      <path
+        id="leaf-vein"
+        d="M95 433C130 394 160 357 202 306"
+        fill="none"
+        stroke="#FFFFFF"
+        stroke-width="9"
+        stroke-linecap="round"/>
+    </g>
+
+    <g id="separadores-blancos" inkscape:label="Separadores blancos">
+      <path
+        id="main-white-curve"
+        d="M76 198C128 207 170 228 207 249C236 266 256 265 286 248C320 228 362 222 417 226"
+        fill="none"
+        stroke="#FFFFFF"
+        stroke-width="18"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+    </g>
+
+    <g id="circulo-central" inkscape:label="Circulo blanco central">
+      <circle id="white-dot" cx="236" cy="189" r="31" fill="#FFFFFF"/>
+    </g>
+  </g>
+</svg>
