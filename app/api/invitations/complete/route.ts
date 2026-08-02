@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "../../../lib/supabase/server";
+import {
+  findAuthUserByEmail,
+  getPatientActivationBlock,
+  patientActivationBlockMessage,
+} from "../../../lib/patient-activation";
 
 type CompleteInvitationBody = {
   token?: string;
@@ -117,6 +122,7 @@ export async function POST(request: Request) {
     supabase,
     sessionToken,
     email: invitation.email,
+    tenantId: invitation.tenant_id,
     password: body.password,
     metadata: {
       full_name: fullName,
@@ -151,20 +157,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: profileError.message }, { status: 500 });
   }
 
-  const { error: memberError } = await supabase.from("tenant_members").upsert(
-    {
-      tenant_id: invitation.tenant_id,
-      user_id: user.id,
-      role: "patient",
-      status: "active",
-    },
-    { onConflict: "tenant_id,user_id" },
-  );
-
-  if (memberError) {
-    return NextResponse.json({ error: memberError.message }, { status: 500 });
-  }
-
   const { data: patient, error: patientError } = await supabase
     .from("patients")
     .insert({
@@ -193,9 +185,30 @@ export async function POST(request: Request) {
     .single();
 
   if (patientError || !patient) {
+    const rawMessage = patientError?.message ?? "No se pudo crear la ficha.";
+    const message = toActivationConflictMessage(rawMessage);
+
     return NextResponse.json(
-      { error: patientError?.message ?? "No se pudo crear la ficha." },
-      { status: 500 },
+      { error: message },
+      { status: message === rawMessage ? 500 : 409 },
+    );
+  }
+
+  const { error: memberError } = await supabase.from("tenant_members").upsert(
+    {
+      tenant_id: invitation.tenant_id,
+      user_id: user.id,
+      role: "patient",
+      status: "active",
+    },
+    { onConflict: "tenant_id,user_id" },
+  );
+
+  if (memberError) {
+    await supabase.from("patients").delete().eq("id", patient.id);
+    return NextResponse.json(
+      { error: toActivationConflictMessage(memberError.message) },
+      { status: 409 },
     );
   }
 
@@ -233,12 +246,14 @@ async function resolveInvitationUser({
   supabase,
   sessionToken,
   email,
+  tenantId,
   password,
   metadata,
 }: {
   supabase: SupabaseClient;
   sessionToken?: string;
   email: string;
+  tenantId: string;
   password: string;
   metadata: Record<string, unknown>;
 }): Promise<{ user: User } | { error: string; status: number }> {
@@ -256,6 +271,19 @@ async function resolveInvitationUser({
       return { error: "La invitacion pertenece a otro correo.", status: 403 };
     }
 
+    const activationBlock = await getPatientActivationBlock(
+      supabase,
+      user.id,
+      tenantId,
+    );
+
+    if (activationBlock) {
+      return {
+        error: patientActivationBlockMessage(activationBlock),
+        status: 409,
+      };
+    }
+
     const { data, error: updateError } =
       await supabase.auth.admin.updateUserById(user.id, {
         password,
@@ -271,6 +299,22 @@ async function resolveInvitationUser({
     }
 
     return { user: data.user };
+  }
+
+  const existingUser = await findAuthUserByEmail(supabase, email);
+  if (existingUser) {
+    const activationBlock = await getPatientActivationBlock(
+      supabase,
+      existingUser.id,
+      tenantId,
+    );
+
+    if (activationBlock) {
+      return {
+        error: patientActivationBlockMessage(activationBlock),
+        status: 409,
+      };
+    }
   }
 
   const { data: createdUser, error: createError } =
@@ -293,20 +337,10 @@ async function resolveInvitationUser({
     };
   }
 
-  const existingUser = await findAuthUserByEmail(supabase, email);
   if (!existingUser) {
     return {
       error:
         "Ese correo ya existe en Auth, pero no se pudo localizar para reutilizarlo. Borralo en Authentication > Users y vuelve a aceptar la invitacion.",
-      status: 409,
-    };
-  }
-
-  const reusable = await canReuseExistingAuthUser(supabase, existingUser.id);
-  if (!reusable) {
-    return {
-      error:
-        "Ese correo ya pertenece a un usuario activo. Usa otro correo o revisa el usuario en Supabase.",
       status: 409,
     };
   }
@@ -329,51 +363,16 @@ async function resolveInvitationUser({
   return { user: updatedUser.user };
 }
 
-async function findAuthUserByEmail(supabase: SupabaseClient, email: string) {
-  const normalizedEmail = email.toLowerCase();
-
-  for (let page = 1; page <= 10; page += 1) {
-    const { data, error } = await supabase.auth.admin.listUsers({
-      page,
-      perPage: 1000,
-    });
-
-    if (error) return null;
-
-    const match = data.users.find(
-      (user) => user.email?.toLowerCase() === normalizedEmail,
-    );
-    if (match) return match;
-    if (!data.nextPage) return null;
-  }
-
-  return null;
-}
-
-async function canReuseExistingAuthUser(
-  supabase: SupabaseClient,
-  userId: string,
-) {
-  const { data: patientRows } = await supabase
-    .from("patients")
-    .select("id")
-    .eq("user_id", userId)
-    .limit(1);
-
-  if ((patientRows ?? []).length > 0) return false;
-
-  const { data: membershipRows } = await supabase
-    .from("tenant_members")
-    .select("role,status")
-    .eq("user_id", userId);
-
-  return !(membershipRows ?? []).some(
-    (membership) => membership.status === "active",
-  );
-}
-
 function buildExerciseRoutine(hours: number, exerciseType: string) {
   const base = `${hours} h/semana`;
   if (!exerciseType) return base;
   return `${base} - ${exerciseType}`;
+}
+
+function toActivationConflictMessage(message: string) {
+  if (message.toLowerCase().includes("duplicate")) {
+    return "Ese correo ya esta activo con otro nutricionista. Para darlo de alta aqui, primero el nutricionista actual debe moverlo a clientes antiguos.";
+  }
+
+  return message;
 }

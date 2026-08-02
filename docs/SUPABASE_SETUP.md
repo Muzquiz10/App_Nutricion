@@ -71,6 +71,14 @@ supabase/migrations/202608020003_patient_inactive_status.sql
 
 Esta migracion cambia los pacientes antiguos de `archived` a `inactive`. Cuando un nutricionista mueve un cliente a antiguos, DietDesk desactiva tambien su acceso en ese nutricionista y permite reactivarlo despues.
 
+Para bloquear que un mismo cliente este activo con dos nutricionistas a la vez, ejecuta tambien:
+
+```text
+supabase/migrations/202608020004_one_active_patient_per_user.sql
+```
+
+Esta migracion sincroniza fichas inactivas con membresias `disabled` y crea indices unicos para permitir solo una ficha/membresia activa por usuario paciente.
+
 ## 3. Configurar Auth
 
 En `Authentication > URL Configuration`:

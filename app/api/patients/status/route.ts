@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../lib/supabase/server";
+import {
+  getPatientActivationBlock,
+  patientActivationBlockMessage,
+} from "../../../lib/patient-activation";
 
 type PatientStatus = "active" | "inactive";
 
@@ -72,28 +76,31 @@ export async function POST(request: Request) {
     );
   }
 
-  const now = new Date().toISOString();
-  const { error: updatePatientError } = await supabase
-    .from("patients")
-    .update({ status: body.status, updated_at: now })
-    .eq("id", patient.id);
+  if (patient.user_id) {
+    if (body.status === "active") {
+      const activationBlock = await getPatientActivationBlock(
+        supabase,
+        patient.user_id,
+        patient.tenant_id,
+      );
 
-  if (updatePatientError) {
-    return NextResponse.json(
-      { error: updatePatientError.message },
-      { status: 500 },
-    );
+      if (activationBlock && activationBlock !== "existing_in_same_tenant") {
+        return NextResponse.json(
+          { error: patientActivationBlockMessage(activationBlock) },
+          { status: 409 },
+        );
+      }
+    }
   }
 
-  if (patient.user_id) {
-    const memberError =
-      body.status === "active"
-        ? await reactivatePatientMember(supabase, patient.tenant_id, patient.user_id)
-        : await disablePatientMember(supabase, patient.tenant_id, patient.user_id);
+  const now = new Date().toISOString();
+  const statusError =
+    body.status === "active"
+      ? await activatePatient(supabase, patient.id, patient.tenant_id, patient.user_id, now)
+      : await inactivatePatient(supabase, patient.id, patient.tenant_id, patient.user_id, now);
 
-    if (memberError) {
-      return NextResponse.json({ error: memberError }, { status: 500 });
-    }
+  if (statusError) {
+    return NextResponse.json({ error: statusError }, { status: 500 });
   }
 
   return NextResponse.json({
@@ -107,39 +114,90 @@ function isPatientStatus(status: unknown): status is PatientStatus {
   return status === "active" || status === "inactive";
 }
 
-async function reactivatePatientMember(
+async function activatePatient(
   supabase: Awaited<ReturnType<typeof getSupabaseAdmin>>,
+  patientId: string,
   tenantId: string,
-  userId: string,
+  userId: string | null,
+  now: string,
 ) {
   if (!supabase) return "Supabase no esta configurado en el servidor.";
 
-  const { error } = await supabase.from("tenant_members").upsert(
-    {
-      tenant_id: tenantId,
-      user_id: userId,
-      role: "patient",
-      status: "active",
-    },
-    { onConflict: "tenant_id,user_id" },
-  );
+  if (userId) {
+    const { error: memberError } = await supabase.from("tenant_members").upsert(
+      {
+        tenant_id: tenantId,
+        user_id: userId,
+        role: "patient",
+        status: "active",
+      },
+      { onConflict: "tenant_id,user_id" },
+    );
 
-  return error?.message ?? "";
+    if (memberError) return toActivationConflictMessage(memberError.message);
+  }
+
+  const { error: patientError } = await supabase
+    .from("patients")
+    .update({ status: "active", updated_at: now })
+    .eq("id", patientId);
+
+  if (patientError && userId) {
+    await supabase
+      .from("tenant_members")
+      .update({ status: "disabled" })
+      .eq("tenant_id", tenantId)
+      .eq("user_id", userId)
+      .eq("role", "patient");
+  }
+
+  return patientError ? toActivationConflictMessage(patientError.message) : "";
 }
 
-async function disablePatientMember(
+async function inactivatePatient(
   supabase: Awaited<ReturnType<typeof getSupabaseAdmin>>,
+  patientId: string,
   tenantId: string,
-  userId: string,
+  userId: string | null,
+  now: string,
 ) {
   if (!supabase) return "Supabase no esta configurado en el servidor.";
 
-  const { error } = await supabase
-    .from("tenant_members")
-    .update({ status: "disabled" })
-    .eq("tenant_id", tenantId)
-    .eq("user_id", userId)
-    .eq("role", "patient");
+  if (userId) {
+    const { error: memberError } = await supabase
+      .from("tenant_members")
+      .update({ status: "disabled" })
+      .eq("tenant_id", tenantId)
+      .eq("user_id", userId)
+      .eq("role", "patient");
 
-  return error?.message ?? "";
+    if (memberError) return memberError.message;
+  }
+
+  const { error: patientError } = await supabase
+    .from("patients")
+    .update({ status: "inactive", updated_at: now })
+    .eq("id", patientId);
+
+  if (patientError && userId) {
+    await supabase.from("tenant_members").upsert(
+      {
+        tenant_id: tenantId,
+        user_id: userId,
+        role: "patient",
+        status: "active",
+      },
+      { onConflict: "tenant_id,user_id" },
+    );
+  }
+
+  return patientError?.message ?? "";
+}
+
+function toActivationConflictMessage(message: string) {
+  if (message.toLowerCase().includes("duplicate")) {
+    return "Ese correo ya esta activo con otro nutricionista. Para reactivarlo aqui, primero el nutricionista actual debe moverlo a clientes antiguos.";
+  }
+
+  return message;
 }

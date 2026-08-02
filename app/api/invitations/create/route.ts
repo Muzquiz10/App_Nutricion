@@ -3,6 +3,11 @@ import {
   getPublicAppOrigin,
   getSupabaseAdmin,
 } from "../../../lib/supabase/server";
+import {
+  findAuthUserByEmail,
+  getPatientActivationBlock,
+  patientActivationBlockMessage,
+} from "../../../lib/patient-activation";
 
 type CreateInvitationBody = {
   email?: string;
@@ -70,6 +75,22 @@ export async function POST(request: Request) {
       { error: "No tienes permisos para invitar pacientes." },
       { status: 403 },
     );
+  }
+
+  const existingAuthUser = await findAuthUserByEmail(supabase, email);
+  if (existingAuthUser) {
+    const activationBlock = await getPatientActivationBlock(
+      supabase,
+      existingAuthUser.id,
+      body.tenantId,
+    );
+
+    if (activationBlock) {
+      return NextResponse.json(
+        { error: patientActivationBlockMessage(activationBlock) },
+        { status: 409 },
+      );
+    }
   }
 
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14).toISOString();
