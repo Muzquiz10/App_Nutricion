@@ -1072,13 +1072,13 @@ export function NutriOSApp({
 
   return (
     <main className="nutrios-app tenant-bg" style={appStyle}>
-      <div className="mx-auto grid min-h-screen max-w-[1440px] grid-cols-1 lg:grid-cols-[280px_1fr]">
-        <aside className="border-b border-[var(--line)] bg-[#fffbf3]/90 px-4 py-4 lg:border-b-0 lg:border-r lg:px-5 lg:py-6">
+      <div className="mx-auto grid min-h-screen max-w-[1440px] grid-cols-1 lg:grid-cols-[5rem_minmax(0,1fr)]">
+        <aside className="group/sidebar border-b border-[var(--line)] bg-[#fffbf3]/90 px-4 py-4 transition-[width,box-shadow] duration-200 lg:sticky lg:top-0 lg:z-30 lg:h-screen lg:w-20 lg:overflow-hidden lg:border-b-0 lg:border-r lg:px-4 lg:py-6 lg:hover:w-72 lg:hover:bg-[#fffbf3]/95 lg:hover:shadow-[var(--shadow-soft)] lg:focus-within:w-72 lg:focus-within:bg-[#fffbf3]/95 lg:focus-within:shadow-[var(--shadow-soft)]">
           <div className="flex items-center justify-between gap-3 lg:block">
-            <Brand tenant={tenant} compact />
-            <div className="flex items-center gap-2 lg:mt-6">
+            <Brand tenant={tenant} compact collapsible />
+            <div className="flex items-center gap-2 lg:mt-6 lg:justify-center lg:transition-all lg:group-hover/sidebar:justify-start lg:group-focus-within/sidebar:justify-start">
               {isDemo && (
-                <span className="rounded-full bg-[#f1e7c4] px-3 py-1 text-xs font-semibold text-[#69551f]">
+                <span className="rounded-full bg-[#f1e7c4] px-3 py-1 text-xs font-semibold text-[#69551f] lg:max-w-0 lg:overflow-hidden lg:px-0 lg:opacity-0 lg:transition-all lg:group-hover/sidebar:max-w-32 lg:group-hover/sidebar:px-3 lg:group-hover/sidebar:opacity-100 lg:group-focus-within/sidebar:max-w-32 lg:group-focus-within/sidebar:px-3 lg:group-focus-within/sidebar:opacity-100">
                   Demo local
                 </span>
               )}
@@ -1105,18 +1105,25 @@ export function NutriOSApp({
                   <button
                     key={tab.id}
                     type="button"
-                    className={`inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-black shadow-sm transition lg:w-full lg:justify-start ${
+                    className={`inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-black shadow-sm transition-all lg:w-full lg:gap-0 lg:px-0 lg:group-hover/sidebar:gap-2 lg:group-hover/sidebar:px-3 lg:group-focus-within/sidebar:gap-2 lg:group-focus-within/sidebar:px-3 ${
                       active
                         ? "border-[var(--tenant-color)] bg-[var(--tenant-color)] text-white shadow-md"
                         : "border-[var(--line)] bg-white/85 text-[#39433f] hover:border-[var(--tenant-color)] hover:bg-white"
                     }`}
                     onClick={() => setActiveTab(tab.id)}
                     aria-current={active ? "page" : undefined}
+                    title={
+                      role === "patient" && tab.id === "patients"
+                        ? "Mi Ficha Personal"
+                        : tab.label
+                    }
                   >
-                    <Icon className="size-4" />
-                    {role === "patient" && tab.id === "patients"
-                      ? "Mi Ficha Personal"
-                      : tab.label}
+                    <Icon className="size-4 shrink-0" />
+                    <span className="whitespace-nowrap transition-opacity lg:w-0 lg:overflow-hidden lg:opacity-0 lg:group-hover/sidebar:w-auto lg:group-hover/sidebar:opacity-100 lg:group-focus-within/sidebar:w-auto lg:group-focus-within/sidebar:opacity-100">
+                      {role === "patient" && tab.id === "patients"
+                        ? "Mi Ficha Personal"
+                        : tab.label}
+                    </span>
                   </button>
                 );
               })}
@@ -1852,14 +1859,34 @@ function PatientCheckboxList({
   );
 }
 
-function Brand({ tenant, compact }: { tenant: Tenant; compact: boolean }) {
+function Brand({
+  tenant,
+  compact,
+  collapsible = false,
+}: {
+  tenant: Tenant;
+  compact: boolean;
+  collapsible?: boolean;
+}) {
   return (
-    <div className="flex items-center gap-3">
+    <div
+      className={`flex items-center gap-3 ${
+        collapsible
+          ? "lg:justify-center lg:transition-all lg:group-hover/sidebar:justify-start lg:group-focus-within/sidebar:justify-start"
+          : ""
+      }`}
+    >
       <div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-1.5 shadow-sm ring-1 ring-[var(--line)]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={APP_ICON_SRC} alt="" className="h-full w-full object-contain" />
       </div>
-      <div className="min-w-0">
+      <div
+        className={`min-w-0 ${
+          collapsible
+            ? "lg:w-0 lg:overflow-hidden lg:opacity-0 lg:transition-opacity lg:group-hover/sidebar:w-auto lg:group-hover/sidebar:opacity-100 lg:group-focus-within/sidebar:w-auto lg:group-focus-within/sidebar:opacity-100"
+            : ""
+        }`}
+      >
         <p className="truncate text-base font-black tracking-normal">{APP_NAME}</p>
         <p className="truncate text-sm text-[var(--muted)]">
           {compact ? tenant.name : `${tenant.name} - ${tenant.slug}`}
@@ -1967,7 +1994,7 @@ function PatientSwitcher({
   if (role === "patient") return null;
 
   return (
-    <div className="mt-6 hidden lg:block">
+    <div className="mt-6 hidden lg:pointer-events-none lg:block lg:translate-x-2 lg:opacity-0 lg:transition-all lg:group-hover/sidebar:pointer-events-auto lg:group-hover/sidebar:translate-x-0 lg:group-hover/sidebar:opacity-100 lg:group-focus-within/sidebar:pointer-events-auto lg:group-focus-within/sidebar:translate-x-0 lg:group-focus-within/sidebar:opacity-100">
       <p className="mb-2 text-xs font-bold uppercase text-[var(--muted)]">Clientes</p>
       <div className="grid max-h-[45vh] gap-2 overflow-y-auto pr-1 scrollbar-thin">
         {patients.map((patient) => (
