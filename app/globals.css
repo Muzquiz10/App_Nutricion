@@ -35,6 +35,23 @@ textarea {
   font: inherit;
 }
 
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+button:not(:disabled):active {
+  transform: translateY(1px) scale(0.99);
+  filter: brightness(0.97);
+}
+
+button:disabled {
+  cursor: wait;
+}
+
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,

@@ -35,6 +35,7 @@ import {
   UserPlus,
   Users,
   Weight,
+  X,
 } from "lucide-react";
 import {
   CartesianGrid,
@@ -287,7 +288,7 @@ const tabs: Array<{
 }> = [
   { id: "patients", label: "Clientes", icon: Users },
   { id: "plans", label: "Dietas", icon: BookOpen },
-  { id: "goals", label: "Objetivos", icon: Target, nutritionistOnly: true },
+  { id: "goals", label: "Objetivos", icon: Target },
   { id: "data-entry", label: "Registro de datos", icon: Plus, patientOnly: true },
   { id: "stats", label: "Estadísticas", icon: Activity },
   { id: "chat", label: "Chat", icon: MessageCircle },
@@ -307,6 +308,9 @@ const dayLabels = [
 
 const mealTypes = ["Desayuno", "Media mañana", "Comida", "Merienda", "Cena"];
 const mealPhotoTypes = [...mealTypes, "Snack"];
+const maxLogoFileSizeBytes = 2 * 1024 * 1024;
+const maxMealPhotoDimension = 1600;
+const mealPhotoQuality = 0.82;
 
 const mealTypeOrder = new Map(mealTypes.map((mealType, index) => [mealType, index]));
 const mealPhotoTypeOrder = new Map(
@@ -677,9 +681,6 @@ export function NutriOSApp({
       setActiveTab("stats");
     }
 
-    if (activeTab === "goals" && role === "patient") {
-      setActiveTab("stats");
-    }
   }, [activeTab, role, setActiveTab]);
 
   const selectedPatient = patients.find((patient) => patient.id === selectedPatientId) ?? null;
@@ -703,6 +704,9 @@ export function NutriOSApp({
     .filter((item) => item.conversation_id === selectedConversation?.id)
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   const patientPlans = plans.filter((plan) => plan.patient_id === selectedPatientId);
+  const showGoalsPanel =
+    activeTab === "goals" ||
+    (role === "patient" && activeTab === "data-entry");
 
   const withSignedUrls = useCallback(
     async <T extends { storage_path: string }>(rows: T[], key: keyof T) => {
@@ -964,6 +968,16 @@ export function NutriOSApp({
     setNotice(error ? error.message : "Sesion iniciada.");
   }
 
+  useEffect(() => {
+    if (!notice) return;
+
+    const timer = window.setTimeout(() => {
+      setNotice("");
+    }, 5200);
+
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
   async function handlePasswordRecovery() {
     if (!supabase) return;
     setNotice("");
@@ -1090,12 +1104,14 @@ export function NutriOSApp({
                 return (
                   <button
                     key={tab.id}
-                    className={`flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${
+                    type="button"
+                    className={`inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-black shadow-sm transition lg:w-full lg:justify-start ${
                       active
-                        ? "bg-[var(--tenant-color)] text-white"
-                        : "text-[#4a554f] hover:bg-white"
+                        ? "border-[var(--tenant-color)] bg-[var(--tenant-color)] text-white shadow-md"
+                        : "border-[var(--line)] bg-white/85 text-[#39433f] hover:border-[var(--tenant-color)] hover:bg-white"
                     }`}
                     onClick={() => setActiveTab(tab.id)}
+                    aria-current={active ? "page" : undefined}
                   >
                     <Icon className="size-4" />
                     {role === "patient" && tab.id === "patients"
@@ -1114,32 +1130,28 @@ export function NutriOSApp({
           />
         </aside>
 
-        <section className="min-w-0 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+        <section className="min-w-0 overflow-x-hidden px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
           <Header tenant={tenant} role={role} selectedPatient={selectedPatient} />
           {workspaceError && (
             <div className="mt-5 rounded-lg border border-[#e8d9aa] bg-[#fff8df] px-4 py-3 text-sm text-[#6b5420]">
               {workspaceError}
             </div>
           )}
-          {notice && (
-            <div className="mt-5 rounded-lg border border-[#bee4d7] bg-[#effaf5] px-4 py-3 text-sm text-[#255d50]">
-              {notice}
-            </div>
+          {showGoalsPanel && (
+            <GoalsPanel
+              tenant={tenant}
+              selectedPatient={selectedPatient}
+              goals={goals}
+              weights={weights}
+              steps={steps}
+              exercises={exercises}
+              goalLogs={goalLogs}
+            />
           )}
-          <GoalsPanel
-            tenant={tenant}
-            selectedPatient={selectedPatient}
-            goals={goals}
-            weights={weights}
-            steps={steps}
-            exercises={exercises}
-            goalLogs={goalLogs}
-          />
 
           <div className="mt-5">
             {activeTab === "patients" && (
               <PatientsPanel
-                tenant={tenant}
                 role={role}
                 patients={patients}
                 pendingInvitations={pendingInvitations}
@@ -1171,6 +1183,11 @@ export function NutriOSApp({
                 onNotice={setNotice}
                 onReload={loadWorkspace}
               />
+            )}
+            {activeTab === "goals" && role === "patient" && (
+              <div className="sr-only" aria-live="polite">
+                Objetivos de hoy visibles.
+              </div>
             )}
             {activeTab === "data-entry" && role === "patient" && (
               <DataEntryPanel
@@ -1237,14 +1254,18 @@ export function NutriOSApp({
               <SettingsPanel
                 tenant={tenant}
                 role={role}
+                pendingInvitations={pendingInvitations}
                 supabase={supabase}
                 onTenant={setTenant}
                 onNotice={setNotice}
+                onReload={loadWorkspace}
               />
             )}
           </div>
+          <AppFooter />
         </section>
       </div>
+      {notice && <NoticeToast message={notice} onClose={() => setNotice("")} />}
     </main>
   );
 }
@@ -1859,20 +1880,14 @@ function Header({
 }) {
   return (
     <header className="flex flex-col gap-4">
-      <div className="flex justify-end sm:hidden">
-        <HeaderLogoWithSlogan />
-      </div>
       <div className="flex items-start justify-between gap-8">
         <div className="min-w-0">
           <p className="text-sm font-semibold uppercase text-[var(--tenant-color)]">
             {role === "patient" ? "Area paciente" : "Panel nutricionista"}
           </p>
-          <h1 className="mt-1 truncate text-2xl font-black tracking-normal text-[#17201d] sm:text-3xl">
+          <h1 className="mt-1 break-words text-xl font-black tracking-normal text-[#17201d] sm:text-3xl">
             {selectedPatient ? selectedPatient.full_name : tenant.name}
           </h1>
-        </div>
-        <div className="hidden shrink-0 sm:block">
-          <HeaderLogoWithSlogan />
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 sm:justify-end">
@@ -1883,15 +1898,48 @@ function Header({
   );
 }
 
-function HeaderLogoWithSlogan() {
+function AppFooter() {
   return (
-    <div className="ml-auto flex items-center justify-end">
+    <footer className="mt-8 flex flex-col gap-3 border-t border-[var(--line)] py-5 text-sm text-[var(--muted)] sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p className="font-semibold text-[#39433f]">
+          © 2026 EgmAnalytics. Todos los derechos reservados.
+        </p>
+        <p className="mt-1">DietDesk es propiedad de EgmAnalytics.</p>
+      </div>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={APP_LOGO_WITH_SLOGAN_SRC}
         alt="DietDesk. Menos gestion. Mas nutricion."
-        className="h-auto w-[min(82vw,20rem)] select-none object-contain object-right sm:w-72 lg:w-80"
+        className="h-auto w-44 select-none object-contain sm:w-56"
       />
+    </footer>
+  );
+}
+
+function NoticeToast({
+  message,
+  onClose,
+}: {
+  message: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-x-3 top-3 z-50 mx-auto max-w-md rounded-lg border border-[#bee4d7] bg-[#effaf5] p-3 text-sm text-[#255d50] shadow-[0_18px_50px_rgba(36,45,42,0.18)] sm:inset-x-auto sm:right-5 sm:top-5">
+      <div className="flex items-start gap-3">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#dcefe7] text-[var(--tenant-color)]">
+          <Check className="size-4" />
+        </span>
+        <p className="min-w-0 flex-1 pt-1 font-semibold leading-5">{message}</p>
+        <button
+          type="button"
+          className="grid size-8 shrink-0 place-items-center rounded-lg text-[#255d50] hover:bg-white/70"
+          onClick={onClose}
+          aria-label="Cerrar aviso"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -1942,7 +1990,6 @@ function PatientSwitcher({
 }
 
 function PatientsPanel({
-  tenant,
   role,
   patients,
   pendingInvitations,
@@ -1953,7 +2000,6 @@ function PatientsPanel({
   onReload,
   supabase,
 }: {
-  tenant: Tenant;
   role: UserRole | null;
   patients: Patient[];
   pendingInvitations: PendingInvitation[];
@@ -1964,11 +2010,6 @@ function PatientsPanel({
   onReload: () => Promise<void>;
   supabase: ReturnType<typeof createSupabaseBrowser>;
 }) {
-  const [inviteDraft, setInviteDraft, clearInviteDraft] = useStoredDraft(
-    `nutrios:draft:invite:${tenant.id}`,
-    { email: "" },
-  );
-  const [manualInviteLink, setManualInviteLink] = useState("");
   const [patientView, setPatientView] = useState<PatientListView>("active");
   const activePatients = patients.filter(isActivePatient);
   const inactivePatients = patients.filter(isInactivePatient);
@@ -1979,49 +2020,6 @@ function PatientsPanel({
   const currentBmi = selectedPatient
     ? calculateBmi(currentWeight, selectedPatient.height_cm)
     : null;
-
-  async function invitePatient(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!supabase) {
-      onNotice("Modo demo: conecta Supabase para enviar invitaciones reales.");
-      return;
-    }
-
-    const accessToken = await getCurrentAccessToken(supabase);
-    if (!accessToken) {
-      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
-      return;
-    }
-
-    setManualInviteLink("");
-    const response = await fetch("/api/invitations/create", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        email: inviteDraft.email,
-        tenantId: tenant.id,
-        tenantSlug: tenant.slug,
-      }),
-    });
-
-    const payload = (await response.json()) as CreateInvitationResponse;
-    if (!response.ok) {
-      onNotice(payload.error ?? "No se pudo enviar la invitacion.");
-      return;
-    }
-
-    clearInviteDraft();
-    if (payload.delivery === "manual_link" && payload.actionLink) {
-      setManualInviteLink(payload.actionLink);
-      onNotice(payload.warning ?? "Invitacion creada con enlace manual.");
-    } else {
-      onNotice("Invitacion enviada al paciente.");
-    }
-    await onReload();
-  }
 
   async function updatePatientStatus(patient: Patient, status: "active" | "inactive") {
     if (!supabase) {
@@ -2063,16 +2061,6 @@ function PatientsPanel({
     await onReload();
   }
 
-  async function copyManualInviteLink() {
-    if (!manualInviteLink) return;
-    try {
-      await navigator.clipboard.writeText(manualInviteLink);
-      onNotice("Enlace copiado.");
-    } catch {
-      onNotice("No se pudo copiar automaticamente. Selecciona el enlace y copialo manualmente.");
-    }
-  }
-
   if (role === "patient") {
     return (
       <div className="grid gap-4 lg:grid-cols-4">
@@ -2098,56 +2086,8 @@ function PatientsPanel({
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
+    <div className="grid gap-5">
       <Panel>
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-black">Alta de cliente</h2>
-          <UserPlus className="size-5 text-[var(--tenant-color)]" />
-        </div>
-        <form className="mt-5 space-y-3" onSubmit={invitePatient}>
-          <Field
-            label="Correo electronico"
-            type="email"
-            value={inviteDraft.email}
-            onChange={(value) =>
-              setInviteDraft((current) => ({ ...current, email: value }))
-            }
-            required
-          />
-          <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
-            <Send className="size-4" />
-            Enviar invitacion
-          </button>
-        </form>
-        <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
-          El cliente completara su ficha al aceptar la invitacion. El ID interno y la fecha de registro se generan automaticamente.
-        </p>
-        {manualInviteLink && (
-          <div className="mt-4 rounded-lg border border-[#e8d9aa] bg-[#fff8df] p-3">
-            <p className="text-sm font-semibold text-[#6b5420]">
-              Enlace manual de invitacion. Envia este enlace al cliente para completar el alta.
-            </p>
-            <div className="mt-3 flex gap-2">
-              <input
-                className="h-10 min-w-0 flex-1 rounded-lg border border-[#e8d9aa] bg-white px-3 text-xs text-[#3f3724]"
-                value={manualInviteLink}
-                readOnly
-                onFocus={(event) => event.currentTarget.select()}
-              />
-              <button
-                type="button"
-                className="grid size-10 shrink-0 place-items-center rounded-lg bg-[var(--tenant-color)] text-white"
-                onClick={copyManualInviteLink}
-                title="Copiar enlace"
-              >
-                <Copy className="size-4" />
-              </button>
-            </div>
-          </div>
-        )}
-      </Panel>
-
-      <Panel className="xl:col-span-1">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="text-lg font-black">
             {patientView === "active" && "Clientes"}
@@ -2216,6 +2156,154 @@ function PatientsPanel({
         weights={selectedPatientWeights}
       />
     </div>
+  );
+}
+
+function InvitationPanel({
+  tenant,
+  pendingInvitations,
+  supabase,
+  onNotice,
+  onReload,
+}: {
+  tenant: Tenant;
+  pendingInvitations: PendingInvitation[];
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const [inviteDraft, setInviteDraft, clearInviteDraft] = useStoredDraft(
+    `nutrios:draft:invite:${tenant.id}`,
+    { email: "" },
+  );
+  const [manualInviteLink, setManualInviteLink] = useState("");
+  const [sendingInvite, setSendingInvite] = useState(false);
+
+  async function invitePatient(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (sendingInvite) return;
+
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para enviar invitaciones reales.");
+      return;
+    }
+
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) {
+      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+      return;
+    }
+
+    setSendingInvite(true);
+    setManualInviteLink("");
+
+    try {
+      const response = await fetch("/api/invitations/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          email: inviteDraft.email,
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+        }),
+      });
+
+      const payload = (await response.json()) as CreateInvitationResponse;
+      if (!response.ok) {
+        onNotice(payload.error ?? "No se pudo enviar la invitacion.");
+        return;
+      }
+
+      clearInviteDraft();
+      if (payload.delivery === "manual_link" && payload.actionLink) {
+        setManualInviteLink(payload.actionLink);
+        onNotice(payload.warning ?? "Invitacion creada con enlace manual.");
+      } else {
+        onNotice("Invitacion enviada al paciente.");
+      }
+      await onReload();
+    } finally {
+      setSendingInvite(false);
+    }
+  }
+
+  async function copyManualInviteLink() {
+    if (!manualInviteLink) return;
+    try {
+      await navigator.clipboard.writeText(manualInviteLink);
+      onNotice("Enlace copiado.");
+    } catch {
+      onNotice("No se pudo copiar automaticamente. Selecciona el enlace y copialo manualmente.");
+    }
+  }
+
+  return (
+    <Panel>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-black sm:text-lg">Dar de alta cliente</h2>
+        <UserPlus className="size-5 text-[var(--tenant-color)]" />
+      </div>
+      <form className="mt-5 space-y-3" onSubmit={invitePatient}>
+        <Field
+          label="Correo electronico"
+          type="email"
+          value={inviteDraft.email}
+          onChange={(value) =>
+            setInviteDraft((current) => ({ ...current, email: value }))
+          }
+          required
+        />
+        <button
+          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
+          disabled={sendingInvite}
+        >
+          {sendingInvite ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Send className="size-4" />
+          )}
+          {sendingInvite ? "Enviando..." : "Enviar invitacion"}
+        </button>
+      </form>
+      <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
+        El cliente completara su ficha al aceptar la invitacion. El ID interno y la fecha de registro se generan automaticamente.
+      </p>
+      {manualInviteLink && (
+        <div className="mt-4 rounded-lg border border-[#e8d9aa] bg-[#fff8df] p-3">
+          <p className="text-sm font-semibold text-[#6b5420]">
+            Enlace manual de invitacion. Envia este enlace al cliente para completar el alta.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <input
+              className="h-10 min-w-0 flex-1 rounded-lg border border-[#e8d9aa] bg-white px-3 text-xs text-[#3f3724]"
+              value={manualInviteLink}
+              readOnly
+              onFocus={(event) => event.currentTarget.select()}
+            />
+            <button
+              type="button"
+              className="grid size-10 shrink-0 place-items-center rounded-lg bg-[var(--tenant-color)] text-white"
+              onClick={copyManualInviteLink}
+              title="Copiar enlace"
+            >
+              <Copy className="size-4" />
+            </button>
+          </div>
+        </div>
+      )}
+      {pendingInvitations.length > 0 && (
+        <div className="mt-5">
+          <p className="mb-2 text-sm font-black">Invitaciones pendientes</p>
+          <PendingInvitationList
+            invitations={pendingInvitations}
+            onNotice={onNotice}
+          />
+        </div>
+      )}
+    </Panel>
   );
 }
 
@@ -3286,8 +3374,9 @@ function DataEntryPanel({
     useStoredValue<Record<string, string>>(
       `nutrios:draft:custom-goals:${selectedPatient?.id ?? "none"}`,
       {},
-    );
+  );
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [savingTracking, setSavingTracking] = useState(false);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const activeCustomGoals = goals
@@ -3301,151 +3390,162 @@ function DataEntryPanel({
 
   async function saveTracking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (savingTracking) return;
     if (!selectedPatient) return;
     if (!supabase) {
       onNotice("Modo demo: conecta Supabase para registrar datos reales.");
       return;
     }
 
-    const rows: PromiseLike<unknown>[] = [];
-    if (trackingDraft.weight) {
-      rows.push(
-        supabase.from("weight_logs").insert({
-          tenant_id: tenant.id,
-          patient_id: selectedPatient.id,
-          weight_kg: Number(trackingDraft.weight),
-          source: role === "patient" ? "patient" : "nutritionist",
-        }),
-      );
-      rows.push(
-        supabase
-          .from("patients")
-          .update({
-            current_weight_kg: Number(trackingDraft.weight),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", selectedPatient.id),
-      );
-    }
-    if (trackingDraft.waist) {
-      rows.push(
-        supabase.from("waist_logs").insert({
-          tenant_id: tenant.id,
-          patient_id: selectedPatient.id,
-          waist_cm: Number(trackingDraft.waist),
-        }),
-      );
-    }
-    if (trackingDraft.steps) {
-      const stepCount = Number(trackingDraft.steps);
-      if (!Number.isInteger(stepCount) || stepCount < 0 || stepCount > 200000) {
-        onNotice("Pasos no validos.");
-        return;
-      }
+    setSavingTracking(true);
 
-      rows.push(
-        supabase.from("step_logs").upsert(
-          {
+    try {
+      const rows: PromiseLike<unknown>[] = [];
+      if (trackingDraft.weight) {
+        rows.push(
+          supabase.from("weight_logs").insert({
             tenant_id: tenant.id,
             patient_id: selectedPatient.id,
-            steps: stepCount,
-            logged_on: getLocalDateString(),
-            source: "patient",
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "patient_id,logged_on" },
-        ),
-      );
-    }
-    if (trackingDraft.exercise) {
-      rows.push(
-        supabase.from("exercise_logs").insert({
-          tenant_id: tenant.id,
-          patient_id: selectedPatient.id,
-          activity: trackingDraft.exercise,
-          duration_minutes: trackingDraft.duration
-            ? Number(trackingDraft.duration)
-            : null,
-          intensity: "normal",
-        }),
-      );
-    }
-    for (const goal of activeCustomGoals) {
-      const rawValue = customGoalDrafts[goal.id];
-      if (rawValue === undefined || rawValue === "") continue;
-
-      const inputType = getCustomGoalInputType(goal);
-      const isCheckGoal = inputType === "check";
-      const numericValue = isCheckGoal ? null : Number(rawValue);
-
-      if (!isCheckGoal && (!Number.isFinite(numericValue) || numericValue < 0)) {
-        onNotice(`Valor no valido para ${goal.title}.`);
-        return;
+            weight_kg: Number(trackingDraft.weight),
+            source: role === "patient" ? "patient" : "nutritionist",
+          }),
+        );
+        rows.push(
+          supabase
+            .from("patients")
+            .update({
+              current_weight_kg: Number(trackingDraft.weight),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", selectedPatient.id),
+        );
       }
-
-      const status = isCheckGoal
-        ? (rawValue as GoalStatus)
-        : deriveNumericCustomGoalStatus(goal, numericValue);
-
-      rows.push(
-        supabase.from("patient_goal_logs").upsert(
-          {
+      if (trackingDraft.waist) {
+        rows.push(
+          supabase.from("waist_logs").insert({
             tenant_id: tenant.id,
             patient_id: selectedPatient.id,
-            goal_id: goal.id,
-            logged_on: getLocalDateString(),
-            status,
-            value: numericValue,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "goal_id,logged_on" },
-        ),
-      );
-    }
+            waist_cm: Number(trackingDraft.waist),
+          }),
+        );
+      }
+      if (trackingDraft.steps) {
+        const stepCount = Number(trackingDraft.steps);
+        if (!Number.isInteger(stepCount) || stepCount < 0 || stepCount > 200000) {
+          onNotice("Pasos no validos.");
+          return;
+        }
 
-    const trackingResults = await Promise.all(rows);
-    const trackingError = findSupabaseResponseError(trackingResults);
-    if (trackingError) {
-      onNotice(trackingError);
-      return;
-    }
+        rows.push(
+          supabase.from("step_logs").upsert(
+            {
+              tenant_id: tenant.id,
+              patient_id: selectedPatient.id,
+              steps: stepCount,
+              logged_on: getLocalDateString(),
+              source: "patient",
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "patient_id,logged_on" },
+          ),
+        );
+      }
+      if (trackingDraft.exercise) {
+        rows.push(
+          supabase.from("exercise_logs").insert({
+            tenant_id: tenant.id,
+            patient_id: selectedPatient.id,
+            activity: trackingDraft.exercise,
+            duration_minutes: trackingDraft.duration
+              ? Number(trackingDraft.duration)
+              : null,
+            intensity: "normal",
+          }),
+        );
+      }
+      for (const goal of activeCustomGoals) {
+        const rawValue = customGoalDrafts[goal.id];
+        if (rawValue === undefined || rawValue === "") continue;
 
-    if (photoFile) {
-      const loggedAt = new Date().toISOString();
-      const photoDay = getLocalDateString(new Date(loggedAt));
-      const photoTimestamp = loggedAt.replace(/\D/g, "");
-      const path = `${tenant.id}/${selectedPatient.id}/meal-photos/${photoDay}/${photoTimestamp}-${safeFileName(photoFile.name)}`;
-      const { error: uploadError } = await supabase.storage
-        .from("nutrios-private")
-        .upload(path, photoFile, { upsert: false });
+        const inputType = getCustomGoalInputType(goal);
+        const isCheckGoal = inputType === "check";
+        const numericValue = isCheckGoal ? null : Number(rawValue);
 
-      if (uploadError) {
-        onNotice(uploadError.message);
+        if (!isCheckGoal && (!Number.isFinite(numericValue) || numericValue < 0)) {
+          onNotice(`Valor no valido para ${goal.title}.`);
+          return;
+        }
+
+        const status = isCheckGoal
+          ? (rawValue as GoalStatus)
+          : deriveNumericCustomGoalStatus(goal, numericValue);
+
+        rows.push(
+          supabase.from("patient_goal_logs").upsert(
+            {
+              tenant_id: tenant.id,
+              patient_id: selectedPatient.id,
+              goal_id: goal.id,
+              logged_on: getLocalDateString(),
+              status,
+              value: numericValue,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "goal_id,logged_on" },
+          ),
+        );
+      }
+
+      const trackingResults = await Promise.all(rows);
+      const trackingError = findSupabaseResponseError(trackingResults);
+      if (trackingError) {
+        onNotice(trackingError);
         return;
       }
 
-      const photoInsert = await supabase.from("meal_photos").insert({
-        tenant_id: tenant.id,
-        patient_id: selectedPatient.id,
-        storage_path: path,
-        meal_type: trackingDraft.mealType,
-        notes: trackingDraft.mealNotes,
-        logged_at: loggedAt,
-      });
+      if (photoFile) {
+        const optimizedPhotoFile = await optimizeMealPhotoFile(photoFile);
+        const loggedAt = new Date().toISOString();
+        const photoDay = getLocalDateString(new Date(loggedAt));
+        const photoTimestamp = loggedAt.replace(/\D/g, "");
+        const path = `${tenant.id}/${selectedPatient.id}/meal-photos/${photoDay}/${photoTimestamp}-${safeFileName(optimizedPhotoFile.name)}`;
+        const { error: uploadError } = await supabase.storage
+          .from("nutrios-private")
+          .upload(path, optimizedPhotoFile, {
+            upsert: false,
+            contentType: optimizedPhotoFile.type || undefined,
+          });
 
-      if (photoInsert.error) {
-        onNotice(photoInsert.error.message);
-        return;
+        if (uploadError) {
+          onNotice(uploadError.message);
+          return;
+        }
+
+        const photoInsert = await supabase.from("meal_photos").insert({
+          tenant_id: tenant.id,
+          patient_id: selectedPatient.id,
+          storage_path: path,
+          meal_type: trackingDraft.mealType,
+          notes: trackingDraft.mealNotes,
+          logged_at: loggedAt,
+        });
+
+        if (photoInsert.error) {
+          onNotice(photoInsert.error.message);
+          return;
+        }
       }
-    }
 
-    clearTrackingDraft();
-    clearCustomGoalDrafts();
-    setPhotoFile(null);
-    if (galleryInputRef.current) galleryInputRef.current.value = "";
-    if (cameraInputRef.current) cameraInputRef.current.value = "";
-    onNotice("Registro actualizado.");
-    await onReload();
+      clearTrackingDraft();
+      clearCustomGoalDrafts();
+      setPhotoFile(null);
+      if (galleryInputRef.current) galleryInputRef.current.value = "";
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
+      onNotice("Registro actualizado.");
+      await onReload();
+    } finally {
+      setSavingTracking(false);
+    }
   }
 
   function updateTrackingDraft(key: keyof typeof emptyTrackingDraft, value: string) {
@@ -3574,16 +3674,18 @@ function DataEntryPanel({
             <div className="grid gap-2 sm:grid-cols-2">
               <button
                 type="button"
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-semibold text-[#39433f] transition hover:border-[var(--tenant-color)]"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-semibold text-[#39433f] transition hover:border-[var(--tenant-color)] disabled:opacity-60"
                 onClick={() => galleryInputRef.current?.click()}
+                disabled={savingTracking}
               >
                 <ImagePlus className="size-4 text-[var(--tenant-color)]" />
                 Elegir foto
               </button>
               <button
                 type="button"
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-semibold text-[#39433f] transition hover:border-[var(--tenant-color)]"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-semibold text-[#39433f] transition hover:border-[var(--tenant-color)] disabled:opacity-60"
                 onClick={() => cameraInputRef.current?.click()}
+                disabled={savingTracking}
               >
                 <Camera className="size-4 text-[var(--tenant-color)]" />
                 Abrir camara
@@ -3605,12 +3707,21 @@ function DataEntryPanel({
               onChange={(event) => setPhotoFile(event.target.files?.[0] ?? null)}
             />
             <p className="mt-2 truncate text-xs font-semibold text-[var(--muted)]">
-              {photoFile ? photoFile.name : "Sin foto seleccionada."}
+              {photoFile
+                ? `${photoFile.name} (${formatFileSize(photoFile.size)}). Se optimizará antes de subirla.`
+                : "Sin foto seleccionada."}
             </p>
           </div>
-          <button className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
-            <ImagePlus className="size-4" />
-            Guardar registro
+          <button
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
+            disabled={savingTracking}
+          >
+            {savingTracking ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <ImagePlus className="size-4" />
+            )}
+            {savingTracking ? "Guardando..." : "Guardar registro"}
           </button>
         </form>
       )}
@@ -3994,21 +4105,27 @@ function DocumentsPanel({
 function SettingsPanel({
   tenant,
   role,
+  pendingInvitations,
   supabase,
   onTenant,
   onNotice,
+  onReload,
 }: {
   tenant: Tenant;
   role: UserRole | null;
+  pendingInvitations: PendingInvitation[];
   supabase: ReturnType<typeof createSupabaseBrowser>;
   onTenant: (tenant: Tenant) => void;
   onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
 }) {
   const [name, setName] = useState(tenant.name);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState(tenant.logo_url ?? "");
   const [logoObjectUrl, setLogoObjectUrl] = useState("");
   const [primaryColor, setPrimaryColor] = useState(tenant.primary_color);
+  const [savingBrand, setSavingBrand] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     return () => {
@@ -4018,6 +4135,16 @@ function SettingsPanel({
 
   function handleLogoFileChange(file: File | null) {
     if (logoObjectUrl) URL.revokeObjectURL(logoObjectUrl);
+
+    if (file && file.size > maxLogoFileSizeBytes) {
+      setLogoFile(null);
+      setLogoObjectUrl("");
+      setLogoPreview(tenant.logo_url ?? "");
+      if (logoInputRef.current) logoInputRef.current.value = "";
+      onNotice(`El logo no puede superar ${formatFileSize(maxLogoFileSizeBytes)}.`);
+      return;
+    }
+
     setLogoFile(file);
 
     if (!file) {
@@ -4033,114 +4160,157 @@ function SettingsPanel({
 
   async function saveSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (savingBrand) return;
+
     let nextLogoUrl = tenant.logo_url;
+    setSavingBrand(true);
 
-    if (logoFile && supabase) {
-      const path = `${tenant.id}/logo-${Date.now()}-${safeFileName(logoFile.name)}`;
-      const { error: uploadError } = await supabase.storage
-        .from("nutrios-branding")
-        .upload(path, logoFile, { upsert: true });
+    try {
+      if (logoFile && supabase) {
+        const path = `${tenant.id}/logo-${Date.now()}-${safeFileName(logoFile.name)}`;
+        const { error: uploadError } = await supabase.storage
+          .from("nutrios-branding")
+          .upload(path, logoFile, {
+            upsert: true,
+            contentType: logoFile.type || undefined,
+          });
 
-      if (uploadError) {
-        onNotice(uploadError.message);
-        return;
+        if (uploadError) {
+          onNotice(uploadError.message);
+          return;
+        }
+
+        const { data } = supabase.storage.from("nutrios-branding").getPublicUrl(path);
+        nextLogoUrl = data.publicUrl;
       }
 
-      const { data } = supabase.storage.from("nutrios-branding").getPublicUrl(path);
-      nextLogoUrl = data.publicUrl;
-    }
-
-    const nextTenant = {
-      ...tenant,
-      name,
-      logo_url: nextLogoUrl,
-      primary_color: primaryColor,
-    };
-
-    if (!supabase) {
-      onTenant({
-        ...nextTenant,
-        logo_url: logoPreview || nextTenant.logo_url,
-      });
-      onNotice("Marca actualizada en modo demo.");
-      return;
-    }
-
-    const { error } = await supabase
-      .from("tenants")
-      .update({
+      const nextTenant = {
+        ...tenant,
         name,
         logo_url: nextLogoUrl,
         primary_color: primaryColor,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", tenant.id);
+      };
 
-    if (error) {
-      onNotice(error.message);
-      return;
+      if (!supabase) {
+        onTenant({
+          ...nextTenant,
+          logo_url: logoPreview || nextTenant.logo_url,
+        });
+        onNotice("Marca actualizada en modo demo.");
+        return;
+      }
+
+      const { error } = await supabase
+        .from("tenants")
+        .update({
+          name,
+          logo_url: nextLogoUrl,
+          primary_color: primaryColor,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", tenant.id);
+
+      if (error) {
+        onNotice(error.message);
+        return;
+      }
+
+      onTenant(nextTenant);
+      setLogoFile(null);
+      if (logoObjectUrl) URL.revokeObjectURL(logoObjectUrl);
+      setLogoObjectUrl("");
+      setLogoPreview(nextLogoUrl ?? "");
+      onNotice("Personalizacion guardada.");
+    } finally {
+      setSavingBrand(false);
     }
-
-    onTenant(nextTenant);
-    setLogoFile(null);
-    if (logoObjectUrl) URL.revokeObjectURL(logoObjectUrl);
-    setLogoObjectUrl("");
-    setLogoPreview(nextLogoUrl ?? "");
-    onNotice("Personalizacion guardada.");
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
       {role !== "patient" && (
-        <Panel>
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-black">Personalizar mi {APP_NAME}</h2>
-            <Palette className="size-5 text-[var(--tenant-color)]" />
-          </div>
-          <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={saveSettings}>
-            <Field label="Nombre visible" value={name} onChange={setName} required />
-            <label className="block">
-              <span className="mb-1 block text-sm font-semibold text-[#39433f]">Logo</span>
-              <div className="flex min-h-24 items-center gap-4 rounded-lg border border-[var(--line)] bg-white p-3">
-                <div className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-lg bg-[var(--tenant-color)] text-xl font-black text-white">
-                  {logoPreview ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={logoPreview} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={APP_ICON_SRC} alt="" className="h-full w-full object-contain bg-white p-2" />
-                  )}
-                </div>
-                <input
-                  className="block min-w-0 flex-1 text-sm"
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                  onChange={(event) =>
-                    handleLogoFileChange(event.target.files?.[0] ?? null)
-                  }
-                />
-              </div>
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-sm font-semibold text-[#39433f]">Color principal</span>
-              <div className="flex h-11 items-center gap-3 rounded-lg border border-[var(--line)] bg-white px-3">
-                <input
-                  type="color"
-                  value={primaryColor}
-                  onChange={(event) => setPrimaryColor(event.target.value)}
-                  className="size-7 rounded border-0 bg-transparent p-0"
-                />
-                <span className="text-sm font-semibold">{primaryColor}</span>
-              </div>
-            </label>
-            <div className="lg:col-span-2">
-              <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
-                <Upload className="size-4" />
-                Guardar personalizacion
-              </button>
+        <div className="grid min-w-0 gap-5">
+          <InvitationPanel
+            tenant={tenant}
+            pendingInvitations={pendingInvitations}
+            supabase={supabase}
+            onNotice={onNotice}
+            onReload={onReload}
+          />
+          <Panel>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-black sm:text-lg">Personalizar mi {APP_NAME}</h2>
+              <Palette className="size-5 text-[var(--tenant-color)]" />
             </div>
-          </form>
-        </Panel>
+            <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={saveSettings}>
+              <Field label="Nombre visible" value={name} onChange={setName} required />
+              <label className="block min-w-0 lg:col-span-2">
+                <span className="mb-1 block text-sm font-semibold text-[#39433f]">Logo</span>
+                <div className="grid gap-3 rounded-lg border border-[var(--line)] bg-white p-3 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
+                  <div className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-lg bg-[var(--tenant-color)] text-xl font-black text-white">
+                    {logoPreview ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={logoPreview} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={APP_ICON_SRC} alt="" className="h-full w-full object-contain bg-white p-2" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <button
+                      type="button"
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-[#fbfaf6] px-4 text-sm font-black text-[#39433f] hover:border-[var(--tenant-color)]"
+                      onClick={() => logoInputRef.current?.click()}
+                    >
+                      <Upload className="size-4 text-[var(--tenant-color)]" />
+                      Seleccionar logo
+                    </button>
+                    <input
+                      ref={logoInputRef}
+                      className="sr-only"
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                      onChange={(event) =>
+                        handleLogoFileChange(event.target.files?.[0] ?? null)
+                      }
+                    />
+                    <p className="mt-2 text-xs font-semibold text-[var(--muted)]">
+                      PNG, JPG, WebP o SVG. Máximo {formatFileSize(maxLogoFileSizeBytes)}.
+                    </p>
+                    <p className="mt-1 truncate text-xs text-[var(--muted)]">
+                      {logoFile ? `${logoFile.name} (${formatFileSize(logoFile.size)})` : "Sin archivo nuevo seleccionado."}
+                    </p>
+                  </div>
+                </div>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-sm font-semibold text-[#39433f]">Color principal</span>
+                <div className="flex h-11 items-center gap-3 rounded-lg border border-[var(--line)] bg-white px-3">
+                  <input
+                    type="color"
+                    value={primaryColor}
+                    onChange={(event) => setPrimaryColor(event.target.value)}
+                    className="size-7 rounded border-0 bg-transparent p-0"
+                  />
+                  <span className="text-sm font-semibold">{primaryColor}</span>
+                </div>
+              </label>
+              <div className="lg:col-span-2">
+                <button
+                  className="inline-flex h-11 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
+                  disabled={savingBrand}
+                >
+                  {savingBrand ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Upload className="size-4" />
+                  )}
+                  {savingBrand ? "Guardando..." : "Guardar personalizacion"}
+                </button>
+              </div>
+            </form>
+          </Panel>
+        </div>
       )}
 
       <AccountSecurityPanel
@@ -4202,7 +4372,7 @@ function AccountSecurityPanel({
   return (
     <Panel className={className}>
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-black">Configuración</h2>
+        <h2 className="text-base font-black sm:text-lg">Cambiar mi contraseña</h2>
         <KeyRound className="size-5 text-[var(--tenant-color)]" />
       </div>
       <form className="mt-5 space-y-4" onSubmit={updatePassword}>
@@ -4240,7 +4410,7 @@ function Panel({
   className?: string;
 }) {
   return (
-    <section className={`rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-[var(--shadow-soft)] sm:p-5 ${className}`}>
+    <section className={`min-w-0 rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-[var(--shadow-soft)] sm:p-5 ${className}`}>
       {children}
     </section>
   );
@@ -4874,6 +5044,11 @@ function formatInteger(value: number | string) {
   return Number(value).toLocaleString("es-ES", { maximumFractionDigits: 0 });
 }
 
+function formatFileSize(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function getLocalDateString(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -5032,4 +5207,57 @@ function safeFileName(name: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9.\-_]/g, "-")
     .replace(/-+/g, "-");
+}
+
+async function optimizeMealPhotoFile(file: File) {
+  if (!file.type.startsWith("image/") || file.type === "image/svg+xml") {
+    return file;
+  }
+
+  const imageUrl = URL.createObjectURL(file);
+
+  try {
+    const image = await loadImageElement(imageUrl);
+    const scale = Math.min(
+      1,
+      maxMealPhotoDimension / Math.max(image.naturalWidth, image.naturalHeight),
+    );
+
+    if (scale >= 1 && file.size <= 900 * 1024) return file;
+
+    const width = Math.max(1, Math.round(image.naturalWidth * scale));
+    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+
+    const context = canvas.getContext("2d");
+    if (!context) return file;
+
+    context.drawImage(image, 0, 0, width, height);
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", mealPhotoQuality);
+    });
+
+    if (!blob || blob.size >= file.size) return file;
+
+    const baseName = file.name.replace(/\.[^.]+$/, "");
+    return new File([blob], `${baseName || "foto-comida"}.jpg`, {
+      type: "image/jpeg",
+      lastModified: Date.now(),
+    });
+  } catch {
+    return file;
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
+
+function loadImageElement(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("No se pudo preparar la imagen."));
+    image.src = src;
+  });
 }
