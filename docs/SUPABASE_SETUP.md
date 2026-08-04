@@ -15,11 +15,16 @@ SUPABASE_SERVICE_ROLE_KEY=...
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 NUTRIOS_ROOT_DOMAIN=tuapp.com
 NUTRIOS_DEFAULT_TENANT_SLUG=maria
+RESEND_API_KEY=...
+SUPPORT_FROM_EMAIL="DietDesk <soporte@tu-dominio.com>"
+SUPPORT_TO_EMAIL=ej.egmanalytics@gmail.com
 ```
 
 La `service_role key` solo debe existir en servidor. No la pongas nunca en codigo cliente ni en variables que empiecen por `NEXT_PUBLIC_`.
 
 `NEXT_PUBLIC_SUPABASE_URL` debe ser la URL base del proyecto. No anadas `/rest/v1` y no pongas comentarios al final de la linea.
+
+Para el boton de asistencia tecnica necesitas una cuenta de Resend y un dominio/remitente validado. `SUPPORT_TO_EMAIL` es opcional si se mantiene `ej.egmanalytics@gmail.com`.
 
 ## 2. Crear tablas, seguridad y Storage
 

@@ -38,7 +38,7 @@ export async function getPublicAppOrigin(request: Request) {
   return `${protocol}://${host}`;
 }
 
-async function readRuntimeEnv(name: string) {
+export async function readRuntimeEnv(name: string) {
   if (process.env[name]) return process.env[name];
 
   try {

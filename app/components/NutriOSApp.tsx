@@ -17,6 +17,7 @@ import {
   Frown,
   ImagePlus,
   KeyRound,
+  LifeBuoy,
   Loader2,
   Meh,
   LogOut,
@@ -277,6 +278,11 @@ type UpdatePatientStatusResponse = {
   ok?: boolean;
   patientName?: string;
   status?: "active" | "inactive";
+};
+
+type SupportRequestResponse = {
+  error?: string;
+  ok?: boolean;
 };
 
 const tabs: Array<{
@@ -4417,12 +4423,161 @@ function SettingsPanel({
         </div>
       )}
 
-      <AccountSecurityPanel
-        supabase={supabase}
-        onNotice={onNotice}
-        className={role === "patient" ? "xl:col-span-2" : ""}
-      />
+      <div className={`grid min-w-0 gap-5 ${role === "patient" ? "xl:col-span-2" : ""}`}>
+        <AccountSecurityPanel
+          supabase={supabase}
+          onNotice={onNotice}
+        />
+        <TechnicalSupportPanel
+          tenant={tenant}
+          supabase={supabase}
+          onNotice={onNotice}
+        />
+      </div>
     </div>
+  );
+}
+
+function TechnicalSupportPanel({
+  tenant,
+  supabase,
+  onNotice,
+}: {
+  tenant: Tenant;
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [supportName, setSupportName] = useState("");
+  const [supportEmail, setSupportEmail] = useState("");
+  const [supportSubject, setSupportSubject] = useState("");
+  const [supportMessage, setSupportMessage] = useState("");
+  const [sendingSupport, setSendingSupport] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadUser() {
+      if (!supabase) return;
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!isMounted || !user) return;
+      setSupportEmail((current) => current || user.email || "");
+      setSupportName((current) => {
+        const metadataName =
+          typeof user.user_metadata?.full_name === "string"
+            ? user.user_metadata.full_name
+            : "";
+        return current || metadataName;
+      });
+    }
+
+    void loadUser();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [supabase]);
+
+  async function sendSupportRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (sendingSupport) return;
+
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para enviar asistencia tecnica.");
+      return;
+    }
+
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) {
+      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+      return;
+    }
+
+    setSendingSupport(true);
+    const response = await fetch("/api/support/request", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        tenantId: tenant.id,
+        name: supportName,
+        email: supportEmail,
+        subject: supportSubject,
+        message: supportMessage,
+      }),
+    });
+
+    const payload = (await response.json()) as SupportRequestResponse;
+    setSendingSupport(false);
+
+    if (!response.ok) {
+      onNotice(payload.error ?? "No se pudo enviar la incidencia.");
+      return;
+    }
+
+    setSupportSubject("");
+    setSupportMessage("");
+    setIsOpen(false);
+    onNotice("Incidencia enviada a asistencia tecnica.");
+  }
+
+  return (
+    <Panel>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-black sm:text-lg">Asistencia tecnica</h2>
+        <LifeBuoy className="size-5 text-[var(--tenant-color)]" />
+      </div>
+      <button
+        type="button"
+        className="mt-5 inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-black text-[#39433f] hover:border-[var(--tenant-color)]"
+        onClick={() => setIsOpen((current) => !current)}
+      >
+        <LifeBuoy className="size-4 text-[var(--tenant-color)]" />
+        {isOpen ? "Cerrar asistencia" : "Solicitar asistencia"}
+      </button>
+
+      {isOpen && (
+        <form className="mt-5 space-y-4" onSubmit={sendSupportRequest}>
+          <Field label="Nombre" value={supportName} onChange={setSupportName} required />
+          <Field
+            label="Correo electronico"
+            type="email"
+            value={supportEmail}
+            onChange={setSupportEmail}
+            required
+          />
+          <Field label="Asunto" value={supportSubject} onChange={setSupportSubject} required />
+          <label className="block">
+            <span className="mb-1 block text-sm font-semibold text-[#39433f]">
+              Incidencia
+            </span>
+            <textarea
+              className="min-h-32 w-full resize-y rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm"
+              value={supportMessage}
+              onChange={(event) => setSupportMessage(event.target.value)}
+              required
+            />
+          </label>
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white disabled:opacity-60"
+            disabled={sendingSupport}
+          >
+            {sendingSupport ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Send className="size-4" />
+            )}
+            {sendingSupport ? "Enviando..." : "Enviar incidencia"}
+          </button>
+        </form>
+      )}
+    </Panel>
   );
 }
 
@@ -4973,6 +5128,10 @@ function formatCustomGoalValue(value: number, inputType: CustomGoalInputType) {
 }
 
 function deriveNumericCustomGoalStatus(goal: PatientGoal, value: number | null) {
+  if (getCustomGoalInputType(goal) === "sleep_hours") {
+    return deriveSleepGoalStatus(goal, value);
+  }
+
   const amount = Number(value ?? 0);
   const target = Number(goal.target_value) || 0;
 
@@ -5003,6 +5162,15 @@ function evaluateCustomGoalStatus(
 
   const value = Number(goalLog.value ?? 0);
   const target = Number(goal.target_value) || 0;
+
+  if (inputType === "sleep_hours") {
+    const status = deriveSleepGoalStatus(goal, value);
+    return {
+      status,
+      detail: getSleepGoalStatusMessage(status),
+    };
+  }
+
   const status = deriveNumericCustomGoalStatus(goal, value);
   const valueLabel = formatCustomGoalValue(value, inputType);
   const targetLabel = target
@@ -5013,6 +5181,28 @@ function evaluateCustomGoalStatus(
     status,
     detail: targetLabel ? `${valueLabel} de ${targetLabel}` : valueLabel,
   };
+}
+
+function deriveSleepGoalStatus(goal: PatientGoal, value: number | null): GoalStatus {
+  const hours = Number(value ?? 0);
+  const target = Number(goal.target_value) || 0;
+
+  if (hours < 5) return "not_fulfilled";
+
+  if (target > 0) {
+    const fulfillmentRatio = hours / target;
+    if (fulfillmentRatio >= 0.55 && fulfillmentRatio < 0.95) {
+      return "in_progress";
+    }
+  }
+
+  return "fulfilled";
+}
+
+function getSleepGoalStatusMessage(status: GoalStatus) {
+  if (status === "not_fulfilled") return "Echate una siesta";
+  if (status === "in_progress") return "Casi lo conseguiste";
+  return "Conseguido";
 }
 
 function getLogDateKey(value: string) {
