@@ -30,7 +30,8 @@ Para el boton de asistencia tecnica necesitas una cuenta de Resend y un dominio/
 
 1. Abre `SQL Editor` en Supabase.
 2. Copia y ejecuta el contenido de `supabase/migrations/202607300001_initial_nutrios_schema.sql`.
-3. La migracion crea:
+3. Ejecuta tambien las migraciones posteriores en orden, incluida `supabase/migrations/202608040001_appointments_calendar.sql` para activar Agenda y Citas.
+4. La migracion inicial crea:
    - tenants para cada nutricionista.
    - perfiles y roles.
    - pacientes.

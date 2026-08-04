@@ -5,12 +5,14 @@ import {
   Activity,
   Archive,
   Bell,
+  Ban,
   BookOpen,
   CalendarDays,
   Camera,
   Check,
   ChevronRight,
   ClipboardList,
+  Clock,
   Copy,
   FileText,
   Footprints,
@@ -19,6 +21,7 @@ import {
   KeyRound,
   LifeBuoy,
   Loader2,
+  MapPin,
   Meh,
   LogOut,
   MessageCircle,
@@ -34,6 +37,7 @@ import {
   Trash2,
   Upload,
   UserPlus,
+  Video,
   Users,
   Weight,
   X,
@@ -168,6 +172,53 @@ type PatientGoalLog = {
   updated_at: string;
 };
 
+type AppointmentMode = "online" | "presential";
+type CalendarEventType = "appointment" | "block" | "note";
+type CalendarEventStatus = "scheduled" | "cancelled";
+
+type AppointmentAvailability = {
+  id: string;
+  tenant_id: string;
+  weekday: number;
+  start_time: string;
+  end_time: string;
+  slot_minutes: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type CalendarEvent = {
+  id: string;
+  tenant_id: string;
+  patient_id: string | null;
+  created_by: string | null;
+  title: string;
+  notes: string | null;
+  event_type: CalendarEventType;
+  appointment_mode: AppointmentMode | null;
+  blocks_availability: boolean;
+  start_at: string;
+  end_at: string;
+  status: CalendarEventStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+type AvailableAppointmentSlot = {
+  id: string;
+  dateKey: string;
+  startAt: string;
+  endAt: string;
+  label: string;
+};
+
+type CalendarBusySlot = {
+  id: string;
+  start_at: string;
+  end_at: string;
+};
+
 type MealPhoto = {
   id: string;
   patient_id: string;
@@ -244,6 +295,7 @@ type TabId =
   | "tracking"
   | "chat"
   | "documents"
+  | "agenda"
   | "settings";
 type PatientListView = "active" | "pending" | "inactive";
 
@@ -299,6 +351,7 @@ const tabs: Array<{
   { id: "stats", label: "Estadísticas", icon: Activity },
   { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "documents", label: "Documentos", icon: FileText },
+  { id: "agenda", label: "Agenda", icon: CalendarDays },
   { id: "settings", label: "Configuración", icon: SettingsIcon },
 ];
 
@@ -317,6 +370,23 @@ const mealPhotoTypes = [...mealTypes, "Snack"];
 const maxLogoFileSizeBytes = 2 * 1024 * 1024;
 const maxMealPhotoDimension = 1600;
 const mealPhotoQuality = 0.82;
+const weekdayOptions = [
+  { value: "1", label: "Lunes" },
+  { value: "2", label: "Martes" },
+  { value: "3", label: "Miercoles" },
+  { value: "4", label: "Jueves" },
+  { value: "5", label: "Viernes" },
+  { value: "6", label: "Sabado" },
+  { value: "0", label: "Domingo" },
+];
+const appointmentModeOptions: Array<{ value: AppointmentMode; label: string }> = [
+  { value: "online", label: "Online" },
+  { value: "presential", label: "Presencial" },
+];
+const calendarEventTypeOptions: Array<{ value: CalendarEventType; label: string }> = [
+  { value: "block", label: "Bloqueo" },
+  { value: "note", label: "Nota" },
+];
 
 const mealTypeOrder = new Map(mealTypes.map((mealType, index) => [mealType, index]));
 const mealPhotoTypeOrder = new Map(
@@ -571,6 +641,74 @@ const demoGoalLogs: PatientGoalLog[] = [
   },
 ];
 
+const demoAvailability: AppointmentAvailability[] = [
+  {
+    id: "availability-demo-1",
+    tenant_id: "demo-tenant",
+    weekday: 1,
+    start_time: "09:00:00",
+    end_time: "13:00:00",
+    slot_minutes: 60,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: "availability-demo-2",
+    tenant_id: "demo-tenant",
+    weekday: 3,
+    start_time: "16:00:00",
+    end_time: "20:00:00",
+    slot_minutes: 60,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+];
+
+const demoCalendarEvents: CalendarEvent[] = [
+  {
+    id: "calendar-demo-1",
+    tenant_id: "demo-tenant",
+    patient_id: "demo-patient-1",
+    created_by: "demo-nutritionist",
+    title: "Revision mensual",
+    notes: "Primera revision de progreso.",
+    event_type: "appointment",
+    appointment_mode: "online",
+    blocks_availability: true,
+    start_at: buildLocalDateTimeIso(getLocalDateString(new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)), "10:00"),
+    end_at: buildLocalDateTimeIso(getLocalDateString(new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)), "11:00"),
+    status: "scheduled",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: "calendar-demo-2",
+    tenant_id: "demo-tenant",
+    patient_id: null,
+    created_by: "demo-nutritionist",
+    title: "Gestion interna",
+    notes: "Bloque no disponible.",
+    event_type: "block",
+    appointment_mode: null,
+    blocks_availability: true,
+    start_at: buildLocalDateTimeIso(getLocalDateString(new Date(Date.now() + 4 * 24 * 60 * 60 * 1000)), "12:00"),
+    end_at: buildLocalDateTimeIso(getLocalDateString(new Date(Date.now() + 4 * 24 * 60 * 60 * 1000)), "13:00"),
+    status: "scheduled",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+];
+
+const demoBusySlots: CalendarBusySlot[] = demoCalendarEvents
+  .filter((event) => event.status === "scheduled" && event.blocks_availability)
+  .map((event) => ({
+    id: event.id,
+    start_at: event.start_at,
+    end_at: event.end_at,
+  }));
+
 const demoConversation: Conversation = {
   id: "demo-conversation",
   patient_id: "demo-patient-1",
@@ -659,6 +797,12 @@ export function NutriOSApp({
   const [steps, setSteps] = useState<StepLog[]>(demoSteps);
   const [goals, setGoals] = useState<PatientGoal[]>(demoGoals);
   const [goalLogs, setGoalLogs] = useState<PatientGoalLog[]>(demoGoalLogs);
+  const [availabilitySlots, setAvailabilitySlots] =
+    useState<AppointmentAvailability[]>(demoAvailability);
+  const [calendarEvents, setCalendarEvents] =
+    useState<CalendarEvent[]>(demoCalendarEvents);
+  const [calendarBusySlots, setCalendarBusySlots] =
+    useState<CalendarBusySlot[]>(demoBusySlots);
   const [exercises, setExercises] = useState<ExerciseLog[]>([]);
   const [mealPhotos, setMealPhotos] = useState<MealPhoto[]>([]);
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
@@ -845,12 +989,36 @@ export function NutriOSApp({
     );
 
     const patientIds = loadedPatients.map((patient) => patient.id);
+    const [availabilityRows, calendarEventRows, busySlotRows] = await Promise.all([
+      supabase
+        .from("appointment_availability")
+        .select("*")
+        .eq("tenant_id", resolvedTenant.id)
+        .order("weekday", { ascending: true })
+        .order("start_time", { ascending: true }),
+      supabase
+        .from("calendar_events")
+        .select("*")
+        .eq("tenant_id", resolvedTenant.id)
+        .order("start_at", { ascending: true }),
+      supabase.rpc("get_calendar_busy_slots", {
+        target_tenant_id: resolvedTenant.id,
+      }),
+    ]);
+
+    setAvailabilitySlots((availabilityRows.data ?? []) as AppointmentAvailability[]);
+    setCalendarEvents((calendarEventRows.data ?? []) as CalendarEvent[]);
+    setCalendarBusySlots((busySlotRows.data ?? []) as CalendarBusySlot[]);
+
     if (patientIds.length === 0) {
       setWeights([]);
       setWaists([]);
       setSteps([]);
       setGoals([]);
       setGoalLogs([]);
+      setAvailabilitySlots((availabilityRows.data ?? []) as AppointmentAvailability[]);
+      setCalendarEvents((calendarEventRows.data ?? []) as CalendarEvent[]);
+      setCalendarBusySlots((busySlotRows.data ?? []) as CalendarBusySlot[]);
       setExercises([]);
       setMealPhotos([]);
       setDocuments([]);
@@ -1156,6 +1324,12 @@ export function NutriOSApp({
               .map((tab) => {
                 const Icon = tab.icon;
                 const active = activeTab === tab.id;
+                const tabLabel =
+                  role === "patient" && tab.id === "patients"
+                    ? "Mi Ficha Personal"
+                    : role === "patient" && tab.id === "agenda"
+                      ? "Citas"
+                      : tab.label;
                 return (
                   <button
                     key={tab.id}
@@ -1169,11 +1343,7 @@ export function NutriOSApp({
                     }`}
                     onClick={(event) => handleTabClick(tab.id, event.currentTarget)}
                     aria-current={active ? "page" : undefined}
-                    title={
-                      role === "patient" && tab.id === "patients"
-                        ? "Mi Ficha Personal"
-                        : tab.label
-                    }
+                    title={tabLabel}
                   >
                     <Icon className="size-4 shrink-0" />
                     <span
@@ -1181,9 +1351,7 @@ export function NutriOSApp({
                         sidebarExpanded ? "lg:w-auto lg:opacity-100" : "lg:w-0 lg:opacity-0"
                       }`}
                     >
-                      {role === "patient" && tab.id === "patients"
-                        ? "Mi Ficha Personal"
-                        : tab.label}
+                      {tabLabel}
                     </span>
                   </button>
                 );
@@ -1314,6 +1482,20 @@ export function NutriOSApp({
                 role={role}
                 selectedPatient={selectedPatient}
                 documents={documents.filter((item) => item.patient_id === selectedPatientId)}
+                supabase={supabase}
+                onNotice={setNotice}
+                onReload={loadWorkspace}
+              />
+            )}
+            {activeTab === "agenda" && (
+              <AgendaPanel
+                tenant={tenant}
+                role={role}
+                patients={patients}
+                selectedPatient={selectedPatient}
+                availabilitySlots={availabilitySlots}
+                calendarEvents={calendarEvents}
+                calendarBusySlots={calendarBusySlots}
                 supabase={supabase}
                 onNotice={setNotice}
                 onReload={loadWorkspace}
@@ -4108,6 +4290,814 @@ function ChatPanel({
   );
 }
 
+function AgendaPanel({
+  tenant,
+  role,
+  patients,
+  selectedPatient,
+  availabilitySlots,
+  calendarEvents,
+  calendarBusySlots,
+  supabase,
+  onNotice,
+  onReload,
+}: {
+  tenant: Tenant;
+  role: UserRole | null;
+  patients: Patient[];
+  selectedPatient: Patient | null;
+  availabilitySlots: AppointmentAvailability[];
+  calendarEvents: CalendarEvent[];
+  calendarBusySlots: CalendarBusySlot[];
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const activePatients = patients.filter(isActivePatient);
+
+  if (role === "patient") {
+    return (
+      <PatientAgendaPanel
+        tenant={tenant}
+        selectedPatient={selectedPatient}
+        availabilitySlots={availabilitySlots}
+        calendarEvents={calendarEvents}
+        calendarBusySlots={calendarBusySlots}
+        supabase={supabase}
+        onNotice={onNotice}
+        onReload={onReload}
+      />
+    );
+  }
+
+  return (
+    <NutritionistAgendaPanel
+      tenant={tenant}
+      patients={activePatients}
+      selectedPatient={selectedPatient}
+      availabilitySlots={availabilitySlots}
+      calendarEvents={calendarEvents}
+      calendarBusySlots={calendarBusySlots}
+      supabase={supabase}
+      onNotice={onNotice}
+      onReload={onReload}
+    />
+  );
+}
+
+function PatientAgendaPanel({
+  tenant,
+  selectedPatient,
+  availabilitySlots,
+  calendarEvents,
+  calendarBusySlots,
+  supabase,
+  onNotice,
+  onReload,
+}: {
+  tenant: Tenant;
+  selectedPatient: Patient | null;
+  availabilitySlots: AppointmentAvailability[];
+  calendarEvents: CalendarEvent[];
+  calendarBusySlots: CalendarBusySlot[];
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const [showBooking, setShowBooking] = useState(false);
+  const [appointmentMode, setAppointmentMode] = useState<AppointmentMode>("online");
+  const [bookingSlotId, setBookingSlotId] = useState("");
+  const patientEvents = calendarEvents
+    .filter((event) => event.patient_id === selectedPatient?.id && event.status === "scheduled")
+    .sort(compareCalendarEvents);
+  const availableSlots = useMemo(
+    () => buildAvailableAppointmentSlots(availabilitySlots, calendarBusySlots, 28),
+    [availabilitySlots, calendarBusySlots],
+  );
+
+  async function bookAppointment(slot: AvailableAppointmentSlot) {
+    if (!selectedPatient) {
+      onNotice("No hay cliente seleccionado para agendar la cita.");
+      return;
+    }
+
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para agendar citas reales.");
+      return;
+    }
+
+    setBookingSlotId(slot.id);
+    const { error } = await supabase.from("calendar_events").insert({
+      tenant_id: tenant.id,
+      patient_id: selectedPatient.id,
+      title: "Cita con nutricionista",
+      event_type: "appointment",
+      appointment_mode: appointmentMode,
+      blocks_availability: true,
+      start_at: slot.startAt,
+      end_at: slot.endAt,
+      status: "scheduled",
+    });
+    setBookingSlotId("");
+
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    setShowBooking(false);
+    onNotice("Cita agendada.");
+    await onReload();
+  }
+
+  return (
+    <div className="grid gap-5">
+      <Panel>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-black">Citas</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Agenda una cita con tu nutricionista y revisa tus proximas sesiones.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white"
+            onClick={() => setShowBooking((current) => !current)}
+          >
+            <CalendarDays className="size-4" />
+            Agendar cita
+          </button>
+        </div>
+
+        {showBooking && (
+          <div className="mt-5 rounded-lg border border-[var(--line)] bg-white p-4">
+            <SelectField
+              label="Tipo de cita"
+              value={appointmentMode}
+              onChange={(value) => setAppointmentMode(value as AppointmentMode)}
+              options={appointmentModeOptions}
+            />
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {availableSlots.slice(0, 12).map((slot) => (
+                <button
+                  key={slot.id}
+                  type="button"
+                  className="rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3 text-left text-sm transition hover:border-[var(--tenant-color)] hover:bg-white disabled:opacity-60"
+                  onClick={() => bookAppointment(slot)}
+                  disabled={bookingSlotId === slot.id}
+                >
+                  <span className="block font-black text-[#24342f]">{slot.label}</span>
+                  <span className="mt-1 block text-xs font-semibold text-[var(--muted)]">
+                    {formatDate(slot.startAt)}
+                  </span>
+                </button>
+              ))}
+              {availableSlots.length === 0 && (
+                <div className="sm:col-span-2 xl:col-span-4">
+                  <EmptyState text="No hay huecos disponibles publicados ahora mismo." />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Panel>
+
+      <AgendaCalendar
+        title="Calendario"
+        events={patientEvents}
+        patients={selectedPatient ? [selectedPatient] : []}
+      />
+    </div>
+  );
+}
+
+function NutritionistAgendaPanel({
+  tenant,
+  patients,
+  selectedPatient,
+  availabilitySlots,
+  calendarEvents,
+  calendarBusySlots,
+  supabase,
+  onNotice,
+  onReload,
+}: {
+  tenant: Tenant;
+  patients: Patient[];
+  selectedPatient: Patient | null;
+  availabilitySlots: AppointmentAvailability[];
+  calendarEvents: CalendarEvent[];
+  calendarBusySlots: CalendarBusySlot[];
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const [availabilityDraft, setAvailabilityDraft] = useState({
+    weekday: "1",
+    startTime: "09:00",
+    endTime: "13:00",
+    slotMinutes: "60",
+  });
+  const [appointmentDraft, setAppointmentDraft] = useState({
+    patientId: selectedPatient?.id ?? patients[0]?.id ?? "",
+    date: getLocalDateString(),
+    startTime: "09:00",
+    durationMinutes: "60",
+    mode: "online" as AppointmentMode,
+    notes: "",
+  });
+  const [eventDraft, setEventDraft] = useState({
+    title: "",
+    date: getLocalDateString(),
+    startTime: "12:00",
+    durationMinutes: "60",
+    eventType: "block" as CalendarEventType,
+    blocksAvailability: true,
+    notes: "",
+  });
+  const [savingAgenda, setSavingAgenda] = useState(false);
+  const visibleEvents = calendarEvents
+    .filter((event) => event.status === "scheduled")
+    .sort(compareCalendarEvents);
+  const appointmentPatientId = appointmentDraft.patientId || patients[0]?.id || "";
+  const availableSlots = useMemo(
+    () => buildAvailableAppointmentSlots(availabilitySlots, calendarBusySlots, 28),
+    [availabilitySlots, calendarBusySlots],
+  );
+
+  async function saveAvailability(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para guardar disponibilidad real.");
+      return;
+    }
+
+    const slotMinutes = Number(availabilityDraft.slotMinutes);
+    if (!slotMinutes || slotMinutes < 15) {
+      onNotice("La duracion minima del hueco debe ser de 15 minutos.");
+      return;
+    }
+
+    setSavingAgenda(true);
+    const { error } = await supabase.from("appointment_availability").insert({
+      tenant_id: tenant.id,
+      weekday: Number(availabilityDraft.weekday),
+      start_time: availabilityDraft.startTime,
+      end_time: availabilityDraft.endTime,
+      slot_minutes: slotMinutes,
+      is_active: true,
+    });
+    setSavingAgenda(false);
+
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    onNotice("Disponibilidad guardada.");
+    await onReload();
+  }
+
+  async function deleteAvailability(slot: AppointmentAvailability) {
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para borrar disponibilidad real.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("appointment_availability")
+      .delete()
+      .eq("id", slot.id);
+
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    onNotice("Disponibilidad eliminada.");
+    await onReload();
+  }
+
+  async function scheduleAppointment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const patient = patients.find((item) => item.id === appointmentPatientId);
+    if (!patient) {
+      onNotice("Selecciona un cliente para agendar la cita.");
+      return;
+    }
+
+    await insertCalendarEvent({
+      tenant,
+      supabase,
+      onNotice,
+      onReload,
+      setSavingAgenda,
+      row: {
+        tenant_id: tenant.id,
+        patient_id: patient.id,
+        title: `Cita con ${patient.full_name}`,
+        notes: appointmentDraft.notes || null,
+        event_type: "appointment",
+        appointment_mode: appointmentDraft.mode,
+        blocks_availability: true,
+        start_at: buildLocalDateTimeIso(appointmentDraft.date, appointmentDraft.startTime),
+        end_at: addMinutesIso(
+          buildLocalDateTimeIso(appointmentDraft.date, appointmentDraft.startTime),
+          Number(appointmentDraft.durationMinutes) || 60,
+        ),
+        status: "scheduled",
+      },
+      successMessage: "Cita agendada.",
+    });
+  }
+
+  async function saveOtherEvent(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!eventDraft.title.trim()) {
+      onNotice("Indica un titulo para el evento.");
+      return;
+    }
+
+    await insertCalendarEvent({
+      tenant,
+      supabase,
+      onNotice,
+      onReload,
+      setSavingAgenda,
+      row: {
+        tenant_id: tenant.id,
+        patient_id: null,
+        title: eventDraft.title,
+        notes: eventDraft.notes || null,
+        event_type: eventDraft.eventType,
+        appointment_mode: null,
+        blocks_availability: eventDraft.blocksAvailability,
+        start_at: buildLocalDateTimeIso(eventDraft.date, eventDraft.startTime),
+        end_at: addMinutesIso(
+          buildLocalDateTimeIso(eventDraft.date, eventDraft.startTime),
+          Number(eventDraft.durationMinutes) || 60,
+        ),
+        status: "scheduled",
+      },
+      successMessage: "Evento guardado.",
+      afterSuccess: () =>
+        setEventDraft((current) => ({
+          ...current,
+          title: "",
+          notes: "",
+        })),
+    });
+  }
+
+  async function cancelEvent(event: CalendarEvent) {
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para cancelar eventos reales.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("calendar_events")
+      .update({ status: "cancelled" })
+      .eq("id", event.id);
+
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    onNotice("Evento cancelado.");
+    await onReload();
+  }
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="grid min-w-0 gap-5">
+        <AgendaCalendar
+          title="Agenda"
+          events={visibleEvents}
+          patients={patients}
+          onCancel={cancelEvent}
+        />
+        <Panel>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-black">Proximos huecos disponibles</h2>
+            <Clock className="size-5 text-[var(--tenant-color)]" />
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {availableSlots.slice(0, 8).map((slot) => (
+              <div
+                key={slot.id}
+                className="rounded-lg border border-[var(--line)] bg-white p-3 text-sm"
+              >
+                <p className="font-black">{slot.label}</p>
+                <p className="mt-1 text-xs font-semibold text-[var(--muted)]">
+                  {formatDate(slot.startAt)}
+                </p>
+              </div>
+            ))}
+            {availableSlots.length === 0 && (
+              <div className="sm:col-span-2 xl:col-span-4">
+                <EmptyState text="No hay huecos disponibles con la configuracion actual." />
+              </div>
+            )}
+          </div>
+        </Panel>
+      </div>
+
+      <div className="grid min-w-0 gap-5">
+        <Panel>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-black sm:text-lg">Horas disponibles</h2>
+            <CalendarDays className="size-5 text-[var(--tenant-color)]" />
+          </div>
+          <form className="mt-5 grid gap-4" onSubmit={saveAvailability}>
+            <SelectField
+              label="Dia"
+              value={availabilityDraft.weekday}
+              onChange={(value) =>
+                setAvailabilityDraft((current) => ({ ...current, weekday: value }))
+              }
+              options={weekdayOptions}
+            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field
+                label="Desde"
+                type="time"
+                value={availabilityDraft.startTime}
+                onChange={(value) =>
+                  setAvailabilityDraft((current) => ({ ...current, startTime: value }))
+                }
+                required
+              />
+              <Field
+                label="Hasta"
+                type="time"
+                value={availabilityDraft.endTime}
+                onChange={(value) =>
+                  setAvailabilityDraft((current) => ({ ...current, endTime: value }))
+                }
+                required
+              />
+            </div>
+            <Field
+              label="Duracion de cada cita (min)"
+              type="number"
+              value={availabilityDraft.slotMinutes}
+              onChange={(value) =>
+                setAvailabilityDraft((current) => ({ ...current, slotMinutes: value }))
+              }
+              required
+            />
+            <button
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
+              disabled={savingAgenda}
+            >
+              <Plus className="size-4" />
+              Guardar disponibilidad
+            </button>
+          </form>
+          <div className="mt-5 grid gap-2">
+            {availabilitySlots.filter((slot) => slot.is_active).map((slot) => (
+              <div
+                key={slot.id}
+                className="flex items-center justify-between gap-2 rounded-lg border border-[var(--line)] bg-white p-3 text-sm"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate font-black">
+                    {weekdayOptions.find((option) => option.value === String(slot.weekday))?.label}
+                  </span>
+                  <span className="text-xs text-[var(--muted)]">
+                    {formatTimeString(slot.start_time)} - {formatTimeString(slot.end_time)} · {slot.slot_minutes} min
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="grid size-9 shrink-0 place-items-center rounded-lg border border-[#efc4ba] bg-[#fff3f0] text-[#8a3327]"
+                  onClick={() => deleteAvailability(slot)}
+                  title="Eliminar disponibilidad"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
+            ))}
+            {availabilitySlots.filter((slot) => slot.is_active).length === 0 && (
+              <EmptyState text="Aun no hay disponibilidad configurada." />
+            )}
+          </div>
+        </Panel>
+
+        <Panel>
+          <h2 className="text-base font-black sm:text-lg">Agendar cita a cliente</h2>
+          <form className="mt-5 grid gap-4" onSubmit={scheduleAppointment}>
+            <SelectField
+              label="Cliente"
+              value={appointmentPatientId}
+              onChange={(value) =>
+                setAppointmentDraft((current) => ({ ...current, patientId: value }))
+              }
+              options={patients.map((patient) => ({
+                value: patient.id,
+                label: patient.full_name,
+              }))}
+            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field
+                label="Fecha"
+                type="date"
+                value={appointmentDraft.date}
+                onChange={(value) =>
+                  setAppointmentDraft((current) => ({ ...current, date: value }))
+                }
+                required
+              />
+              <Field
+                label="Hora"
+                type="time"
+                value={appointmentDraft.startTime}
+                onChange={(value) =>
+                  setAppointmentDraft((current) => ({ ...current, startTime: value }))
+                }
+                required
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <SelectField
+                label="Tipo"
+                value={appointmentDraft.mode}
+                onChange={(value) =>
+                  setAppointmentDraft((current) => ({
+                    ...current,
+                    mode: value as AppointmentMode,
+                  }))
+                }
+                options={appointmentModeOptions}
+              />
+              <Field
+                label="Duracion (min)"
+                type="number"
+                value={appointmentDraft.durationMinutes}
+                onChange={(value) =>
+                  setAppointmentDraft((current) => ({
+                    ...current,
+                    durationMinutes: value,
+                  }))
+                }
+                required
+              />
+            </div>
+            <TextArea
+              label="Notas"
+              value={appointmentDraft.notes}
+              onChange={(value) =>
+                setAppointmentDraft((current) => ({ ...current, notes: value }))
+              }
+            />
+            <button
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
+              disabled={savingAgenda}
+            >
+              <CalendarDays className="size-4" />
+              Agendar cita
+            </button>
+          </form>
+        </Panel>
+
+        <Panel>
+          <h2 className="text-base font-black sm:text-lg">Anadir bloqueo o nota</h2>
+          <form className="mt-5 grid gap-4" onSubmit={saveOtherEvent}>
+            <Field
+              label="Titulo"
+              value={eventDraft.title}
+              onChange={(value) =>
+                setEventDraft((current) => ({ ...current, title: value }))
+              }
+              required
+            />
+            <SelectField
+              label="Tipo"
+              value={eventDraft.eventType}
+              onChange={(value) =>
+                setEventDraft((current) => ({
+                  ...current,
+                  eventType: value as CalendarEventType,
+                }))
+              }
+              options={calendarEventTypeOptions}
+            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field
+                label="Fecha"
+                type="date"
+                value={eventDraft.date}
+                onChange={(value) =>
+                  setEventDraft((current) => ({ ...current, date: value }))
+                }
+                required
+              />
+              <Field
+                label="Hora"
+                type="time"
+                value={eventDraft.startTime}
+                onChange={(value) =>
+                  setEventDraft((current) => ({ ...current, startTime: value }))
+                }
+                required
+              />
+            </div>
+            <Field
+              label="Duracion (min)"
+              type="number"
+              value={eventDraft.durationMinutes}
+              onChange={(value) =>
+                setEventDraft((current) => ({ ...current, durationMinutes: value }))
+              }
+              required
+            />
+            <label className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm font-semibold text-[#39433f]">
+              <input
+                type="checkbox"
+                checked={eventDraft.blocksAvailability}
+                onChange={(event) =>
+                  setEventDraft((current) => ({
+                    ...current,
+                    blocksAvailability: event.target.checked,
+                  }))
+                }
+              />
+              Bloquear disponibilidad
+            </label>
+            <TextArea
+              label="Notas"
+              value={eventDraft.notes}
+              onChange={(value) =>
+                setEventDraft((current) => ({ ...current, notes: value }))
+              }
+            />
+            <button
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
+              disabled={savingAgenda}
+            >
+              <Plus className="size-4" />
+              Guardar evento
+            </button>
+          </form>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function AgendaCalendar({
+  title,
+  events,
+  patients,
+  onCancel,
+}: {
+  title: string;
+  events: CalendarEvent[];
+  patients: Patient[];
+  onCancel?: (event: CalendarEvent) => void;
+}) {
+  const days = getAgendaDays(14);
+  const eventsByDay = groupCalendarEventsByDay(events);
+
+  return (
+    <Panel>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-black">{title}</h2>
+        <CalendarDays className="size-5 text-[var(--tenant-color)]" />
+      </div>
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {days.map((day) => {
+          const dayEvents = eventsByDay.get(day.dateKey) ?? [];
+          return (
+            <div
+              key={day.dateKey}
+              className="min-h-36 rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-black text-[#24342f]">{day.label}</p>
+                <span className="rounded-md bg-white px-2 py-1 text-xs font-black text-[var(--muted)]">
+                  {dayEvents.length}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2">
+                {dayEvents.map((event) => (
+                  <AgendaEventCard
+                    key={event.id}
+                    event={event}
+                    patientName={getPatientName(patients, event.patient_id)}
+                    onCancel={onCancel}
+                  />
+                ))}
+                {dayEvents.length === 0 && (
+                  <p className="rounded-lg border border-dashed border-[var(--line)] bg-white/70 px-3 py-4 text-center text-xs font-semibold text-[var(--muted)]">
+                    Sin eventos
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+function AgendaEventCard({
+  event,
+  patientName,
+  onCancel,
+}: {
+  event: CalendarEvent;
+  patientName: string;
+  onCancel?: (event: CalendarEvent) => void;
+}) {
+  const meta = getCalendarEventMeta(event);
+
+  return (
+    <article className={`rounded-lg border p-3 text-sm ${meta.className}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate font-black text-[#24342f]">{event.title}</p>
+          <p className="mt-1 text-xs font-semibold text-[#4a554f]">
+            {formatAgendaTimeRange(event.start_at, event.end_at)}
+          </p>
+        </div>
+        <meta.Icon className="size-4 shrink-0 text-[var(--tenant-color)]" />
+      </div>
+      {patientName && (
+        <p className="mt-2 truncate text-xs font-semibold text-[var(--muted)]">
+          {patientName}
+        </p>
+      )}
+      {event.appointment_mode && (
+        <p className="mt-2 inline-flex rounded-md bg-white/80 px-2 py-1 text-xs font-black text-[#39433f]">
+          {formatAppointmentMode(event.appointment_mode)}
+        </p>
+      )}
+      {event.notes && <p className="mt-2 text-xs leading-5 text-[#4a554f]">{event.notes}</p>}
+      {onCancel && (
+        <button
+          type="button"
+          className="mt-3 inline-flex h-8 items-center gap-2 rounded-lg border border-[#efc4ba] bg-white px-3 text-xs font-black text-[#8a3327]"
+          onClick={() => onCancel(event)}
+        >
+          <Ban className="size-3.5" />
+          Cancelar
+        </button>
+      )}
+    </article>
+  );
+}
+
+async function insertCalendarEvent({
+  tenant,
+  supabase,
+  onNotice,
+  onReload,
+  setSavingAgenda,
+  row,
+  successMessage,
+  afterSuccess,
+}: {
+  tenant: Tenant;
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+  setSavingAgenda: (saving: boolean) => void;
+  row: Omit<CalendarEvent, "id" | "created_by" | "created_at" | "updated_at">;
+  successMessage: string;
+  afterSuccess?: () => void;
+}) {
+  if (!supabase) {
+    onNotice("Modo demo: conecta Supabase para guardar eventos reales.");
+    return;
+  }
+
+  if (new Date(row.end_at).getTime() <= new Date(row.start_at).getTime()) {
+    onNotice("La hora de fin debe ser posterior a la hora de inicio.");
+    return;
+  }
+
+  setSavingAgenda(true);
+  const { error } = await supabase.from("calendar_events").insert({
+    ...row,
+    tenant_id: tenant.id,
+  });
+  setSavingAgenda(false);
+
+  if (error) {
+    onNotice(error.message);
+    return;
+  }
+
+  afterSuccess?.();
+  onNotice(successMessage);
+  await onReload();
+}
+
 function DocumentsPanel({
   tenant,
   role,
@@ -5203,6 +6193,165 @@ function getSleepGoalStatusMessage(status: GoalStatus) {
   if (status === "not_fulfilled") return "Echate una siesta";
   if (status === "in_progress") return "Casi lo conseguiste";
   return "Conseguido";
+}
+
+function buildAvailableAppointmentSlots(
+  availabilitySlots: AppointmentAvailability[],
+  busySlots: CalendarBusySlot[],
+  daysAhead: number,
+): AvailableAppointmentSlot[] {
+  const now = Date.now();
+  const slots: AvailableAppointmentSlot[] = [];
+
+  for (let dayOffset = 0; dayOffset < daysAhead; dayOffset += 1) {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + dayOffset);
+    const dateKey = getLocalDateString(date);
+    const weekday = date.getDay();
+
+    availabilitySlots
+      .filter((slot) => slot.is_active && slot.weekday === weekday)
+      .forEach((availability) => {
+        const startMinutes = parseTimeToMinutes(availability.start_time);
+        const endMinutes = parseTimeToMinutes(availability.end_time);
+        const duration = availability.slot_minutes || 60;
+
+        for (
+          let cursor = startMinutes;
+          cursor + duration <= endMinutes;
+          cursor += duration
+        ) {
+          const startAt = buildLocalDateTimeIso(dateKey, minutesToTime(cursor));
+          const endAt = buildLocalDateTimeIso(dateKey, minutesToTime(cursor + duration));
+          const startsAtMs = new Date(startAt).getTime();
+
+          if (startsAtMs <= now + 5 * 60 * 1000) continue;
+          if (busySlots.some((busySlot) => timeRangesOverlap(startAt, endAt, busySlot.start_at, busySlot.end_at))) {
+            continue;
+          }
+
+          slots.push({
+            id: `${availability.id}-${dateKey}-${cursor}`,
+            dateKey,
+            startAt,
+            endAt,
+            label: `${formatShortWeekday(date)} ${formatTimeString(minutesToTime(cursor))}`,
+          });
+        }
+      });
+  }
+
+  return slots.sort((first, second) => first.startAt.localeCompare(second.startAt));
+}
+
+function groupCalendarEventsByDay(events: CalendarEvent[]) {
+  const grouped = new Map<string, CalendarEvent[]>();
+
+  events.forEach((event) => {
+    const dateKey = getLocalDateString(new Date(event.start_at));
+    const dayEvents = grouped.get(dateKey) ?? [];
+    dayEvents.push(event);
+    grouped.set(dateKey, dayEvents.sort(compareCalendarEvents));
+  });
+
+  return grouped;
+}
+
+function getAgendaDays(daysAhead: number) {
+  return Array.from({ length: daysAhead }, (_, index) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + index);
+    return {
+      dateKey: getLocalDateString(date),
+      label: index === 0 ? "Hoy" : formatPhotoDayLabel(getLocalDateString(date)),
+    };
+  });
+}
+
+function compareCalendarEvents(first: CalendarEvent, second: CalendarEvent) {
+  return new Date(first.start_at).getTime() - new Date(second.start_at).getTime();
+}
+
+function getPatientName(patients: Patient[], patientId: string | null) {
+  if (!patientId) return "";
+  return patients.find((patient) => patient.id === patientId)?.full_name ?? "";
+}
+
+function getCalendarEventMeta(event: CalendarEvent) {
+  if (event.event_type === "appointment") {
+    return {
+      Icon: event.appointment_mode === "online" ? Video : MapPin,
+      className: "border-[#b8dccd] bg-[#effaf5]",
+    };
+  }
+
+  if (event.event_type === "block") {
+    return {
+      Icon: Ban,
+      className: "border-[#efc4ba] bg-[#fff3f0]",
+    };
+  }
+
+  return {
+    Icon: FileText,
+    className: "border-[#d9d3c7] bg-white",
+  };
+}
+
+function formatAppointmentMode(mode: AppointmentMode) {
+  return mode === "online" ? "Online" : "Presencial";
+}
+
+function formatAgendaTimeRange(startAt: string, endAt: string) {
+  return `${formatPhotoTime(startAt)} - ${formatPhotoTime(endAt)}`;
+}
+
+function buildLocalDateTimeIso(dateKey: string, time: string) {
+  const [hours, minutes] = time.slice(0, 5).split(":").map(Number);
+  const date = new Date(`${dateKey}T00:00:00`);
+  date.setHours(hours || 0, minutes || 0, 0, 0);
+  return date.toISOString();
+}
+
+function addMinutesIso(value: string, minutes: number) {
+  return new Date(new Date(value).getTime() + minutes * 60 * 1000).toISOString();
+}
+
+function parseTimeToMinutes(value: string) {
+  const [hours, minutes] = value.slice(0, 5).split(":").map(Number);
+  return (hours || 0) * 60 + (minutes || 0);
+}
+
+function minutesToTime(totalMinutes: number) {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function formatTimeString(value: string) {
+  return value.slice(0, 5);
+}
+
+function formatShortWeekday(date: Date) {
+  return new Intl.DateTimeFormat("es-ES", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+  }).format(date);
+}
+
+function timeRangesOverlap(
+  firstStart: string,
+  firstEnd: string,
+  secondStart: string,
+  secondEnd: string,
+) {
+  return (
+    new Date(firstStart).getTime() < new Date(secondEnd).getTime() &&
+    new Date(firstEnd).getTime() > new Date(secondStart).getTime()
+  );
 }
 
 function getLogDateKey(value: string) {
