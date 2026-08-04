@@ -2,6 +2,10 @@ do $$
 declare
   constraint_record record;
 begin
+  if to_regclass('public.calendar_events') is null then
+    raise exception 'calendar_events table does not exist. Run 202608040001_appointments_calendar.sql first.';
+  end if;
+
   for constraint_record in
     select conname
     from pg_constraint
@@ -32,6 +36,25 @@ alter column status set default 'confirmed';
 alter table public.calendar_events
 add constraint calendar_events_status_check
 check (status in ('pending', 'confirmed', 'cancelled'));
+
+drop policy if exists "Allowed users can read calendar events"
+on public.calendar_events;
+create policy "Allowed users can read calendar events"
+on public.calendar_events for select
+using (
+  public.current_tenant_role(tenant_id) in ('owner', 'nutritionist')
+  or (
+    patient_id is not null
+    and public.can_access_patient(patient_id)
+  )
+);
+
+drop policy if exists "Nutritionists can manage calendar events"
+on public.calendar_events;
+create policy "Nutritionists can manage calendar events"
+on public.calendar_events for all
+using (public.current_tenant_role(tenant_id) in ('owner', 'nutritionist'))
+with check (public.current_tenant_role(tenant_id) in ('owner', 'nutritionist'));
 
 drop policy if exists "Patients can create own appointments"
 on public.calendar_events;

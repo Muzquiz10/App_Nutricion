@@ -1456,7 +1456,6 @@ export function NutriOSApp({
             {activeTab === "data-entry" && role === "patient" && (
               <DataEntryPanel
                 key={`data-entry-${selectedPatientId || "none"}`}
-                role={role}
                 tenant={tenant}
                 selectedPatient={selectedPatient}
                 supabase={supabase}
@@ -3678,7 +3677,6 @@ function EditableMealItem({
 }
 
 function DataEntryPanel({
-  role,
   tenant,
   selectedPatient,
   supabase,
@@ -3687,7 +3685,6 @@ function DataEntryPanel({
   onNotice,
   onReload,
 }: {
-  role: UserRole | null;
   tenant: Tenant;
   selectedPatient: Patient | null;
   supabase: ReturnType<typeof createSupabaseBrowser>;
@@ -3742,69 +3739,52 @@ function DataEntryPanel({
     setSavingTracking(true);
 
     try {
-      const rows: PromiseLike<unknown>[] = [];
+      const customGoalLogs: Array<{
+        goalId: string;
+        status: GoalStatus;
+        value: number | null;
+      }> = [];
+
       if (trackingDraft.weight) {
-        rows.push(
-          supabase.from("weight_logs").insert({
-            tenant_id: tenant.id,
-            patient_id: selectedPatient.id,
-            weight_kg: Number(trackingDraft.weight),
-            source: role === "patient" ? "patient" : "nutritionist",
-          }),
-        );
-        rows.push(
-          supabase
-            .from("patients")
-            .update({
-              current_weight_kg: Number(trackingDraft.weight),
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", selectedPatient.id),
-        );
+        const weightKg = Number(trackingDraft.weight);
+        if (!Number.isFinite(weightKg) || weightKg <= 0) {
+          onNotice("Peso no valido.");
+          return;
+        }
       }
+
       if (trackingDraft.waist) {
-        rows.push(
-          supabase.from("waist_logs").insert({
-            tenant_id: tenant.id,
-            patient_id: selectedPatient.id,
-            waist_cm: Number(trackingDraft.waist),
-          }),
-        );
+        const waistCm = Number(trackingDraft.waist);
+        if (!Number.isFinite(waistCm) || waistCm <= 0) {
+          onNotice("Medida de cintura no valida.");
+          return;
+        }
       }
+
       if (trackingDraft.steps) {
         const stepCount = Number(trackingDraft.steps);
         if (!Number.isInteger(stepCount) || stepCount < 0 || stepCount > 200000) {
           onNotice("Pasos no validos.");
           return;
         }
+      }
 
-        rows.push(
-          supabase.from("step_logs").upsert(
-            {
-              tenant_id: tenant.id,
-              patient_id: selectedPatient.id,
-              steps: stepCount,
-              logged_on: getLocalDateString(),
-              source: "patient",
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: "patient_id,logged_on" },
-          ),
-        );
+      if (trackingDraft.duration) {
+        const durationMinutes = Number(trackingDraft.duration);
+        if (!Number.isFinite(durationMinutes) || durationMinutes < 0) {
+          onNotice("Duracion de actividad no valida.");
+          return;
+        }
       }
+
       if (trackingDraft.exercise) {
-        rows.push(
-          supabase.from("exercise_logs").insert({
-            tenant_id: tenant.id,
-            patient_id: selectedPatient.id,
-            activity: trackingDraft.exercise,
-            duration_minutes: trackingDraft.duration
-              ? Number(trackingDraft.duration)
-              : null,
-            intensity: "normal",
-          }),
-        );
+        const activity = trackingDraft.exercise.trim();
+        if (!activity) {
+          onNotice("Actividad no valida.");
+          return;
+        }
       }
+
       for (const goal of activeCustomGoals) {
         const rawValue = customGoalDrafts[goal.id];
         if (rawValue === undefined || rawValue === "") continue;
@@ -3822,28 +3802,21 @@ function DataEntryPanel({
           ? (rawValue as GoalStatus)
           : deriveNumericCustomGoalStatus(goal, numericValue);
 
-        rows.push(
-          supabase.from("patient_goal_logs").upsert(
-            {
-              tenant_id: tenant.id,
-              patient_id: selectedPatient.id,
-              goal_id: goal.id,
-              logged_on: getLocalDateString(),
-              status,
-              value: numericValue,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: "goal_id,logged_on" },
-          ),
-        );
+        customGoalLogs.push({
+          goalId: goal.id,
+          status,
+          value: numericValue,
+        });
       }
 
-      const trackingResults = await Promise.all(rows);
-      const trackingError = findSupabaseResponseError(trackingResults);
-      if (trackingError) {
-        onNotice(trackingError);
-        return;
-      }
+      let mealPhoto:
+        | {
+            storagePath: string;
+            mealType: string;
+            notes: string;
+            loggedAt: string;
+          }
+        | null = null;
 
       if (photoFile) {
         const optimizedPhotoFile = await optimizeMealPhotoFile(photoFile);
@@ -3863,19 +3836,29 @@ function DataEntryPanel({
           return;
         }
 
-        const photoInsert = await supabase.from("meal_photos").insert({
-          tenant_id: tenant.id,
-          patient_id: selectedPatient.id,
-          storage_path: path,
-          meal_type: trackingDraft.mealType,
+        mealPhoto = {
+          storagePath: path,
+          mealType: trackingDraft.mealType,
           notes: trackingDraft.mealNotes,
-          logged_at: loggedAt,
-        });
+          loggedAt,
+        };
+      }
 
-        if (photoInsert.error) {
-          onNotice(photoInsert.error.message);
-          return;
-        }
+      const { error } = await postTrackingLogs(supabase, {
+        tenantId: tenant.id,
+        patientId: selectedPatient.id,
+        weightKg: trackingDraft.weight ? Number(trackingDraft.weight) : null,
+        waistCm: trackingDraft.waist ? Number(trackingDraft.waist) : null,
+        steps: trackingDraft.steps ? Number(trackingDraft.steps) : null,
+        exercise: trackingDraft.exercise.trim() || null,
+        durationMinutes: trackingDraft.duration ? Number(trackingDraft.duration) : null,
+        customGoalLogs,
+        mealPhoto,
+      });
+
+      if (error) {
+        onNotice(error);
+        return;
       }
 
       clearTrackingDraft();
@@ -4452,22 +4435,14 @@ function PatientAgendaPanel({
       end_at: slot.endAt,
       status: "pending",
     } satisfies Omit<CalendarEvent, "id" | "created_by" | "created_at" | "updated_at">;
-    let { error } = await supabase.from("calendar_events").insert(row);
-
-    if (isCalendarStatusConstraintError(error)) {
-      const legacyRow = {
-        ...row,
-        title: LEGACY_PENDING_APPOINTMENT_TITLE,
-        status: "scheduled" as CalendarEventStatus,
-      };
-      const legacyInsert = await supabase.from("calendar_events").insert(legacyRow);
-      error = legacyInsert.error;
-    }
-
+    const { error } = await postCalendarEventMutation(supabase, {
+      action: "create",
+      row,
+    });
     setBookingSlotId("");
 
     if (error) {
-      onNotice(error.message);
+      onNotice(error);
       return;
     }
 
@@ -4743,13 +4718,14 @@ function NutritionistAgendaPanel({
       return;
     }
 
-    const { error } = await supabase
-      .from("calendar_events")
-      .update({ status: "cancelled" })
-      .eq("id", event.id);
+    const { error } = await postCalendarEventMutation(supabase, {
+      action: "update-status",
+      eventId: event.id,
+      status: "cancelled",
+    });
 
     if (error) {
-      onNotice(error.message);
+      onNotice(error);
       return;
     }
 
@@ -4763,24 +4739,15 @@ function NutritionistAgendaPanel({
       return;
     }
 
-    let { error } = await supabase
-      .from("calendar_events")
-      .update({ status: "confirmed", title: buildConfirmedAppointmentTitle(event, patients) })
-      .eq("id", event.id);
-
-    if (isCalendarStatusConstraintError(error)) {
-      const legacyUpdate = await supabase
-        .from("calendar_events")
-        .update({
-          status: "scheduled",
-          title: buildConfirmedAppointmentTitle(event, patients),
-        })
-        .eq("id", event.id);
-      error = legacyUpdate.error;
-    }
+    const { error } = await postCalendarEventMutation(supabase, {
+      action: "update-status",
+      eventId: event.id,
+      status: "confirmed",
+      title: buildConfirmedAppointmentTitle(event, patients),
+    });
 
     if (error) {
-      onNotice(error.message);
+      onNotice(error);
       return;
     }
 
@@ -5455,30 +5422,112 @@ async function insertCalendarEvent({
   }
 
   setSavingAgenda(true);
-  let { error } = await supabase.from("calendar_events").insert({
-    ...row,
-    tenant_id: tenant.id,
-  });
-
-  if (isCalendarStatusConstraintError(error) && row.status === "confirmed") {
-    const legacyInsert = await supabase.from("calendar_events").insert({
+  const { error } = await postCalendarEventMutation(supabase, {
+    action: "create",
+    row: {
       ...row,
       tenant_id: tenant.id,
-      status: "scheduled",
-    });
-    error = legacyInsert.error;
-  }
-
+    },
+  });
   setSavingAgenda(false);
 
   if (error) {
-    onNotice(error.message);
+    onNotice(error);
     return;
   }
 
   afterSuccess?.();
   onNotice(successMessage);
   await onReload();
+}
+
+async function postCalendarEventMutation(
+  supabase: ReturnType<typeof createSupabaseBrowser>,
+  body:
+    | {
+        action: "create";
+        row: Omit<CalendarEvent, "id" | "created_by" | "created_at" | "updated_at">;
+      }
+    | {
+        action: "update-status";
+        eventId: string;
+        status: CalendarEventStatus;
+        title?: string;
+      },
+) {
+  if (!supabase) {
+    return { error: "Modo demo: conecta Supabase para guardar agenda real." };
+  }
+
+  const accessToken = await getCurrentAccessToken(supabase);
+  if (!accessToken) {
+    return { error: "Tu sesion ha caducado. Cierra sesion y vuelve a entrar." };
+  }
+
+  const response = await fetch("/api/calendar/events", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json()) as { error?: string; ok?: boolean };
+
+  if (!response.ok || !payload.ok) {
+    return { error: payload.error ?? "No se pudo guardar la agenda." };
+  }
+
+  return { error: "" };
+}
+
+async function postTrackingLogs(
+  supabase: ReturnType<typeof createSupabaseBrowser>,
+  body: {
+    tenantId: string;
+    patientId: string;
+    weightKg: number | null;
+    waistCm: number | null;
+    steps: number | null;
+    exercise: string | null;
+    durationMinutes: number | null;
+    customGoalLogs: Array<{
+      goalId: string;
+      status: GoalStatus;
+      value: number | null;
+    }>;
+    mealPhoto: {
+      storagePath: string;
+      mealType: string;
+      notes: string;
+      loggedAt: string;
+    } | null;
+  },
+) {
+  if (!supabase) {
+    return { error: "Modo demo: conecta Supabase para registrar datos reales." };
+  }
+
+  const accessToken = await getCurrentAccessToken(supabase);
+  if (!accessToken) {
+    return { error: "Tu sesion ha caducado. Cierra sesion y vuelve a entrar." };
+  }
+
+  const response = await fetch("/api/tracking/logs", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json()) as { error?: string; ok?: boolean };
+
+  if (!response.ok || !payload.ok) {
+    return { error: payload.error ?? "No se pudo registrar el dato." };
+  }
+
+  return { error: "" };
 }
 
 function DocumentsPanel({
@@ -6761,15 +6810,6 @@ function buildConfirmedAppointmentTitle(event: CalendarEvent, patients: Patient[
   return patientName ? `Cita con ${patientName}` : "Cita con nutricionista";
 }
 
-function isCalendarStatusConstraintError(error: unknown) {
-  if (!error || typeof error !== "object") return false;
-  const details = error as { code?: string; message?: string };
-  return (
-    details.code === "23514" ||
-    details.message?.includes("calendar_events_status_check") === true
-  );
-}
-
 function formatAppointmentMode(mode: AppointmentMode) {
   return mode === "online" ? "Online" : "Presencial";
 }
@@ -6999,21 +7039,6 @@ async function getCurrentAccessToken(
   }
 
   return data.session?.access_token ?? "";
-}
-
-function findSupabaseResponseError(responses: unknown[]) {
-  for (const response of responses) {
-    if (
-      typeof response === "object" &&
-      response !== null &&
-      "error" in response
-    ) {
-      const error = (response as { error?: { message?: string } | null }).error;
-      if (error?.message) return error.message;
-    }
-  }
-
-  return "";
 }
 
 function useStoredDraft<T extends Record<string, string>>(

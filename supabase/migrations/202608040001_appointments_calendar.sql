@@ -36,6 +36,41 @@ create table if not exists public.calendar_events (
   )
 );
 
+do $$
+declare
+  constraint_record record;
+begin
+  for constraint_record in
+    select conname
+    from pg_constraint
+    where conrelid = 'public.calendar_events'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%status%'
+  loop
+    execute format(
+      'alter table public.calendar_events drop constraint if exists %I',
+      constraint_record.conname
+    );
+  end loop;
+end $$;
+
+update public.calendar_events
+set status = 'pending'
+where status = 'scheduled'
+  and event_type = 'appointment'
+  and title = 'Solicitud pendiente de cita';
+
+update public.calendar_events
+set status = 'confirmed'
+where status = 'scheduled';
+
+alter table public.calendar_events
+alter column status set default 'confirmed';
+
+alter table public.calendar_events
+add constraint calendar_events_status_check
+check (status in ('pending', 'confirmed', 'cancelled'));
+
 create index if not exists idx_appointment_availability_tenant
 on public.appointment_availability(tenant_id, weekday, start_time);
 
