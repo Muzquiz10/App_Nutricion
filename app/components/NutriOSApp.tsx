@@ -379,6 +379,7 @@ const weekdayOptions = [
   { value: "6", label: "Sabado" },
   { value: "0", label: "Domingo" },
 ];
+const agendaWeekdayLabels = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"];
 const appointmentModeOptions: Array<{ value: AppointmentMode; label: string }> = [
   { value: "online", label: "Online" },
   { value: "presential", label: "Presencial" },
@@ -4365,6 +4366,7 @@ function PatientAgendaPanel({
   onReload: () => Promise<void>;
 }) {
   const [showBooking, setShowBooking] = useState(false);
+  const [selectedBookingDate, setSelectedBookingDate] = useState(getLocalDateString());
   const [appointmentMode, setAppointmentMode] = useState<AppointmentMode>("online");
   const [bookingSlotId, setBookingSlotId] = useState("");
   const patientEvents = calendarEvents
@@ -4373,6 +4375,9 @@ function PatientAgendaPanel({
   const availableSlots = useMemo(
     () => buildAvailableAppointmentSlots(availabilitySlots, calendarBusySlots, 28),
     [availabilitySlots, calendarBusySlots],
+  );
+  const selectedDaySlots = availableSlots.filter(
+    (slot) => slot.dateKey === selectedBookingDate,
   );
 
   async function bookAppointment(slot: AvailableAppointmentSlot) {
@@ -4406,6 +4411,7 @@ function PatientAgendaPanel({
     }
 
     setShowBooking(false);
+    setSelectedBookingDate(slot.dateKey);
     onNotice("Cita agendada.");
     await onReload();
   }
@@ -4423,7 +4429,12 @@ function PatientAgendaPanel({
           <button
             type="button"
             className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white"
-            onClick={() => setShowBooking((current) => !current)}
+            onClick={() => {
+              if (!showBooking && availableSlots[0]) {
+                setSelectedBookingDate(availableSlots[0].dateKey);
+              }
+              setShowBooking((current) => !current);
+            }}
           >
             <CalendarDays className="size-4" />
             Agendar cita
@@ -4431,33 +4442,45 @@ function PatientAgendaPanel({
         </div>
 
         {showBooking && (
-          <div className="mt-5 rounded-lg border border-[var(--line)] bg-white p-4">
-            <SelectField
-              label="Tipo de cita"
-              value={appointmentMode}
-              onChange={(value) => setAppointmentMode(value as AppointmentMode)}
-              options={appointmentModeOptions}
-            />
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              {availableSlots.slice(0, 12).map((slot) => (
-                <button
-                  key={slot.id}
-                  type="button"
-                  className="rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3 text-left text-sm transition hover:border-[var(--tenant-color)] hover:bg-white disabled:opacity-60"
-                  onClick={() => bookAppointment(slot)}
-                  disabled={bookingSlotId === slot.id}
-                >
-                  <span className="block font-black text-[#24342f]">{slot.label}</span>
-                  <span className="mt-1 block text-xs font-semibold text-[var(--muted)]">
-                    {formatDate(slot.startAt)}
-                  </span>
-                </button>
-              ))}
-              {availableSlots.length === 0 && (
-                <div className="sm:col-span-2 xl:col-span-4">
-                  <EmptyState text="No hay huecos disponibles publicados ahora mismo." />
+          <div className="mt-5 rounded-lg border border-[var(--line)] bg-white p-3 sm:p-4">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+              <BookingCalendar
+                availableSlots={availableSlots}
+                selectedDate={selectedBookingDate}
+                onSelectDate={setSelectedBookingDate}
+              />
+              <div className="rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3">
+                <SelectField
+                  label="Tipo de cita"
+                  value={appointmentMode}
+                  onChange={(value) => setAppointmentMode(value as AppointmentMode)}
+                  options={appointmentModeOptions}
+                />
+                <div className="mt-4">
+                  <p className="text-sm font-black text-[#24342f]">
+                    {formatBookingDateLabel(selectedBookingDate)}
+                  </p>
+                  <div className="mt-3 grid gap-2">
+                    {selectedDaySlots.map((slot) => (
+                      <button
+                        key={slot.id}
+                        type="button"
+                        className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-left text-sm transition hover:border-[var(--tenant-color)] disabled:opacity-60"
+                        onClick={() => bookAppointment(slot)}
+                        disabled={bookingSlotId === slot.id}
+                      >
+                        <span className="font-black text-[#24342f]">
+                          {formatAgendaTimeRange(slot.startAt, slot.endAt)}
+                        </span>
+                        <ChevronRight className="size-4 shrink-0 text-[var(--tenant-color)]" />
+                      </button>
+                    ))}
+                    {selectedDaySlots.length === 0 && (
+                      <EmptyState text="No hay horas disponibles en este dia." />
+                    )}
+                  </div>
                 </div>
-              )}
+              </div>
             </div>
           </div>
         )}
@@ -4959,49 +4982,167 @@ function AgendaCalendar({
   patients: Patient[];
   onCancel?: (event: CalendarEvent) => void;
 }) {
-  const days = getAgendaDays(14);
+  const weeks = getAgendaWeeks(4);
   const eventsByDay = groupCalendarEventsByDay(events);
 
   return (
     <Panel>
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-black">{title}</h2>
-        <CalendarDays className="size-5 text-[var(--tenant-color)]" />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-lg font-black">{title}</h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Vista semanal de lunes a domingo.
+          </p>
+        </div>
+        <span className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-black text-[#39433f]">
+          <CalendarDays className="size-4 text-[var(--tenant-color)]" />
+          Desde {formatBookingDateLabel(weeks[0][0].dateKey)}
+        </span>
       </div>
-      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {days.map((day) => {
-          const dayEvents = eventsByDay.get(day.dateKey) ?? [];
-          return (
+      <div className="mt-5 overflow-x-auto pb-2 scrollbar-thin">
+        <div className="min-w-[920px] rounded-lg border border-[var(--line)] bg-white shadow-sm">
+          <div className="grid grid-cols-7 border-b border-[var(--line)] bg-[#f3f0e8]">
+            {agendaWeekdayLabels.map((label) => (
+              <div
+                key={label}
+                className="px-3 py-3 text-xs font-black uppercase text-[var(--muted)]"
+              >
+                {label}
+              </div>
+            ))}
+          </div>
+          {weeks.map((week) => (
             <div
-              key={day.dateKey}
-              className="min-h-36 rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3"
+              key={week[0].dateKey}
+              className="grid grid-cols-7 border-b border-[var(--line)] last:border-b-0"
             >
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-black text-[#24342f]">{day.label}</p>
-                <span className="rounded-md bg-white px-2 py-1 text-xs font-black text-[var(--muted)]">
-                  {dayEvents.length}
-                </span>
-              </div>
-              <div className="mt-3 grid gap-2">
-                {dayEvents.map((event) => (
-                  <AgendaEventCard
-                    key={event.id}
-                    event={event}
-                    patientName={getPatientName(patients, event.patient_id)}
-                    onCancel={onCancel}
-                  />
-                ))}
-                {dayEvents.length === 0 && (
-                  <p className="rounded-lg border border-dashed border-[var(--line)] bg-white/70 px-3 py-4 text-center text-xs font-semibold text-[var(--muted)]">
-                    Sin eventos
-                  </p>
-                )}
-              </div>
+              {week.map((day) => {
+                const dayEvents = eventsByDay.get(day.dateKey) ?? [];
+                return (
+                  <div
+                    key={day.dateKey}
+                    className={`min-h-44 border-r border-[var(--line)] bg-[#fbfaf6] p-2 last:border-r-0 ${
+                      day.isToday ? "bg-[#effaf5]" : ""
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-black text-[#24342f]">{day.dayNumber}</p>
+                        <p className="text-[11px] font-bold text-[var(--muted)]">
+                          {day.monthLabel}
+                        </p>
+                      </div>
+                      {dayEvents.length > 0 && (
+                        <span className="grid min-w-7 place-items-center rounded-md bg-white px-2 py-1 text-xs font-black text-[var(--tenant-color)]">
+                          {dayEvents.length}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-3 grid gap-2">
+                      {dayEvents.slice(0, 3).map((event) => (
+                        <AgendaEventCard
+                          key={event.id}
+                          event={event}
+                          patientName={getPatientName(patients, event.patient_id)}
+                          onCancel={onCancel}
+                        />
+                      ))}
+                      {dayEvents.length > 3 && (
+                        <p className="rounded-md bg-white px-2 py-1 text-xs font-black text-[var(--muted)]">
+                          +{dayEvents.length - 3} mas
+                        </p>
+                      )}
+                      {dayEvents.length === 0 && (
+                        <p className="rounded-lg border border-dashed border-[var(--line)] bg-white/70 px-2 py-4 text-center text-xs font-semibold text-[var(--muted)]">
+                          Sin eventos
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
+          ))}
+        </div>
       </div>
     </Panel>
+  );
+}
+
+function BookingCalendar({
+  availableSlots,
+  selectedDate,
+  onSelectDate,
+}: {
+  availableSlots: AvailableAppointmentSlot[];
+  selectedDate: string;
+  onSelectDate: (dateKey: string) => void;
+}) {
+  const weeks = getAgendaWeeks(4);
+  const slotCountByDay = countSlotsByDay(availableSlots);
+
+  return (
+    <div className="overflow-x-auto pb-2 scrollbar-thin">
+      <div className="min-w-[760px] rounded-lg border border-[var(--line)] bg-white shadow-sm">
+        <div className="grid grid-cols-7 border-b border-[var(--line)] bg-[#f3f0e8]">
+          {agendaWeekdayLabels.map((label) => (
+            <div
+              key={label}
+              className="px-3 py-3 text-xs font-black uppercase text-[var(--muted)]"
+            >
+              {label}
+            </div>
+          ))}
+        </div>
+        {weeks.map((week) => (
+          <div
+            key={week[0].dateKey}
+            className="grid grid-cols-7 border-b border-[var(--line)] last:border-b-0"
+          >
+            {week.map((day) => {
+              const slotsCount = slotCountByDay.get(day.dateKey) ?? 0;
+              const selected = selectedDate === day.dateKey;
+              const available = slotsCount > 0;
+
+              return (
+                <button
+                  key={day.dateKey}
+                  type="button"
+                  className={`min-h-28 border-r border-[var(--line)] p-3 text-left transition last:border-r-0 ${
+                    selected
+                      ? "bg-[var(--tenant-color)] text-white"
+                      : available
+                        ? "bg-[#effaf5] text-[#24342f] hover:bg-[#dcefe7]"
+                        : "bg-[#f6f3ed] text-[#9a9388]"
+                  }`}
+                  onClick={() => onSelectDate(day.dateKey)}
+                >
+                  <span className="block text-sm font-black">{day.dayNumber}</span>
+                  <span
+                    className={`mt-1 block text-[11px] font-bold ${
+                      selected ? "text-white/80" : "text-[var(--muted)]"
+                    }`}
+                  >
+                    {day.monthLabel}
+                  </span>
+                  <span
+                    className={`mt-4 inline-flex rounded-md px-2 py-1 text-xs font-black ${
+                      selected
+                        ? "bg-white/20 text-white"
+                        : available
+                          ? "bg-white text-[#255d50]"
+                          : "bg-white/70 text-[#8a8378]"
+                    }`}
+                  >
+                    {available ? `${slotsCount} huecos` : "Sin huecos"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -6258,16 +6399,50 @@ function groupCalendarEventsByDay(events: CalendarEvent[]) {
   return grouped;
 }
 
-function getAgendaDays(daysAhead: number) {
-  return Array.from({ length: daysAhead }, (_, index) => {
-    const date = new Date();
-    date.setHours(0, 0, 0, 0);
-    date.setDate(date.getDate() + index);
-    return {
-      dateKey: getLocalDateString(date),
-      label: index === 0 ? "Hoy" : formatPhotoDayLabel(getLocalDateString(date)),
-    };
+function getAgendaWeeks(weekCount: number) {
+  const firstMonday = getMondayStart(new Date());
+
+  return Array.from({ length: weekCount }, (_, weekIndex) =>
+    Array.from({ length: 7 }, (_, dayIndex) => {
+      const date = new Date(firstMonday);
+      date.setDate(firstMonday.getDate() + weekIndex * 7 + dayIndex);
+      const dateKey = getLocalDateString(date);
+
+      return {
+        dateKey,
+        dayNumber: new Intl.DateTimeFormat("es-ES", { day: "2-digit" }).format(date),
+        monthLabel: new Intl.DateTimeFormat("es-ES", { month: "short" }).format(date),
+        isToday: dateKey === getLocalDateString(),
+      };
+    }),
+  );
+}
+
+function getMondayStart(value: Date) {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  const weekday = date.getDay();
+  const mondayOffset = weekday === 0 ? -6 : 1 - weekday;
+  date.setDate(date.getDate() + mondayOffset);
+  return date;
+}
+
+function countSlotsByDay(slots: AvailableAppointmentSlot[]) {
+  const countByDay = new Map<string, number>();
+
+  slots.forEach((slot) => {
+    countByDay.set(slot.dateKey, (countByDay.get(slot.dateKey) ?? 0) + 1);
   });
+
+  return countByDay;
+}
+
+function formatBookingDateLabel(dateKey: string) {
+  return new Intl.DateTimeFormat("es-ES", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+  }).format(new Date(`${dateKey}T12:00:00`));
 }
 
 function compareCalendarEvents(first: CalendarEvent, second: CalendarEvent) {
