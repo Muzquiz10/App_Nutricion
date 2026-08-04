@@ -2,6 +2,12 @@ alter table public.calendar_events
 drop constraint if exists calendar_events_status_check;
 
 update public.calendar_events
+set status = 'pending'
+where status = 'scheduled'
+  and event_type = 'appointment'
+  and title = 'Solicitud pendiente de cita';
+
+update public.calendar_events
 set status = 'confirmed'
 where status = 'scheduled';
 

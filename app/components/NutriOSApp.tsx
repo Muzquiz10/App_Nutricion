@@ -175,6 +175,7 @@ type PatientGoalLog = {
 type AppointmentMode = "online" | "presential";
 type CalendarEventType = "appointment" | "block" | "note";
 type CalendarEventStatus = "pending" | "confirmed" | "cancelled" | "scheduled";
+const LEGACY_PENDING_APPOINTMENT_TITLE = "Solicitud pendiente de cita";
 
 type AppointmentAvailability = {
   id: string;
@@ -877,7 +878,7 @@ export function NutriOSApp({
     activeTab === "goals" ||
     (role === "patient" && activeTab === "data-entry");
   const pendingAppointmentCount = calendarEvents.filter(
-    (event) => event.event_type === "appointment" && event.status === "pending",
+    (event) => isPendingCalendarAppointment(event),
   ).length;
 
   function handleSidebarEnter() {
@@ -4440,7 +4441,7 @@ function PatientAgendaPanel({
     }
 
     setBookingSlotId(slot.id);
-    const { error } = await supabase.from("calendar_events").insert({
+    const row = {
       tenant_id: tenant.id,
       patient_id: selectedPatient.id,
       title: "Cita con nutricionista",
@@ -4450,7 +4451,19 @@ function PatientAgendaPanel({
       start_at: slot.startAt,
       end_at: slot.endAt,
       status: "pending",
-    });
+    } satisfies Omit<CalendarEvent, "id" | "created_by" | "created_at" | "updated_at">;
+    let { error } = await supabase.from("calendar_events").insert(row);
+
+    if (isCalendarStatusConstraintError(error)) {
+      const legacyRow = {
+        ...row,
+        title: LEGACY_PENDING_APPOINTMENT_TITLE,
+        status: "scheduled" as CalendarEventStatus,
+      };
+      const legacyInsert = await supabase.from("calendar_events").insert(legacyRow);
+      error = legacyInsert.error;
+    }
+
     setBookingSlotId("");
 
     if (error) {
@@ -4592,7 +4605,7 @@ function NutritionistAgendaPanel({
   const [savingAgenda, setSavingAgenda] = useState(false);
   const visibleEvents = [...calendarEvents].sort(compareCalendarEvents);
   const pendingAppointments = visibleEvents.filter(
-    (event) => event.event_type === "appointment" && event.status === "pending",
+    (event) => isPendingCalendarAppointment(event),
   );
   const appointmentPatientId = appointmentDraft.patientId || patients[0]?.id || "";
   const availableSlots = useMemo(
@@ -4750,10 +4763,21 @@ function NutritionistAgendaPanel({
       return;
     }
 
-    const { error } = await supabase
+    let { error } = await supabase
       .from("calendar_events")
-      .update({ status: "confirmed" })
+      .update({ status: "confirmed", title: buildConfirmedAppointmentTitle(event, patients) })
       .eq("id", event.id);
+
+    if (isCalendarStatusConstraintError(error)) {
+      const legacyUpdate = await supabase
+        .from("calendar_events")
+        .update({
+          status: "scheduled",
+          title: buildConfirmedAppointmentTitle(event, patients),
+        })
+        .eq("id", event.id);
+      error = legacyUpdate.error;
+    }
 
     if (error) {
       onNotice(error.message);
@@ -5373,8 +5397,8 @@ function AgendaEventCard({
         </p>
       )}
       <div className="mt-2 flex flex-wrap gap-1.5">
-        <span className={`inline-flex rounded-md px-2 py-1 text-[11px] font-black ${getCalendarStatusClass(event.status)}`}>
-          {formatCalendarEventStatus(event.status)}
+        <span className={`inline-flex rounded-md px-2 py-1 text-[11px] font-black ${getCalendarStatusClass(event)}`}>
+          {formatCalendarEventStatus(event)}
         </span>
         {event.appointment_mode && (
           <span className="inline-flex rounded-md bg-white/80 px-2 py-1 text-[11px] font-black text-[#39433f]">
@@ -5431,10 +5455,20 @@ async function insertCalendarEvent({
   }
 
   setSavingAgenda(true);
-  const { error } = await supabase.from("calendar_events").insert({
+  let { error } = await supabase.from("calendar_events").insert({
     ...row,
     tenant_id: tenant.id,
   });
+
+  if (isCalendarStatusConstraintError(error) && row.status === "confirmed") {
+    const legacyInsert = await supabase.from("calendar_events").insert({
+      ...row,
+      tenant_id: tenant.id,
+      status: "scheduled",
+    });
+    error = legacyInsert.error;
+  }
+
   setSavingAgenda(false);
 
   if (error) {
@@ -6670,7 +6704,7 @@ function getCalendarEventMeta(event: CalendarEvent) {
     };
   }
 
-  if (event.status === "pending") {
+  if (isPendingCalendarAppointment(event)) {
     return {
       Icon: Bell,
       className: "border-[#ead39b] bg-[#fff8df]",
@@ -6701,16 +6735,39 @@ function isCalendarEventBlocking(event: CalendarEvent) {
   return event.blocks_availability && event.status !== "cancelled";
 }
 
-function formatCalendarEventStatus(status: CalendarEventStatus) {
-  if (status === "pending") return "Pendiente";
-  if (status === "cancelled") return "Cancelada";
+function isPendingCalendarAppointment(event: CalendarEvent) {
+  return (
+    event.event_type === "appointment" &&
+    (event.status === "pending" ||
+      (event.status === "scheduled" &&
+        event.title === LEGACY_PENDING_APPOINTMENT_TITLE))
+  );
+}
+
+function formatCalendarEventStatus(event: CalendarEvent) {
+  if (isPendingCalendarAppointment(event)) return "Pendiente";
+  if (event.status === "cancelled") return "Cancelada";
   return "Confirmada";
 }
 
-function getCalendarStatusClass(status: CalendarEventStatus) {
-  if (status === "pending") return "bg-[#f3e2b2] text-[#6b5420]";
-  if (status === "cancelled") return "bg-[#f7d7cf] text-[#8a3327]";
+function getCalendarStatusClass(event: CalendarEvent) {
+  if (isPendingCalendarAppointment(event)) return "bg-[#f3e2b2] text-[#6b5420]";
+  if (event.status === "cancelled") return "bg-[#f7d7cf] text-[#8a3327]";
   return "bg-[#dcefe7] text-[#255d50]";
+}
+
+function buildConfirmedAppointmentTitle(event: CalendarEvent, patients: Patient[]) {
+  const patientName = getPatientName(patients, event.patient_id);
+  return patientName ? `Cita con ${patientName}` : "Cita con nutricionista";
+}
+
+function isCalendarStatusConstraintError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const details = error as { code?: string; message?: string };
+  return (
+    details.code === "23514" ||
+    details.message?.includes("calendar_events_status_check") === true
+  );
 }
 
 function formatAppointmentMode(mode: AppointmentMode) {
