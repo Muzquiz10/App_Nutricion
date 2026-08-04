@@ -25,8 +25,8 @@ create table if not exists public.calendar_events (
   blocks_availability boolean not null default true,
   start_at timestamptz not null,
   end_at timestamptz not null,
-  status text not null default 'scheduled'
-    check (status in ('scheduled', 'cancelled')),
+  status text not null default 'confirmed'
+    check (status in ('pending', 'confirmed', 'cancelled')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   check (start_at < end_at),
@@ -98,7 +98,7 @@ create policy "Patients can create own appointments"
 on public.calendar_events for insert
 with check (
   event_type = 'appointment'
-  and status = 'scheduled'
+  and status = 'pending'
   and blocks_availability = true
   and appointment_mode in ('online', 'presential')
   and patient_id is not null
@@ -126,7 +126,7 @@ as $$
   select ce.id, ce.start_at, ce.end_at
   from public.calendar_events ce
   where ce.tenant_id = target_tenant_id
-    and ce.status = 'scheduled'
+    and ce.status in ('pending', 'confirmed')
     and ce.blocks_availability = true
     and public.current_tenant_role(target_tenant_id) in ('owner', 'nutritionist', 'patient')
 $$;
