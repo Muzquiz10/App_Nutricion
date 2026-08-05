@@ -63,6 +63,7 @@ import {
 import type { Tenant } from "../lib/types";
 
 type UserRole = "owner" | "nutritionist" | "patient";
+type LoginIntent = "patient" | "professional";
 
 type Patient = {
   id: string;
@@ -477,6 +478,15 @@ const demoTenant = (slug: string): Tenant => ({
   privacy_policy_url: null,
 });
 
+const commonLoginTenant: Tenant = {
+  id: "common-login",
+  slug: "app",
+  name: "Acceso común",
+  logo_url: null,
+  primary_color: "#2f7d6d",
+  privacy_policy_url: null,
+};
+
 const demoPatients: Patient[] = [
   {
     id: "demo-patient-1",
@@ -787,10 +797,12 @@ const demoPlan: MealPlan = {
 export function NutriOSApp({
   tenantSlug,
   initialTenant,
+  commonEntry = false,
   supabaseConfig,
 }: {
   tenantSlug: string;
   initialTenant?: Tenant | null;
+  commonEntry?: boolean;
   supabaseConfig?: SupabasePublicConfig | null;
 }) {
   const supabase = useMemo(
@@ -799,7 +811,7 @@ export function NutriOSApp({
   );
   const isDemo = !supabase;
   const [tenant, setTenant] = useState<Tenant>(
-    initialTenant ?? demoTenant(tenantSlug),
+    commonEntry ? commonLoginTenant : initialTenant ?? demoTenant(tenantSlug),
   );
   const [role, setRole] = useState<UserRole | null>(isDemo ? "nutritionist" : null);
   const [sessionUserId, setSessionUserId] = useState(isDemo ? "demo-nutritionist" : "");
@@ -807,7 +819,7 @@ export function NutriOSApp({
   const [pendingInvitations, setPendingInvitations] =
     useState<PendingInvitation[]>(demoPendingInvitations);
   const [selectedPatientId, setSelectedPatientId] = useStoredValue(
-    `nutrios:${tenantSlug}:selected-patient`,
+    `nutrios:${commonEntry ? "common" : tenantSlug}:selected-patient`,
     demoPatients[0]?.id ?? "",
   );
   const [weights, setWeights] = useState<WeightLog[]>(demoWeights);
@@ -827,8 +839,9 @@ export function NutriOSApp({
   const [conversations, setConversations] = useState<Conversation[]>([demoConversation]);
   const [messages, setMessages] = useState<ChatMessage[]>(demoMessages);
   const [plans, setPlans] = useState<MealPlan[]>([demoPlan]);
+  const [loginIntent, setLoginIntent] = useState<LoginIntent>("patient");
   const [activeTab, setActiveTab] = useStoredValue<TabId>(
-    `nutrios:${tenantSlug}:active-tab`,
+    `nutrios:${commonEntry ? "common" : tenantSlug}:active-tab`,
     "patients",
   );
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
@@ -932,49 +945,86 @@ export function NutriOSApp({
       data: { session },
     } = await supabase.auth.getSession();
 
-    const { data: tenantRow } = await supabase
-      .from("tenants")
-      .select("*")
-      .eq("slug", tenantSlug)
-      .maybeSingle();
-
-    const resolvedTenant = (tenantRow as Tenant | null) ?? initialTenant ?? null;
-
-    if (!resolvedTenant) {
-      setWorkspaceError(
-        `No existe ningun nutricionista configurado para ${tenantSlug}.`,
-      );
-      finishLoading();
-      return;
-    }
-
-    setTenant(resolvedTenant);
-
     if (!session) {
+      setRole(null);
+      if (commonEntry) {
+        setTenant(commonLoginTenant);
+      }
       finishLoading();
       return;
     }
 
     setSessionUserId(session.user.id);
 
-    const { data: membership } = await supabase
-      .from("tenant_members")
-      .select("role,status")
-      .eq("tenant_id", resolvedTenant.id)
-      .eq("user_id", session.user.id)
-      .eq("status", "active")
-      .maybeSingle();
+    let resolvedTenant: Tenant | null = null;
+    let resolvedRole: UserRole | null = null;
 
-    if (!membership) {
+    if (commonEntry) {
+      const workspace = await resolveCommonWorkspace(
+        supabase,
+        session.user.id,
+        loginIntent,
+      );
+
+      if (!workspace) {
+        setRole(null);
+        setWorkspaceError(
+          loginIntent === "professional"
+            ? "No encontramos ningun perfil profesional activo para este usuario."
+            : "No encontramos ninguna ficha de cliente activa para este usuario.",
+        );
+        finishLoading();
+        return;
+      }
+
+      resolvedTenant = workspace.tenant;
+      resolvedRole = workspace.role;
+    } else {
+      const { data: tenantRow } = await supabase
+        .from("tenants")
+        .select("*")
+        .eq("slug", tenantSlug)
+        .maybeSingle();
+
+      resolvedTenant = (tenantRow as Tenant | null) ?? initialTenant ?? null;
+
+      if (!resolvedTenant) {
+        setWorkspaceError(
+          `No existe ningun nutricionista configurado para ${tenantSlug}.`,
+        );
+        finishLoading();
+        return;
+      }
+
+      const { data: membership } = await supabase
+        .from("tenant_members")
+        .select("role,status")
+        .eq("tenant_id", resolvedTenant.id)
+        .eq("user_id", session.user.id)
+        .eq("status", "active")
+        .maybeSingle();
+
+      if (!membership) {
+        setRole(null);
+        setWorkspaceError("Tu usuario todavia no esta vinculado a este espacio.");
+        finishLoading();
+        return;
+      }
+
+      resolvedRole = membership.role as UserRole;
+    }
+
+    if (!resolvedTenant || !resolvedRole) {
       setRole(null);
-      setWorkspaceError("Tu usuario todavia no esta vinculado a este espacio.");
+      setWorkspaceError("No se pudo resolver tu espacio de trabajo.");
       finishLoading();
       return;
     }
 
-    setRole(membership.role as UserRole);
+    setTenant(resolvedTenant);
+    setRole(resolvedRole);
 
-    if (["owner", "nutritionist"].includes(membership.role)) {
+    if (["owner", "nutritionist"].includes(resolvedRole)) {
       const { data: invitationRows } = await supabase
         .from("invitations")
         .select("id,email,token,status,expires_at,created_at")
@@ -988,7 +1038,7 @@ export function NutriOSApp({
     }
 
     const patientQuery =
-      membership.role === "patient"
+      resolvedRole === "patient"
         ? supabase
             .from("patients")
             .select("*")
@@ -1128,7 +1178,15 @@ export function NutriOSApp({
     setMessages((messageRows.data ?? []) as ChatMessage[]);
     setPlans((planRows.data ?? []) as MealPlan[]);
     finishLoading();
-  }, [initialTenant, setSelectedPatientId, supabase, tenantSlug, withSignedUrls]);
+  }, [
+    commonEntry,
+    initialTenant,
+    loginIntent,
+    setSelectedPatientId,
+    supabase,
+    tenantSlug,
+    withSignedUrls,
+  ]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -1179,6 +1237,7 @@ export function NutriOSApp({
     event.preventDefault();
     if (!supabase) return;
     setNotice("");
+    setWorkspaceError("");
     const { error } = await supabase.auth.signInWithPassword({
       email: authEmail,
       password: authPassword,
@@ -1207,7 +1266,8 @@ export function NutriOSApp({
     }
 
     setSendingRecovery(true);
-    const resetPath = `/auth/reset-password?next=${encodeURIComponent(`/n/${tenantSlug}`)}`;
+    const nextPath = commonEntry ? "/" : `/n/${tenantSlug}`;
+    const resetPath = `/auth/reset-password?next=${encodeURIComponent(nextPath)}`;
     const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(resetPath)}`;
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo,
@@ -1227,6 +1287,9 @@ export function NutriOSApp({
     await supabase.auth.signOut();
     setRole(null);
     setSessionUserId("");
+    if (commonEntry) {
+      setTenant(commonLoginTenant);
+    }
   }
 
   const appStyle = {
@@ -1247,9 +1310,63 @@ export function NutriOSApp({
 
   if (supabase && !role) {
     return (
-      <main className="nutrios-app tenant-bg flex min-h-screen items-center justify-center px-4" style={appStyle}>
-        <section className="w-full max-w-md rounded-lg border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[var(--shadow-soft)]">
-          <Brand tenant={tenant} compact={false} />
+      <main
+        className="nutrios-app tenant-bg flex min-h-screen items-center justify-center px-4 py-8"
+        style={appStyle}
+      >
+        <section className="grid w-full max-w-5xl overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-[var(--shadow-soft)] lg:grid-cols-[minmax(0,0.95fr)_minmax(360px,1fr)]">
+          <div className="flex min-h-[420px] flex-col justify-between bg-[#f4f0e6] p-6 sm:p-8">
+            <Brand tenant={tenant} compact={commonEntry} />
+            <div className="mt-10 max-w-md">
+              <p className="text-xs font-black uppercase tracking-normal text-[var(--tenant-color)]">
+                Acceso {APP_NAME}
+              </p>
+              <h1 className="mt-3 text-3xl font-black tracking-normal text-[#17201d] sm:text-4xl">
+                Un mismo lugar para clientes y profesionales.
+              </h1>
+            </div>
+            <div className="mt-10 max-w-xs">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={APP_LOGO_WITH_SLOGAN_SRC}
+                alt={APP_NAME}
+                className="h-auto w-full"
+              />
+            </div>
+          </div>
+
+          <div className="p-6 sm:p-8">
+            {commonEntry && (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {[
+                  { id: "patient", title: "Soy cliente", icon: Users },
+                  { id: "professional", title: "Soy profesional", icon: ClipboardList },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  const active = loginIntent === item.id;
+
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`flex min-h-14 items-center justify-center gap-2 rounded-lg border px-4 text-sm font-black transition ${
+                        active
+                          ? "border-[var(--tenant-color)] bg-[var(--tenant-color)] text-white shadow-md"
+                          : "border-[var(--line)] bg-white text-[#39433f] hover:border-[var(--tenant-color)]"
+                      }`}
+                      onClick={() => {
+                        setWorkspaceError("");
+                        setLoginIntent(item.id as LoginIntent);
+                      }}
+                    >
+                      <Icon className="size-4" />
+                      {item.title}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
           <form className="mt-8 space-y-4" onSubmit={handleLogin}>
             <Field
               label="Correo electrónico"
@@ -1283,6 +1400,7 @@ export function NutriOSApp({
               {workspaceError || notice}
             </p>
           )}
+          </div>
         </section>
       </main>
     );
@@ -2277,6 +2395,61 @@ function Pill({ icon: Icon, label }: { icon: typeof Users; label: string }) {
       {label}
     </span>
   );
+}
+
+async function resolveCommonWorkspace(
+  supabase: ReturnType<typeof createSupabaseBrowser>,
+  userId: string,
+  loginIntent: LoginIntent,
+): Promise<{ tenant: Tenant; role: UserRole } | null> {
+  if (!supabase) return null;
+
+  if (loginIntent === "professional") {
+    const { data: membershipRows } = await supabase
+      .from("tenant_members")
+      .select(
+        "role,status,created_at,tenant:tenants(id,slug,name,logo_url,primary_color,privacy_policy_url)",
+      )
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .order("created_at", { ascending: true });
+
+    const professionalMembership = (membershipRows ?? []).find((row) =>
+      ["owner", "nutritionist"].includes(String(row.role)),
+    );
+    const tenant = normalizeJoinedTenant(professionalMembership?.tenant);
+
+    if (professionalMembership && tenant) {
+      return {
+        tenant,
+        role: professionalMembership.role as UserRole,
+      };
+    }
+
+    return null;
+  }
+
+  const { data: patientRows } = await supabase
+    .from("patients")
+    .select(
+      "id,registered_at,tenant:tenants(id,slug,name,logo_url,primary_color,privacy_policy_url)",
+    )
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .order("registered_at", { ascending: false });
+  const patientTenant = normalizeJoinedTenant(patientRows?.[0]?.tenant);
+
+  return patientTenant
+    ? {
+        tenant: patientTenant,
+        role: "patient",
+      }
+    : null;
+}
+
+function normalizeJoinedTenant(value: Tenant | Tenant[] | null | undefined) {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
 }
 
 function PatientSwitcher({

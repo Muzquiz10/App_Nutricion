@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const componentPath = new URL("../app/components/NutriOSApp.tsx", import.meta.url);
+const homePagePath = new URL("../app/page.tsx", import.meta.url);
 const repairMigrationPath = new URL(
   "../supabase/migrations/202608040003_calendar_event_policy_repair.sql",
   import.meta.url,
@@ -31,4 +32,12 @@ test("calendar repair migration fixes constraints and policies together", async 
   assert.match(sql, /status in \('pending', 'confirmed', 'cancelled'\)/i);
   assert.match(sql, /Patients can create own appointments/i);
   assert.match(sql, /get_calendar_busy_slots/i);
+});
+
+test("home route is the shared app entry point", async () => {
+  const source = await readFile(homePagePath, "utf8");
+
+  assert.match(source, /commonEntry/);
+  assert.match(source, /tenantSlug="app"/);
+  assert.doesNotMatch(source, /resolveTenantSlugFromHost/);
 });

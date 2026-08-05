@@ -185,7 +185,7 @@ export function InvitationAcceptApp({
       return;
     }
 
-    window.location.replace(`/n/${invitation.tenant.slug}`);
+    window.location.replace("/");
   }
 
   if (loading) {
