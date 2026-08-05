@@ -3,8 +3,10 @@
 :root {
   --background: #f7f5ef;
   --foreground: #17201d;
-  --tenant-color: #2f7d6d;
-  --tenant-color-dark: #225f52;
+  --tenant-color: #0b2f4a;
+  --tenant-color-dark: #071f31;
+  --brand-accent: #8bd8f7;
+  --brand-accent-soft: #eaf8fd;
   --panel: #fffdf8;
   --muted: #6c756f;
   --line: #ded9cc;
