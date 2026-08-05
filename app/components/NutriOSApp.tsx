@@ -1315,17 +1315,8 @@ export function NutriOSApp({
         style={appStyle}
       >
         <section className="grid w-full max-w-5xl overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-[var(--shadow-soft)] lg:grid-cols-[minmax(0,0.95fr)_minmax(360px,1fr)]">
-          <div className="flex min-h-[420px] flex-col justify-between bg-[var(--brand-accent-soft)] p-6 sm:p-8">
-            <Brand tenant={tenant} compact={commonEntry} />
-            <div className="mt-10 max-w-md">
-              <p className="text-xs font-black uppercase tracking-normal text-[var(--tenant-color)]">
-                Acceso {APP_NAME}
-              </p>
-              <h1 className="mt-3 text-3xl font-black tracking-normal text-[#17201d] sm:text-4xl">
-                Un mismo lugar para clientes y profesionales.
-              </h1>
-            </div>
-            <div className="mt-10 max-w-xs">
+          <div className="flex min-h-[260px] items-center justify-center bg-[var(--brand-accent-soft)] px-8 py-10 sm:min-h-[340px] sm:px-12 lg:min-h-[480px]">
+            <div className="w-full max-w-[420px]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={APP_LOGO_WITH_SLOGAN_SRC}
