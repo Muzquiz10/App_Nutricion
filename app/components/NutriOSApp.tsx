@@ -385,15 +385,15 @@ const dayLabels = [
 const mealTypes = ["Desayuno", "Almuerzo", "Comida", "Media tarde", "Cena"];
 const mealPhotoTypes = [...mealTypes, "Snack"];
 const mealUnitOptions = [
-  "gramos",
-  "kilogramos",
-  "mililitros",
-  "litros",
-  "unidades",
-  "cucharadas",
-  "cucharaditas",
-  "tazas",
-  "raciones",
+  "Gramos",
+  "Kilogramos",
+  "Mililitros",
+  "Litros",
+  "Unidades",
+  "Cucharadas",
+  "Cucharaditas",
+  "Tazas",
+  "Raciones",
 ];
 const maxLogoFileSizeBytes = 2 * 1024 * 1024;
 const maxMealPhotoDimension = 1600;
@@ -812,7 +812,7 @@ const demoPlan: MealPlan = {
           title: "Yogur sin lactosa con avena",
           description: "Añadir frutos rojos y nueces.",
           quantity: 250,
-          unit: "gramos",
+          unit: "Gramos",
           food_name: "Yogur sin lactosa con avena",
           position: 1,
         },
@@ -823,7 +823,7 @@ const demoPlan: MealPlan = {
           title: "Pollo con arroz integral",
           description: "Verduras salteadas y aceite de oliva.",
           quantity: 1,
-          unit: "raciones",
+          unit: "Raciones",
           food_name: "Pollo con arroz integral",
           position: 2,
         },
@@ -3322,20 +3322,24 @@ function PlansPanel({
   const draftItems = sortDraftItems(
     normalizedDraft.draftItems.filter(hasCompleteDraftMealItem),
   );
+  const isNutritionist = role !== "patient";
+  const availablePlans = useMemo(
+    () => (isNutritionist ? plans : plans.filter((plan) => isPlanActive(plan))),
+    [isNutritionist, plans],
+  );
   const selectedPublishedPlan =
-    plans.find((plan) => plan.id === selectedPlanId) ?? plans[0] ?? null;
+    availablePlans.find((plan) => plan.id === selectedPlanId) ?? availablePlans[0] ?? null;
   const draftPlan =
     selectedPatient && draftItems.length > 0
       ? buildDraftMealPlan(normalizedDraft, draftItems, selectedPatient.id)
       : null;
-  const isNutritionist = role !== "patient";
   const activePlan = isNutritionist && draftPlan ? draftPlan : selectedPublishedPlan;
   const activePlanIsDraft = Boolean(isNutritionist && draftPlan);
 
   useEffect(() => {
-    if (!plans.length || plans.some((plan) => plan.id === selectedPlanId)) return;
-    setSelectedPlanId(plans[0].id);
-  }, [plans, selectedPlanId, setSelectedPlanId]);
+    if (!availablePlans.length || availablePlans.some((plan) => plan.id === selectedPlanId)) return;
+    setSelectedPlanId(availablePlans[0].id);
+  }, [availablePlans, selectedPlanId, setSelectedPlanId]);
 
   function addRowsToDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -3421,6 +3425,17 @@ function PlansPanel({
       return;
     }
 
+    const archiveError = await deactivateOtherMealPlans(
+      supabase,
+      selectedPatient.id,
+      plan.id,
+    );
+    if (archiveError) {
+      onNotice(archiveError.message);
+      setPublishing(false);
+      return;
+    }
+
     onNotice("Dieta publicada para el cliente.");
     clearPlanDraft();
     setSelectedPlanId(plan.id);
@@ -3444,6 +3459,71 @@ function PlansPanel({
     }
 
     onNotice("Dieta borrada.");
+    await onReload();
+  }
+
+  async function duplicatePlan(plan: MealPlan) {
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para duplicar dietas reales.");
+      return;
+    }
+
+    const duplicatedPlan = await duplicateMealPlan(
+      supabase,
+      tenant.id,
+      plan,
+      `${plan.title} copia`,
+    );
+
+    if (duplicatedPlan.error || !duplicatedPlan.planId) {
+      onNotice(duplicatedPlan.error?.message ?? "No se pudo duplicar la dieta.");
+      return;
+    }
+
+    setSelectedPlanId(duplicatedPlan.planId);
+    onNotice("Dieta duplicada como inactiva.");
+    await onReload();
+  }
+
+  async function togglePlanStatus(plan: MealPlan) {
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para activar o desactivar dietas reales.");
+      return;
+    }
+
+    if (isPlanActive(plan)) {
+      const { error } = await supabase
+        .from("meal_plans")
+        .update({ status: "archived" })
+        .eq("id", plan.id);
+
+      if (error) {
+        onNotice(error.message);
+        return;
+      }
+
+      onNotice("Dieta desactivada.");
+      await onReload();
+      return;
+    }
+
+    const archiveError = await deactivateOtherMealPlans(supabase, plan.patient_id, plan.id);
+    if (archiveError) {
+      onNotice(archiveError.message);
+      return;
+    }
+
+    const { error } = await supabase
+      .from("meal_plans")
+      .update({ status: "published" })
+      .eq("id", plan.id);
+
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    onNotice("Dieta activada.");
     await onReload();
   }
 
@@ -3506,6 +3586,8 @@ function PlansPanel({
               selectedPlanId={selectedPublishedPlan?.id ?? ""}
               onSelectPlan={setSelectedPlanId}
               onDeletePlan={deletePlan}
+              onDuplicatePlan={duplicatePlan}
+              onTogglePlanStatus={togglePlanStatus}
             />
           </Panel>
         </div>
@@ -3523,6 +3605,7 @@ function PlansPanel({
           onReload={onReload}
           onUpdateDraftMeal={updateDraftPlanMeal}
           onDeleteDraftMeal={deleteDraftPlanMeal}
+          onPasteDraftDay={pasteDraftDayMeals}
         />
       </Panel>
     </div>
@@ -3584,8 +3667,10 @@ function PlansPanel({
 
       return {
         ...draft,
-        draftItems: draft.draftItems.map((item, itemIndex) =>
-          itemIndex === index ? normalizeDraftMealItem({ ...item, ...patch }) : item,
+        draftItems: sortDraftItems(
+          draft.draftItems.map((item, itemIndex) =>
+            itemIndex === index ? normalizeDraftMealItem({ ...item, ...patch }) : item,
+          ),
         ),
       };
     });
@@ -3598,6 +3683,20 @@ function PlansPanel({
       return {
         ...draft,
         draftItems: draft.draftItems.filter((_, itemIndex) => itemIndex !== index),
+      };
+    });
+  }
+
+  function pasteDraftDayMeals(targetDayIndex: number, copiedItems: MealItem[]) {
+    setPlanDraft((current) => {
+      const draft = normalizePlanDraft(current);
+
+      return {
+        ...draft,
+        draftItems: sortDraftItems([
+          ...draft.draftItems,
+          ...copiedItems.map((item) => mealItemToDraftMealItem(item, targetDayIndex)),
+        ]),
       };
     });
   }
@@ -3647,7 +3746,7 @@ function DietBuilderRow({
         />
         <SelectField
           label="Unidad de medida"
-          value={item.unit ?? "gramos"}
+          value={formatMealUnit(item.unit ?? "Gramos")}
           onChange={(value) => onChange({ unit: value })}
           options={mealUnitOptions.map((label) => ({
             value: label,
@@ -3682,6 +3781,8 @@ function DietPublishedSummary({
   selectedPlanId,
   onSelectPlan,
   onDeletePlan,
+  onDuplicatePlan,
+  onTogglePlanStatus,
 }: {
   plan: MealPlan | null;
   isDraft: boolean;
@@ -3689,6 +3790,8 @@ function DietPublishedSummary({
   selectedPlanId: string;
   onSelectPlan: (planId: string) => void;
   onDeletePlan: (plan: MealPlan) => Promise<void>;
+  onDuplicatePlan: (plan: MealPlan) => Promise<void>;
+  onTogglePlanStatus: (plan: MealPlan) => Promise<void>;
 }) {
   const groupedItems = getPlanMeals(plan);
 
@@ -3706,7 +3809,7 @@ function DietPublishedSummary({
             onChange={onSelectPlan}
             options={plans.map((savedPlan) => ({
               value: savedPlan.id,
-              label: `${savedPlan.title} - ${formatDate(savedPlan.start_date)}`,
+              label: `${savedPlan.title} - ${formatDate(savedPlan.start_date)} - ${formatMealPlanStatus(savedPlan)}`,
             }))}
           />
         </div>
@@ -3717,7 +3820,7 @@ function DietPublishedSummary({
           <div className="rounded-lg border border-[var(--line)] bg-white p-3">
             <p className="font-black">{plan.title}</p>
             <p className="text-sm text-[var(--muted)]">
-              Inicio {formatDate(plan.start_date)} - {isDraft ? "borrador" : plan.status}
+              Inicio {formatDate(plan.start_date)} - {isDraft ? "Borrador" : formatMealPlanStatus(plan)}
             </p>
           </div>
           <div className="max-h-[430px] space-y-3 overflow-y-auto pr-1">
@@ -3741,14 +3844,36 @@ function DietPublishedSummary({
             )}
           </div>
           {!isDraft && (
-            <button
-              type="button"
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#e8c7be] bg-[#fff3ef] px-3 text-xs font-bold text-[#8d3c2f]"
-              onClick={() => onDeletePlan(plan)}
-            >
-              <Trash2 className="size-4" />
-              Borrar dieta
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-xs font-bold text-[#53605a]"
+                onClick={() => onDuplicatePlan(plan)}
+              >
+                <Copy className="size-4" />
+                Duplicar dieta
+              </button>
+              <button
+                type="button"
+                className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-bold ${
+                  isPlanActive(plan)
+                    ? "border-[#e8c7be] bg-[#fff3ef] text-[#8d3c2f]"
+                    : "border-[#b8dccd] bg-[#effaf5] text-[#255d50]"
+                }`}
+                onClick={() => onTogglePlanStatus(plan)}
+              >
+                {isPlanActive(plan) ? <Ban className="size-4" /> : <Check className="size-4" />}
+                {isPlanActive(plan) ? "Desactivar dieta" : "Activar dieta"}
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#e8c7be] bg-[#fff3ef] px-3 text-xs font-bold text-[#8d3c2f]"
+                onClick={() => onDeletePlan(plan)}
+              >
+                <Trash2 className="size-4" />
+                Borrar dieta
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -3767,6 +3892,7 @@ function MealPlanCalendar({
   onReload,
   onUpdateDraftMeal,
   onDeleteDraftMeal,
+  onPasteDraftDay,
 }: {
   plan: MealPlan | null;
   isDraft: boolean;
@@ -3778,11 +3904,92 @@ function MealPlanCalendar({
   onReload: () => Promise<void>;
   onUpdateDraftMeal: (index: number, patch: Partial<DraftMealItem>) => void;
   onDeleteDraftMeal: (index: number) => void;
+  onPasteDraftDay: (targetDayIndex: number, copiedItems: MealItem[]) => void;
 }) {
   const planDays = plan?.meal_plan_days ?? [];
+  const [copiedDay, setCopiedDay] = useState<{
+    dayIndex: number;
+    dayLabel: string;
+    items: MealItem[];
+  } | null>(null);
 
   function handlePrint() {
-    window.print();
+    if (typeof document === "undefined") return;
+
+    document.body.classList.add("printing-diet-calendar");
+    const clearPrintMode = () => document.body.classList.remove("printing-diet-calendar");
+    window.addEventListener("afterprint", clearPrintMode, { once: true });
+    window.setTimeout(() => {
+      window.print();
+      window.setTimeout(clearPrintMode, 1000);
+    }, 0);
+  }
+
+  function copyDay(dayIndex: number) {
+    if (!plan) return;
+
+    const items = getMealItemsForDay(plan, dayIndex);
+    if (items.length === 0) {
+      onNotice("Ese día no tiene comidas para copiar.");
+      return;
+    }
+
+    setCopiedDay({
+      dayIndex,
+      dayLabel: dayLabels[dayIndex - 1],
+      items,
+    });
+    onNotice(`Comidas de ${dayLabels[dayIndex - 1]} copiadas.`);
+  }
+
+  async function pasteDay(targetDayIndex: number) {
+    if (!plan || !copiedDay) return;
+    if (copiedDay.dayIndex === targetDayIndex) {
+      onNotice("Elige un día diferente para pegar las comidas.");
+      return;
+    }
+
+    if (isDraft) {
+      onPasteDraftDay(targetDayIndex, copiedDay.items);
+      onNotice(`Comidas pegadas en ${dayLabels[targetDayIndex - 1]}.`);
+      return;
+    }
+
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para editar dietas reales.");
+      return;
+    }
+
+    const mealPlanDayId = await getOrCreateMealPlanDayId(
+      supabase,
+      plan.id,
+      planDays,
+      targetDayIndex,
+    );
+    if (!mealPlanDayId) {
+      onNotice("No se pudo crear el día destino.");
+      return;
+    }
+
+    const targetItems = getMealItemsForDay(plan, targetDayIndex);
+    const nextPosition =
+      targetItems.reduce((max, item) => Math.max(max, item.position), 0) + 1;
+    const rows = copiedDay.items.map((item, index) =>
+      mealItemPayloadFromDraft(
+        mealItemToDraftMealItem(item, targetDayIndex),
+        mealPlanDayId,
+        nextPosition + index,
+      ),
+    );
+    const error = await insertMealRows(supabase, rows);
+
+    if (error) {
+      onNotice(error.message);
+      return;
+    }
+
+    onNotice(`Comidas pegadas en ${dayLabels[targetDayIndex - 1]}.`);
+    await onReload();
   }
 
   return (
@@ -3790,7 +3997,7 @@ function MealPlanCalendar({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="inline-flex items-center rounded-full bg-[#eef7fb] px-3 py-1 text-xs font-black uppercase text-[var(--tenant-color)]">
-            {isDraft ? "Borrador pendiente" : plan ? "Publicado" : "Sin dieta"}
+            {isDraft ? "Borrador pendiente" : plan ? formatMealPlanStatus(plan) : "Sin dieta"}
           </div>
           <h2 className="mt-2 text-lg font-black">Vista dieta</h2>
           <p className="text-sm text-[var(--muted)]">
@@ -3835,14 +4042,40 @@ function MealPlanCalendar({
               <div className="border-r border-[var(--line)] p-3 text-xs font-black uppercase text-[var(--muted)]">
                 Comida / día
               </div>
-              {dayLabels.map((dayLabel) => (
+              {dayLabels.map((dayLabel, dayIndex) => {
+                const calendarDayIndex = dayIndex + 1;
+
+                return (
                 <div
                   key={dayLabel}
                   className="border-r border-[var(--line)] p-3 text-xs font-black uppercase text-[#53605a] last:border-r-0"
                 >
-                  {dayLabel}
+                  <div className="flex flex-col gap-2">
+                    <span>{dayLabel}</span>
+                    {isEditable && (
+                      <div className="print-hidden flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          className="inline-flex h-7 flex-1 items-center justify-center gap-1 rounded-md border border-[var(--line)] bg-white px-2 text-[11px] font-bold normal-case text-[#53605a]"
+                          onClick={() => copyDay(calendarDayIndex)}
+                        >
+                          <Copy className="size-3" />
+                          Copiar
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex h-7 flex-1 items-center justify-center gap-1 rounded-md border border-[var(--line)] bg-white px-2 text-[11px] font-bold normal-case text-[#53605a] disabled:opacity-50"
+                          onClick={() => pasteDay(calendarDayIndex)}
+                          disabled={!copiedDay}
+                        >
+                          Pegar
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
             {mealTypes.map((mealType) => (
               <div
@@ -3925,7 +4158,7 @@ function CalendarMealItem({
   const [dayIndex, setDayIndex] = useState(String(currentDayIndex));
   const [mealType, setMealType] = useState(formatMealTypeLabel(item.meal_type));
   const [quantity, setQuantity] = useState(formatMealQuantityValue(item));
-  const [unit, setUnit] = useState(item.unit ?? "gramos");
+  const [unit, setUnit] = useState(formatMealUnit(item.unit ?? "Gramos"));
   const [foodName, setFoodName] = useState(getMealFoodName(item));
   const draftIndex = getDraftMealIndex(item);
 
@@ -3933,7 +4166,7 @@ function CalendarMealItem({
     setDayIndex(String(currentDayIndex));
     setMealType(formatMealTypeLabel(item.meal_type));
     setQuantity(formatMealQuantityValue(item));
-    setUnit(item.unit ?? "gramos");
+    setUnit(formatMealUnit(item.unit ?? "Gramos"));
     setFoodName(getMealFoodName(item));
     setIsEditing(true);
   }
@@ -4181,7 +4414,7 @@ function createDraftMealItem(patch: Partial<DraftMealItem> = {}): DraftMealItem 
     dayIndex: 1,
     mealType: "Desayuno",
     quantity: "",
-    unit: "gramos",
+    unit: "Gramos",
     foodName: "",
     title: "",
     description: "",
@@ -4197,7 +4430,7 @@ function normalizePlanDraft(draft: Partial<MealPlanDraft>): MealPlanDraft {
     title: draft.title ?? "Plan semanal",
     startDate: draft.startDate ?? new Date().toISOString().slice(0, 10),
     entryRows: entryRows.length > 0 ? entryRows : [createDraftMealItem()],
-    draftItems,
+    draftItems: sortDraftItems(draftItems),
   };
 }
 
@@ -4212,7 +4445,7 @@ function normalizeDraftMealItem(item: Partial<DraftMealItem>): DraftMealItem {
     dayIndex: Number(item.dayIndex || 1),
     mealType: formatMealTypeLabel(item.mealType || "Desayuno"),
     quantity: item.quantity ?? "",
-    unit: item.unit || "gramos",
+    unit: formatMealUnit(item.unit || "Gramos"),
     foodName,
     title: foodName,
     description: item.description ?? "",
@@ -4221,6 +4454,20 @@ function normalizeDraftMealItem(item: Partial<DraftMealItem>): DraftMealItem {
 
 function hasCompleteDraftMealItem(item: DraftMealItem) {
   return Boolean((item.foodName ?? item.title).trim() && (item.quantity ?? "").trim());
+}
+
+function mealItemToDraftMealItem(item: MealItem, dayIndex: number): DraftMealItem {
+  const foodName = getMealFoodName(item);
+
+  return {
+    dayIndex,
+    mealType: formatMealTypeLabel(item.meal_type),
+    quantity: formatMealQuantityValue(item),
+    unit: formatMealUnit(item.unit ?? "Gramos"),
+    foodName,
+    title: foodName,
+    description: "",
+  };
 }
 
 function sortDraftItems(items: DraftMealItem[]) {
@@ -4244,7 +4491,7 @@ function mealItemPayloadFromDraft(
     title: foodName,
     description: null,
     quantity: parseMealQuantity(item.quantity ?? ""),
-    unit: item.unit ?? "gramos",
+    unit: formatMealUnit(item.unit ?? "Gramos"),
     food_name: foodName,
     position,
   };
@@ -4283,6 +4530,88 @@ async function updateMealItem(
     .eq("id", itemId);
 
   return fallbackError;
+}
+
+async function deactivateOtherMealPlans(
+  supabase: ReturnType<typeof createSupabaseBrowser>,
+  patientId: string,
+  activePlanId: string,
+) {
+  if (!supabase) return null;
+
+  const { error } = await supabase
+    .from("meal_plans")
+    .update({ status: "archived" })
+    .eq("patient_id", patientId)
+    .eq("status", "published")
+    .neq("id", activePlanId);
+
+  return error;
+}
+
+async function duplicateMealPlan(
+  supabase: ReturnType<typeof createSupabaseBrowser>,
+  tenantId: string,
+  plan: MealPlan,
+  title: string,
+) {
+  if (!supabase) return { planId: null, error: null };
+
+  const { data: insertedPlan, error: planError } = await supabase
+    .from("meal_plans")
+    .insert({
+      tenant_id: tenantId,
+      patient_id: plan.patient_id,
+      title,
+      start_date: plan.start_date,
+      status: "archived",
+    })
+    .select("id")
+    .single();
+
+  if (planError || !insertedPlan) {
+    return { planId: null, error: planError };
+  }
+
+  const sourceDays = plan.meal_plan_days ?? [];
+  if (sourceDays.length === 0) {
+    return { planId: insertedPlan.id as string, error: null };
+  }
+
+  const { data: insertedDays, error: dayError } = await supabase
+    .from("meal_plan_days")
+    .insert(
+      sourceDays.map((day) => ({
+        meal_plan_id: insertedPlan.id,
+        day_index: day.day_index,
+        day_label: day.day_label,
+        notes: day.notes,
+      })),
+    )
+    .select("id,day_index");
+
+  if (dayError || !insertedDays) {
+    return { planId: null, error: dayError };
+  }
+
+  const mealRows = sourceDays.flatMap((day) => {
+    const targetDayId = insertedDays.find((insertedDay) => insertedDay.day_index === day.day_index)?.id;
+    if (!targetDayId) return [];
+
+    return getMealItemsForDay(plan, day.day_index).map((item, index) =>
+      mealItemPayloadFromDraft(
+        mealItemToDraftMealItem(item, day.day_index),
+        targetDayId,
+        index + 1,
+      ),
+    );
+  });
+  const itemError = await insertMealRows(supabase, mealRows);
+
+  return {
+    planId: itemError ? null : (insertedPlan.id as string),
+    error: itemError,
+  };
 }
 
 function toLegacyMealItemPayload(payload: ReturnType<typeof mealItemPayloadFromDraft>) {
@@ -4347,7 +4676,7 @@ function formatMealQuantityValue(item: MealItem) {
 
 function formatMealQuantity(item: MealItem) {
   const quantity = getMealQuantity(item);
-  if (quantity && item.unit) return `${quantity} ${item.unit}`;
+  if (quantity && item.unit) return `${quantity} ${formatMealUnit(item.unit)}`;
   if (item.description) return item.description;
   return "Sin cantidad indicada";
 }
@@ -4359,7 +4688,7 @@ function formatMealServing(item: MealItem) {
 function formatQuantityAndUnit(quantity: number | null, unit: string | null) {
   if (quantity === null && !unit) return null;
 
-  return `${quantity ?? ""} ${unit ?? ""}`.trim() || null;
+  return `${quantity ?? ""} ${unit ? formatMealUnit(unit) : ""}`.trim() || null;
 }
 
 function parseMealQuantity(value: string) {
@@ -4375,6 +4704,30 @@ function formatMealTypeLabel(mealType: string) {
   if (mealType === "Merienda") return "Media tarde";
 
   return mealType;
+}
+
+function formatMealUnit(unit: string) {
+  const normalizedUnit = unit.trim();
+  const knownUnit = mealUnitOptions.find(
+    (option) => option.toLocaleLowerCase("es-ES") === normalizedUnit.toLocaleLowerCase("es-ES"),
+  );
+  if (knownUnit) return knownUnit;
+
+  return normalizedUnit
+    ? normalizedUnit.charAt(0).toLocaleUpperCase("es-ES") + normalizedUnit.slice(1)
+    : "Gramos";
+}
+
+function isPlanActive(plan: MealPlan) {
+  return plan.status === "published";
+}
+
+function formatMealPlanStatus(plan: MealPlan) {
+  if (plan.status === "draft") return "Borrador";
+  if (isPlanActive(plan)) return "Activa";
+  if (plan.status === "archived") return "Inactiva";
+
+  return plan.status;
 }
 
 function getDraftMealIndex(item: MealItem) {

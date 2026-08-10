@@ -84,11 +84,23 @@ a:focus-visible {
     background: #ffffff;
   }
 
+  body.printing-diet-calendar * {
+    visibility: hidden !important;
+  }
+
+  body.printing-diet-calendar .diet-print-card,
+  body.printing-diet-calendar .diet-print-card * {
+    visibility: visible !important;
+  }
+
   .print-hidden {
     display: none !important;
   }
 
   .diet-print-card {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    width: 100% !important;
     border: 0 !important;
     box-shadow: none !important;
   }
