@@ -78,3 +78,22 @@ a:focus-visible {
   scrollbar-width: thin;
   scrollbar-color: #c7c0b2 transparent;
 }
+
+@media print {
+  body {
+    background: #ffffff;
+  }
+
+  .print-hidden {
+    display: none !important;
+  }
+
+  .diet-print-card {
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .diet-calendar-grid {
+    min-width: 0 !important;
+  }
+}

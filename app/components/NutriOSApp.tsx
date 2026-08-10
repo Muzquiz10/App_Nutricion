@@ -28,6 +28,7 @@ import {
   Palette,
   Pencil,
   Plus,
+  Printer,
   RotateCcw,
   Send,
   Settings as SettingsIcon,
@@ -275,17 +276,31 @@ type MealPlanDay = {
 
 type MealItem = {
   id: string;
+  meal_plan_day_id?: string;
   meal_type: string;
   title: string;
   description: string | null;
+  quantity?: number | string | null;
+  unit?: string | null;
+  food_name?: string | null;
   position: number;
 };
 
 type DraftMealItem = {
   dayIndex: number;
   mealType: string;
+  quantity?: string;
+  unit?: string;
+  foodName?: string;
   title: string;
   description: string;
+};
+
+type MealPlanDraft = {
+  title: string;
+  startDate: string;
+  entryRows: DraftMealItem[];
+  draftItems: DraftMealItem[];
 };
 
 type TabId =
@@ -367,8 +382,19 @@ const dayLabels = [
   "Domingo",
 ];
 
-const mealTypes = ["Desayuno", "Media mañana", "Comida", "Merienda", "Cena"];
+const mealTypes = ["Desayuno", "Almuerzo", "Comida", "Media tarde", "Cena"];
 const mealPhotoTypes = [...mealTypes, "Snack"];
+const mealUnitOptions = [
+  "gramos",
+  "kilogramos",
+  "mililitros",
+  "litros",
+  "unidades",
+  "cucharadas",
+  "cucharaditas",
+  "tazas",
+  "raciones",
+];
 const maxLogoFileSizeBytes = 2 * 1024 * 1024;
 const maxMealPhotoDimension = 1600;
 const mealPhotoQuality = 0.82;
@@ -391,7 +417,11 @@ const calendarEventTypeOptions: Array<{ value: CalendarEventType; label: string 
   { value: "note", label: "Nota" },
 ];
 
-const mealTypeOrder = new Map(mealTypes.map((mealType, index) => [mealType, index]));
+const mealTypeOrder = new Map<string, number>([
+  ...mealTypes.map((mealType, index) => [mealType, index] as const),
+  ["Media mañana", 1],
+  ["Merienda", 3],
+]);
 const mealPhotoTypeOrder = new Map(
   mealPhotoTypes.map((mealType, index) => [mealType, index]),
 );
@@ -777,16 +807,24 @@ const demoPlan: MealPlan = {
       meal_items: [
         {
           id: "item-1",
+          meal_plan_day_id: "day-1",
           meal_type: "Desayuno",
           title: "Yogur sin lactosa con avena",
           description: "Añadir frutos rojos y nueces.",
+          quantity: 250,
+          unit: "gramos",
+          food_name: "Yogur sin lactosa con avena",
           position: 1,
         },
         {
           id: "item-2",
+          meal_plan_day_id: "day-1",
           meal_type: "Comida",
           title: "Pollo con arroz integral",
           description: "Verduras salteadas y aceite de oliva.",
+          quantity: 1,
+          unit: "raciones",
+          food_name: "Pollo con arroz integral",
           position: 2,
         },
       ],
@@ -3222,7 +3260,7 @@ function PatientRecord({
         {role !== "patient" && (
           <InfoBlock
             label="Calorias basales actuales (TMB)"
-            value={basalCalories ? `${basalCalories} kcal/dia` : "Faltan datos para calcular"}
+            value={basalCalories ? `${basalCalories} kcal/día` : "Faltan datos para calcular"}
           />
         )}
         <InfoBlock label="Sexo para calculo basal" value={formatSex(patient.sex)} />
@@ -3262,36 +3300,83 @@ function PlansPanel({
   onReload: () => Promise<void>;
 }) {
   const emptyPlanDraft = useMemo(
-    () => ({
+    (): MealPlanDraft => ({
       title: "Plan semanal",
       startDate: new Date().toISOString().slice(0, 10),
-      draftItems: [
-        { dayIndex: 1, mealType: "Desayuno", title: "", description: "" },
-      ] as DraftMealItem[],
+      entryRows: [createDraftMealItem()],
+      draftItems: [],
     }),
     [],
   );
-  const [planDraft, setPlanDraft, clearPlanDraft] = useStoredValue(
+  const [planDraft, setPlanDraft, clearPlanDraft] = useStoredValue<MealPlanDraft>(
     `nutrios:draft:plan:${selectedPatient?.id ?? "none"}`,
     emptyPlanDraft,
   );
+  const [selectedPlanId, setSelectedPlanId] = useStoredValue(
+    `nutrios:selected:plan:${selectedPatient?.id ?? "none"}`,
+    "",
+  );
+  const [publishing, setPublishing] = useState(false);
+  const normalizedDraft = normalizePlanDraft(planDraft);
+  const entryRows = normalizedDraft.entryRows;
+  const draftItems = sortDraftItems(
+    normalizedDraft.draftItems.filter(hasCompleteDraftMealItem),
+  );
+  const selectedPublishedPlan =
+    plans.find((plan) => plan.id === selectedPlanId) ?? plans[0] ?? null;
+  const draftPlan =
+    selectedPatient && draftItems.length > 0
+      ? buildDraftMealPlan(normalizedDraft, draftItems, selectedPatient.id)
+      : null;
+  const isNutritionist = role !== "patient";
+  const activePlan = isNutritionist && draftPlan ? draftPlan : selectedPublishedPlan;
+  const activePlanIsDraft = Boolean(isNutritionist && draftPlan);
 
-  async function savePlan(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    if (!plans.length || plans.some((plan) => plan.id === selectedPlanId)) return;
+    setSelectedPlanId(plans[0].id);
+  }, [plans, selectedPlanId, setSelectedPlanId]);
+
+  function addRowsToDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const validRows = entryRows.filter(hasCompleteDraftMealItem);
+    if (validRows.length === 0) {
+      onNotice("Completa al menos una línea con cantidad y alimento.");
+      return;
+    }
+
+    setPlanDraft((current) => {
+      const draft = normalizePlanDraft(current);
+
+      return {
+        ...draft,
+        draftItems: sortDraftItems([...draft.draftItems, ...validRows]),
+        entryRows: [createDraftMealItem()],
+      };
+    });
+    onNotice("Comidas añadidas al borrador de la dieta.");
+  }
+
+  async function publishDraftPlan() {
     if (!selectedPatient) return;
     if (!supabase) {
       onNotice("Modo demo: conecta Supabase para guardar dietas reales.");
       return;
     }
+    if (draftItems.length === 0) {
+      onNotice("Añade comidas al plan antes de publicarlo.");
+      return;
+    }
 
-    const items = planDraft.draftItems.filter((item) => item.title.trim());
+    setPublishing(true);
     const { data: plan, error: planError } = await supabase
       .from("meal_plans")
       .insert({
         tenant_id: tenant.id,
         patient_id: selectedPatient.id,
-        title: planDraft.title,
-        start_date: planDraft.startDate,
+        title: normalizedDraft.title.trim() || "Plan semanal",
+        start_date: normalizedDraft.startDate,
         status: "published",
       })
       .select("id")
@@ -3299,10 +3384,11 @@ function PlansPanel({
 
     if (planError || !plan) {
       onNotice(planError?.message ?? "No se pudo guardar la dieta.");
+      setPublishing(false);
       return;
     }
 
-    const dayRows = Array.from(new Set(items.map((item) => item.dayIndex))).map((dayIndex) => ({
+    const dayRows = Array.from(new Set(draftItems.map((item) => item.dayIndex))).map((dayIndex) => ({
       meal_plan_id: plan.id,
       day_index: dayIndex,
       day_label: dayLabels[dayIndex - 1],
@@ -3314,27 +3400,32 @@ function PlansPanel({
       .select("id,day_index");
 
     if (dayError || !insertedDays) {
-      onNotice(dayError?.message ?? "No se pudieron guardar los dias.");
+      onNotice(dayError?.message ?? "No se pudieron guardar los días.");
+      setPublishing(false);
       return;
     }
 
-    const mealRows = items.map((item, index) => ({
-      meal_plan_day_id: insertedDays.find((day) => day.day_index === item.dayIndex)?.id,
-      meal_type: item.mealType,
-      title: item.title,
-      description: item.description,
-      position: index + 1,
-    }));
+    const mealRows = draftItems
+      .map((item, index) => {
+        const mealPlanDayId = insertedDays.find((day) => day.day_index === item.dayIndex)?.id;
+        if (!mealPlanDayId) return null;
 
-    const { error: itemError } = await supabase.from("meal_items").insert(mealRows);
+        return mealItemPayloadFromDraft(item, mealPlanDayId, index + 1);
+      })
+      .filter(Boolean);
+
+    const itemError = await insertMealRows(supabase, mealRows);
     if (itemError) {
       onNotice(itemError.message);
+      setPublishing(false);
       return;
     }
 
     onNotice("Dieta publicada para el cliente.");
     clearPlanDraft();
+    setSelectedPlanId(plan.id);
     await onReload();
+    setPublishing(false);
   }
 
   async function deletePlan(plan: MealPlan) {
@@ -3357,398 +3448,568 @@ function PlansPanel({
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[420px_1fr]">
-      {role !== "patient" && (
-        <Panel>
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-black">Crear dieta</h2>
-            <ClipboardList className="size-5 text-[var(--tenant-color)]" />
-          </div>
-          <form className="mt-5 space-y-4" onSubmit={savePlan}>
-            <Field
-              label="Título"
-              value={planDraft.title}
-              onChange={(value) => updatePlanDraft({ title: value })}
-              required
-            />
-            <Field
-              label="Fecha inicio"
-              type="date"
-              value={planDraft.startDate}
-              onChange={(value) => updatePlanDraft({ startDate: value })}
-              required
-            />
-            <div className="space-y-3">
-              {planDraft.draftItems.map((item, index) => (
-                <div key={index} className="rounded-lg border border-[var(--line)] bg-white p-3">
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <SelectField
-                      label="Día"
-                      value={String(item.dayIndex)}
-                      onChange={(value) => updateDraftItem(index, { dayIndex: Number(value) })}
-                      options={dayLabels.map((label, dayIndex) => ({
-                        value: String(dayIndex + 1),
-                        label,
-                      }))}
-                    />
-                    <SelectField
-                      label="Comida"
-                      value={item.mealType}
-                      onChange={(value) => updateDraftItem(index, { mealType: value })}
-                      options={mealTypes.map((label) => ({
-                        value: label,
-                        label,
-                      }))}
-                    />
-                  </div>
-                  <Field
-                    label="Plato"
-                    value={item.title}
-                    onChange={(value) => updateDraftItem(index, { title: value })}
-                  />
-                  <TextArea
-                    label="Indicaciones"
-                    value={item.description}
-                    onChange={(value) => updateDraftItem(index, { description: value })}
-                  />
-                </div>
-              ))}
+    <div className="grid gap-5">
+      {isNutritionist && (
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+          <Panel>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-black">Crear dieta</h2>
+              <ClipboardList className="size-5 text-[var(--tenant-color)]" />
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-semibold"
-                onClick={() =>
-                  setPlanDraft((current) => ({
-                    ...current,
-                    draftItems: [
-                      ...current.draftItems,
-                      { dayIndex: 1, mealType: "Comida", title: "", description: "" },
-                    ],
-                  }))
-                }
-              >
-                <Plus className="size-4" />
-                Añadir comida
-              </button>
-              <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
-                <Check className="size-4" />
-                Publicar
-              </button>
-            </div>
-          </form>
-        </Panel>
-      )}
+            <form className="mt-5 space-y-4" onSubmit={addRowsToDraft}>
+              <Field
+                label="Nombre de la dieta"
+                value={normalizedDraft.title}
+                onChange={(value) => updatePlanDraft({ title: value })}
+                required
+              />
+              <Field
+                label="Fecha inicio"
+                type="date"
+                value={normalizedDraft.startDate}
+                onChange={(value) => updatePlanDraft({ startDate: value })}
+                required
+              />
+              <div className="space-y-3 rounded-lg border border-[var(--line)] bg-white p-3">
+                {entryRows.map((item, index) => (
+                  <DietBuilderRow
+                    key={index}
+                    item={item}
+                    canRemove={entryRows.length > 1}
+                    onChange={(patch) => updateEntryRow(index, patch)}
+                    onRemove={() => removeEntryRow(index)}
+                  />
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-semibold"
+                  onClick={addEntryRow}
+                >
+                  <Plus className="size-4" />
+                  Añadir línea
+                </button>
+                <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white">
+                  <Check className="size-4" />
+                  Añadir al plan
+                </button>
+              </div>
+            </form>
+          </Panel>
 
-      <Panel className={role === "patient" ? "xl:col-span-2" : ""}>
-        <h2 className="text-lg font-black">Dieta publicada</h2>
-        <div className="mt-4 grid gap-4">
-          {plans.map((plan) => (
-            <MealPlanCard
-              key={plan.id}
-              plan={plan}
-              role={role}
-              supabase={supabase}
-              onNotice={onNotice}
-              onReload={onReload}
+          <Panel>
+            <DietPublishedSummary
+              plan={activePlan}
+              isDraft={activePlanIsDraft}
+              plans={plans}
+              selectedPlanId={selectedPublishedPlan?.id ?? ""}
+              onSelectPlan={setSelectedPlanId}
               onDeletePlan={deletePlan}
             />
-          ))}
-          {plans.length === 0 && <EmptyState text="No hay dietas publicadas para este cliente." />}
+          </Panel>
         </div>
+      )}
+
+      <Panel className="diet-print-card">
+        <MealPlanCalendar
+          plan={activePlan}
+          isDraft={activePlanIsDraft}
+          isEditable={isNutritionist}
+          supabase={supabase}
+          publishing={publishing}
+          onPublish={publishDraftPlan}
+          onNotice={onNotice}
+          onReload={onReload}
+          onUpdateDraftMeal={updateDraftPlanMeal}
+          onDeleteDraftMeal={deleteDraftPlanMeal}
+        />
       </Panel>
     </div>
   );
 
-  function updatePlanDraft(patch: Partial<Omit<typeof emptyPlanDraft, "draftItems">>) {
+  function updatePlanDraft(patch: Partial<Omit<MealPlanDraft, "draftItems" | "entryRows">>) {
     setPlanDraft((current) => ({
-      ...current,
+      ...normalizePlanDraft(current),
       ...patch,
     }));
   }
 
-  function updateDraftItem(index: number, patch: Partial<DraftMealItem>) {
-    setPlanDraft((current) => ({
-      ...current,
-      draftItems: current.draftItems.map((item, itemIndex) =>
-        itemIndex === index ? { ...item, ...patch } : item,
-      ),
-    }));
+  function updateEntryRow(index: number, patch: Partial<DraftMealItem>) {
+    setPlanDraft((current) => {
+      const draft = normalizePlanDraft(current);
+
+      return {
+        ...draft,
+        entryRows: draft.entryRows.map((item, itemIndex) =>
+          itemIndex === index ? normalizeDraftMealItem({ ...item, ...patch }) : item,
+        ),
+      };
+    });
+  }
+
+  function addEntryRow() {
+    setPlanDraft((current) => {
+      const draft = normalizePlanDraft(current);
+      const lastRow = draft.entryRows.at(-1);
+
+      return {
+        ...draft,
+        entryRows: [
+          ...draft.entryRows,
+          createDraftMealItem({
+            dayIndex: lastRow?.dayIndex ?? 1,
+            mealType: lastRow?.mealType ?? "Desayuno",
+          }),
+        ],
+      };
+    });
+  }
+
+  function removeEntryRow(index: number) {
+    setPlanDraft((current) => {
+      const draft = normalizePlanDraft(current);
+      const nextRows = draft.entryRows.filter((_, itemIndex) => itemIndex !== index);
+
+      return {
+        ...draft,
+        entryRows: nextRows.length > 0 ? nextRows : [createDraftMealItem()],
+      };
+    });
+  }
+
+  function updateDraftPlanMeal(index: number, patch: Partial<DraftMealItem>) {
+    setPlanDraft((current) => {
+      const draft = normalizePlanDraft(current);
+
+      return {
+        ...draft,
+        draftItems: draft.draftItems.map((item, itemIndex) =>
+          itemIndex === index ? normalizeDraftMealItem({ ...item, ...patch }) : item,
+        ),
+      };
+    });
+  }
+
+  function deleteDraftPlanMeal(index: number) {
+    setPlanDraft((current) => {
+      const draft = normalizePlanDraft(current);
+
+      return {
+        ...draft,
+        draftItems: draft.draftItems.filter((_, itemIndex) => itemIndex !== index),
+      };
+    });
   }
 }
 
-function MealPlanCard({
-  plan,
-  role,
-  supabase,
-  onNotice,
-  onReload,
-  onDeletePlan,
+function DietBuilderRow({
+  item,
+  canRemove,
+  onChange,
+  onRemove,
 }: {
-  plan: MealPlan;
-  role: UserRole | null;
-  supabase: ReturnType<typeof createSupabaseBrowser>;
-  onNotice: (message: string) => void;
-  onReload: () => Promise<void>;
-  onDeletePlan: (plan: MealPlan) => Promise<void>;
+  item: DraftMealItem;
+  canRemove: boolean;
+  onChange: (patch: Partial<DraftMealItem>) => void;
+  onRemove: () => void;
 }) {
-  const isEditable = role !== "patient";
-  const sortedDays = dayLabels.map((label, index) => {
-    const dayIndex = index + 1;
-    const existingDay =
-      (plan.meal_plan_days ?? []).find((day) => day.day_index === dayIndex) ??
-      null;
-    return { dayIndex, label, day: existingDay };
-  });
-
   return (
-    <div className="rounded-lg border border-[var(--line)] bg-white p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="font-black">{plan.title}</p>
-          <p className="text-sm text-[var(--muted)]">
-            Inicio {formatDate(plan.start_date)} - {plan.status}
-          </p>
-        </div>
-        {isEditable && (
+    <div className="grid gap-3 rounded-lg bg-[#faf8f1] p-3">
+      <div className="grid gap-3 md:grid-cols-2">
+        <SelectField
+          label="Día"
+          value={String(item.dayIndex)}
+          onChange={(value) => onChange({ dayIndex: Number(value) })}
+          options={dayLabels.map((label, dayIndex) => ({
+            value: String(dayIndex + 1),
+            label,
+          }))}
+        />
+        <SelectField
+          label="Comida"
+          value={item.mealType}
+          onChange={(value) => onChange({ mealType: value })}
+          options={mealTypes.map((label) => ({
+            value: label,
+            label,
+          }))}
+        />
+      </div>
+      <div className="grid gap-3 md:grid-cols-[110px_150px_minmax(0,1fr)_auto]">
+        <Field
+          label="Cantidad"
+          type="number"
+          step="0.01"
+          value={item.quantity ?? ""}
+          onChange={(value) => onChange({ quantity: value })}
+          required
+        />
+        <SelectField
+          label="Unidad de medida"
+          value={item.unit ?? "gramos"}
+          onChange={(value) => onChange({ unit: value })}
+          options={mealUnitOptions.map((label) => ({
+            value: label,
+            label,
+          }))}
+        />
+        <Field
+          label="Tipo de alimento"
+          value={item.foodName ?? item.title}
+          onChange={(value) => onChange({ foodName: value, title: value })}
+          required
+        />
+        {canRemove && (
           <button
             type="button"
-            className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#e8c7be] bg-[#fff3ef] px-3 text-xs font-bold text-[#8d3c2f]"
-            onClick={() => onDeletePlan(plan)}
+            className="mt-6 inline-flex h-11 items-center justify-center rounded-lg border border-[#e8c7be] bg-[#fff3ef] px-3 text-[#8d3c2f]"
+            onClick={onRemove}
+            aria-label="Eliminar línea"
           >
             <Trash2 className="size-4" />
-            Borrar dieta
           </button>
         )}
-      </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        {sortedDays.map(({ dayIndex, label, day }) => (
-          <MealPlanDayEditor
-            key={`${plan.id}-${dayIndex}`}
-            planId={plan.id}
-            dayIndex={dayIndex}
-            dayLabel={label}
-            day={day}
-            isEditable={isEditable}
-            supabase={supabase}
-            onNotice={onNotice}
-            onReload={onReload}
-          />
-        ))}
       </div>
     </div>
   );
 }
 
-function MealPlanDayEditor({
+function DietPublishedSummary({
+  plan,
+  isDraft,
+  plans,
+  selectedPlanId,
+  onSelectPlan,
+  onDeletePlan,
+}: {
+  plan: MealPlan | null;
+  isDraft: boolean;
+  plans: MealPlan[];
+  selectedPlanId: string;
+  onSelectPlan: (planId: string) => void;
+  onDeletePlan: (plan: MealPlan) => Promise<void>;
+}) {
+  const groupedItems = getPlanMeals(plan);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-black">Dieta publicada</h2>
+        <BookOpen className="size-5 text-[var(--tenant-color)]" />
+      </div>
+      {plans.length > 0 && (
+        <div className="mt-4">
+          <SelectField
+            label="Dieta guardada"
+            value={selectedPlanId}
+            onChange={onSelectPlan}
+            options={plans.map((savedPlan) => ({
+              value: savedPlan.id,
+              label: `${savedPlan.title} - ${formatDate(savedPlan.start_date)}`,
+            }))}
+          />
+        </div>
+      )}
+      {!plan && <div className="mt-4"><EmptyState text="Añade comidas al plan para montar la dieta." /></div>}
+      {plan && (
+        <div className="mt-4 space-y-3">
+          <div className="rounded-lg border border-[var(--line)] bg-white p-3">
+            <p className="font-black">{plan.title}</p>
+            <p className="text-sm text-[var(--muted)]">
+              Inicio {formatDate(plan.start_date)} - {isDraft ? "borrador" : plan.status}
+            </p>
+          </div>
+          <div className="max-h-[430px] space-y-3 overflow-y-auto pr-1">
+            {groupedItems.map(({ dayLabel, items }) => (
+              <div key={dayLabel} className="rounded-lg bg-[#f7f5ef] p-3">
+                <p className="text-sm font-black">{dayLabel}</p>
+                <div className="mt-2 space-y-2">
+                  {items.map((item) => (
+                    <div key={item.id} className="rounded-md bg-white px-3 py-2 text-sm">
+                      <p className="font-bold">{formatMealTypeLabel(item.meal_type)}</p>
+                      <p className="text-[var(--muted)]">{formatMealServing(item)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {groupedItems.length === 0 && (
+              <p className="rounded-md border border-dashed border-[#d8d1c4] px-3 py-2 text-sm text-[var(--muted)]">
+                Sin comidas añadidas.
+              </p>
+            )}
+          </div>
+          {!isDraft && (
+            <button
+              type="button"
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#e8c7be] bg-[#fff3ef] px-3 text-xs font-bold text-[#8d3c2f]"
+              onClick={() => onDeletePlan(plan)}
+            >
+              <Trash2 className="size-4" />
+              Borrar dieta
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MealPlanCalendar({
+  plan,
+  isDraft,
+  isEditable,
+  supabase,
+  publishing,
+  onPublish,
+  onNotice,
+  onReload,
+  onUpdateDraftMeal,
+  onDeleteDraftMeal,
+}: {
+  plan: MealPlan | null;
+  isDraft: boolean;
+  isEditable: boolean;
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  publishing: boolean;
+  onPublish: () => Promise<void>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+  onUpdateDraftMeal: (index: number, patch: Partial<DraftMealItem>) => void;
+  onDeleteDraftMeal: (index: number) => void;
+}) {
+  const planDays = plan?.meal_plan_days ?? [];
+
+  function handlePrint() {
+    window.print();
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="inline-flex items-center rounded-full bg-[#eef7fb] px-3 py-1 text-xs font-black uppercase text-[var(--tenant-color)]">
+            {isDraft ? "Borrador pendiente" : plan ? "Publicado" : "Sin dieta"}
+          </div>
+          <h2 className="mt-2 text-lg font-black">Vista dieta</h2>
+          <p className="text-sm text-[var(--muted)]">
+            {plan
+              ? `${plan.title} · Inicio ${formatDate(plan.start_date)}`
+              : "El calendario se rellenará al añadir comidas al plan."}
+          </p>
+        </div>
+        <div className="print-hidden flex flex-wrap gap-2">
+          {isEditable && isDraft && (
+            <button
+              type="button"
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-bold text-white disabled:opacity-60"
+              onClick={onPublish}
+              disabled={publishing}
+            >
+              <Check className="size-4" />
+              {publishing ? "Publicando..." : "Publicar dieta"}
+            </button>
+          )}
+          <button
+            type="button"
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-bold text-[#39433f] disabled:opacity-60"
+            onClick={handlePrint}
+            disabled={!plan}
+          >
+            <Printer className="size-4" />
+            Descargar / imprimir
+          </button>
+        </div>
+      </div>
+
+      {!plan && (
+        <div className="mt-4">
+          <EmptyState text="Todavía no hay dieta para mostrar." />
+        </div>
+      )}
+      {plan && (
+        <div className="mt-4 overflow-x-auto">
+          <div className="diet-calendar-grid min-w-[980px] overflow-hidden rounded-lg border border-[var(--line)] bg-white">
+            <div className="grid grid-cols-[130px_repeat(7,minmax(120px,1fr))] border-b border-[var(--line)] bg-[#f2efe7]">
+              <div className="border-r border-[var(--line)] p-3 text-xs font-black uppercase text-[var(--muted)]">
+                Comida / día
+              </div>
+              {dayLabels.map((dayLabel) => (
+                <div
+                  key={dayLabel}
+                  className="border-r border-[var(--line)] p-3 text-xs font-black uppercase text-[#53605a] last:border-r-0"
+                >
+                  {dayLabel}
+                </div>
+              ))}
+            </div>
+            {mealTypes.map((mealType) => (
+              <div
+                key={mealType}
+                className="grid grid-cols-[130px_repeat(7,minmax(120px,1fr))] border-b border-[var(--line)] last:border-b-0"
+              >
+                <div className="border-r border-[var(--line)] bg-[#faf8f1] p-3 text-sm font-black">
+                  {mealType}
+                </div>
+                {dayLabels.map((dayLabel, dayIndex) => {
+                  const calendarDayIndex = dayIndex + 1;
+                  const cellItems = getMealItemsForCell(plan, calendarDayIndex, mealType);
+
+                  return (
+                    <div
+                      key={`${mealType}-${dayLabel}`}
+                      className="min-h-[118px] border-r border-[var(--line)] p-2 last:border-r-0"
+                    >
+                      <div className="space-y-2">
+                        {cellItems.map((item) => (
+                          <CalendarMealItem
+                            key={item.id}
+                            item={item}
+                            planId={plan.id}
+                            planDays={planDays}
+                            currentDayIndex={calendarDayIndex}
+                            isDraft={isDraft}
+                            isEditable={isEditable}
+                            supabase={supabase}
+                            onNotice={onNotice}
+                            onReload={onReload}
+                            onUpdateDraftMeal={onUpdateDraftMeal}
+                            onDeleteDraftMeal={onDeleteDraftMeal}
+                          />
+                        ))}
+                        {cellItems.length === 0 && (
+                          <p className="rounded-md border border-dashed border-[#e0dbd0] px-2 py-3 text-center text-xs font-semibold text-[var(--muted)]">
+                            Sin alimento
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalendarMealItem({
+  item,
   planId,
-  dayIndex,
-  dayLabel,
-  day,
+  planDays,
+  currentDayIndex,
+  isDraft,
   isEditable,
   supabase,
   onNotice,
   onReload,
+  onUpdateDraftMeal,
+  onDeleteDraftMeal,
 }: {
+  item: MealItem;
   planId: string;
-  dayIndex: number;
-  dayLabel: string;
-  day: MealPlanDay | null;
+  planDays: MealPlanDay[];
+  currentDayIndex: number;
+  isDraft: boolean;
   isEditable: boolean;
   supabase: ReturnType<typeof createSupabaseBrowser>;
   onNotice: (message: string) => void;
   onReload: () => Promise<void>;
-}) {
-  const [newMealType, setNewMealType] = useState("Comida");
-  const [newTitle, setNewTitle] = useState("");
-  const [newDescription, setNewDescription] = useState("");
-  const [isAddingMeal, setIsAddingMeal] = useState(false);
-  const sortedItems = [...(day?.meal_items ?? [])].sort(
-    (a, b) =>
-      getMealTypePosition(a.meal_type) - getMealTypePosition(b.meal_type) ||
-      a.position - b.position,
-  );
-
-  async function addMeal(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!newTitle.trim()) {
-      onNotice("Escribe el plato antes de añadir la comida.");
-      return;
-    }
-    if (!supabase) {
-      onNotice("Modo demo: conecta Supabase para editar dietas reales.");
-      return;
-    }
-
-    let dayId = day?.id;
-    if (!dayId) {
-      const { data: insertedDay, error: dayError } = await supabase
-        .from("meal_plan_days")
-        .insert({
-          meal_plan_id: planId,
-          day_index: dayIndex,
-          day_label: dayLabel,
-        })
-        .select("id")
-        .single();
-
-      if (dayError || !insertedDay) {
-        onNotice(dayError?.message ?? "No se pudo crear el dia de la dieta.");
-        return;
-      }
-
-      dayId = insertedDay.id;
-    }
-
-    const nextPosition =
-      sortedItems.reduce((max, item) => Math.max(max, item.position), 0) + 1;
-    const { error } = await supabase.from("meal_items").insert({
-      meal_plan_day_id: dayId,
-      meal_type: newMealType,
-      title: newTitle.trim(),
-      description: newDescription.trim() || null,
-      position: nextPosition,
-    });
-
-    if (error) {
-      onNotice(error.message);
-      return;
-    }
-
-    setNewMealType("Comida");
-    setNewTitle("");
-    setNewDescription("");
-    setIsAddingMeal(false);
-    onNotice("Comida anadida a la dieta.");
-    await onReload();
-  }
-
-  return (
-    <div className="rounded-lg bg-[#f7f5ef] p-3">
-      <p className="font-bold">{dayLabel}</p>
-      <div className="mt-2 space-y-2">
-        {sortedItems.map((item) =>
-          isEditable ? (
-            <EditableMealItem
-              key={item.id}
-              item={item}
-              supabase={supabase}
-              onNotice={onNotice}
-              onReload={onReload}
-            />
-          ) : (
-            <div key={item.id} className="rounded-md bg-white px-3 py-2 text-sm">
-              <p className="font-semibold">
-                {item.meal_type}: {item.title}
-              </p>
-              {item.description && (
-                <p className="mt-1 text-[var(--muted)]">{item.description}</p>
-              )}
-            </div>
-          ),
-        )}
-        {sortedItems.length === 0 && (
-          <p className="rounded-md border border-dashed border-[#d8d1c4] px-3 py-2 text-sm text-[var(--muted)]">
-            Sin comidas para este dia.
-          </p>
-        )}
-      </div>
-      {isEditable && !isAddingMeal && (
-        <button
-          type="button"
-          className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-xs font-bold text-[#53605a]"
-          onClick={() => setIsAddingMeal(true)}
-        >
-          <Plus className="size-4" />
-          Añadir comida
-        </button>
-      )}
-      {isEditable && isAddingMeal && (
-        <form className="mt-3 rounded-md border border-[var(--line)] bg-white p-3" onSubmit={addMeal}>
-          <div className="grid gap-2">
-            <SelectField
-              label="Comida"
-              value={newMealType}
-              onChange={setNewMealType}
-              options={mealTypes.map((label) => ({ value: label, label }))}
-            />
-            <Field label="Plato" value={newTitle} onChange={setNewTitle} />
-            <TextArea
-              label="Indicaciones"
-              value={newDescription}
-              onChange={setNewDescription}
-            />
-            <div className="flex flex-wrap gap-2">
-              <button className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-3 text-xs font-bold text-white">
-                <Check className="size-4" />
-                Guardar
-              </button>
-              <button
-                type="button"
-                className="inline-flex h-9 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-3 text-xs font-bold text-[#53605a]"
-                onClick={() => {
-                  setIsAddingMeal(false);
-                  setNewMealType("Comida");
-                  setNewTitle("");
-                  setNewDescription("");
-                }}
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </form>
-      )}
-    </div>
-  );
-}
-
-function EditableMealItem({
-  item,
-  supabase,
-  onNotice,
-  onReload,
-}: {
-  item: MealItem;
-  supabase: ReturnType<typeof createSupabaseBrowser>;
-  onNotice: (message: string) => void;
-  onReload: () => Promise<void>;
+  onUpdateDraftMeal: (index: number, patch: Partial<DraftMealItem>) => void;
+  onDeleteDraftMeal: (index: number) => void;
 }) {
   const [isEditing, setIsEditing] = useState(false);
-  const [mealType, setMealType] = useState(item.meal_type);
-  const [title, setTitle] = useState(item.title);
-  const [description, setDescription] = useState(item.description ?? "");
+  const [dayIndex, setDayIndex] = useState(String(currentDayIndex));
+  const [mealType, setMealType] = useState(formatMealTypeLabel(item.meal_type));
+  const [quantity, setQuantity] = useState(formatMealQuantityValue(item));
+  const [unit, setUnit] = useState(item.unit ?? "gramos");
+  const [foodName, setFoodName] = useState(getMealFoodName(item));
+  const draftIndex = getDraftMealIndex(item);
+
+  function startEditing() {
+    setDayIndex(String(currentDayIndex));
+    setMealType(formatMealTypeLabel(item.meal_type));
+    setQuantity(formatMealQuantityValue(item));
+    setUnit(item.unit ?? "gramos");
+    setFoodName(getMealFoodName(item));
+    setIsEditing(true);
+  }
 
   async function saveMeal() {
-    if (!title.trim()) {
-      onNotice("El plato no puede quedar vacio.");
+    if (!foodName.trim() || !quantity.trim()) {
+      onNotice("Completa cantidad y alimento.");
       return;
     }
+
+    if (isDraft) {
+      if (draftIndex === null) return;
+      onUpdateDraftMeal(draftIndex, {
+        dayIndex: Number(dayIndex),
+        mealType,
+        quantity,
+        unit,
+        foodName,
+        title: foodName,
+        description: "",
+      });
+      setIsEditing(false);
+      onNotice("Comida actualizada en el borrador.");
+      return;
+    }
+
     if (!supabase) {
       onNotice("Modo demo: conecta Supabase para editar dietas reales.");
       return;
     }
 
-    const { error } = await supabase
-      .from("meal_items")
-      .update({
-        meal_type: mealType,
-        title: title.trim(),
-        description: description.trim() || null,
-      })
-      .eq("id", item.id);
+    const mealPlanDayId = await getOrCreateMealPlanDayId(
+      supabase,
+      planId,
+      planDays,
+      Number(dayIndex),
+    );
+    if (!mealPlanDayId) {
+      onNotice("No se pudo localizar el día de la dieta.");
+      return;
+    }
+
+    const payload = mealItemPayloadFromDraft(
+      {
+        dayIndex: Number(dayIndex),
+        mealType,
+        quantity,
+        unit,
+        foodName,
+        title: foodName,
+        description: "",
+      },
+      mealPlanDayId,
+      item.position,
+    );
+    const error = await updateMealItem(supabase, item.id, payload);
 
     if (error) {
       onNotice(error.message);
       return;
     }
 
-    onNotice("Comida actualizada.");
     setIsEditing(false);
+    onNotice("Comida actualizada.");
     await onReload();
   }
 
   async function deleteMeal() {
+    if (isDraft) {
+      if (draftIndex !== null) {
+        onDeleteDraftMeal(draftIndex);
+        onNotice("Comida eliminada del borrador.");
+      }
+      return;
+    }
+
     if (!supabase) {
       onNotice("Modo demo: conecta Supabase para editar dietas reales.");
       return;
@@ -3765,79 +4026,361 @@ function EditableMealItem({
   }
 
   return (
-    <div className="rounded-md border border-[var(--line)] bg-white p-3 text-sm">
+    <div className="rounded-md border border-[var(--line)] bg-[#fffdf8] p-2 text-xs">
       {!isEditing && (
         <div>
-          <p className="font-semibold">
-            {item.meal_type}: {item.title}
-          </p>
-          {item.description && (
-            <p className="mt-1 text-[var(--muted)]">{item.description}</p>
+          <p className="font-black text-[#17201d]">{getMealFoodName(item)}</p>
+          <p className="mt-1 text-[var(--muted)]">{formatMealQuantity(item)}</p>
+          {isEditable && (
+            <div className="print-hidden mt-2 flex flex-wrap gap-1">
+              <button
+                type="button"
+                className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-md border border-[var(--line)] bg-white px-2 font-bold text-[#53605a]"
+                onClick={startEditing}
+              >
+                <Pencil className="size-3.5" />
+                Modificar
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center justify-center rounded-md border border-[#e8c7be] bg-[#fff3ef] px-2 text-[#8d3c2f]"
+                onClick={deleteMeal}
+                aria-label="Borrar comida"
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            </div>
           )}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-[#faf8f1] px-3 text-xs font-bold text-[#53605a]"
-              onClick={() => setIsEditing(true)}
-            >
-              <Pencil className="size-4" />
-              Modificar
-            </button>
-            <button
-              type="button"
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[#e8c7be] bg-[#fff3ef] px-3 text-xs font-bold text-[#8d3c2f]"
-              onClick={deleteMeal}
-            >
-              <Trash2 className="size-4" />
-              Borrar
-            </button>
-          </div>
         </div>
       )}
       {isEditing && (
         <div className="grid gap-2">
+          <SelectField
+            label="Día"
+            value={dayIndex}
+            onChange={setDayIndex}
+            options={dayLabels.map((label, index) => ({
+              value: String(index + 1),
+              label,
+            }))}
+          />
           <SelectField
             label="Comida"
             value={mealType}
             onChange={setMealType}
             options={mealTypes.map((label) => ({ value: label, label }))}
           />
-          <Field label="Plato" value={title} onChange={setTitle} />
-          <TextArea label="Indicaciones" value={description} onChange={setDescription} />
-          <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-3 text-xs font-bold text-white"
-            onClick={saveMeal}
-          >
-            <Check className="size-4" />
-            Guardar
-          </button>
-          <button
-            type="button"
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[#e8c7be] bg-[#fff3ef] px-3 text-xs font-bold text-[#8d3c2f]"
-            onClick={deleteMeal}
-          >
-            <Trash2 className="size-4" />
-            Borrar
-          </button>
-          <button
-            type="button"
-            className="inline-flex h-9 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-3 text-xs font-bold text-[#53605a]"
-            onClick={() => {
-              setMealType(item.meal_type);
-              setTitle(item.title);
-              setDescription(item.description ?? "");
-              setIsEditing(false);
-            }}
-          >
-            Cancelar
-          </button>
+          <Field
+            label="Cantidad"
+            type="number"
+            step="0.01"
+            value={quantity}
+            onChange={setQuantity}
+          />
+          <SelectField
+            label="Unidad"
+            value={unit}
+            onChange={setUnit}
+            options={mealUnitOptions.map((label) => ({ value: label, label }))}
+          />
+          <Field label="Alimento" value={foodName} onChange={setFoodName} />
+          <div className="flex flex-wrap gap-1">
+            <button
+              type="button"
+              className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-md bg-[var(--tenant-color)] px-2 font-bold text-white"
+              onClick={saveMeal}
+            >
+              <Check className="size-3.5" />
+              Guardar
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-8 items-center justify-center rounded-md border border-[var(--line)] bg-white px-2 font-bold text-[#53605a]"
+              onClick={() => setIsEditing(false)}
+            >
+              Cancelar
+            </button>
+          </div>
         </div>
-      </div>
       )}
     </div>
   );
+}
+
+function getPlanMeals(plan: MealPlan | null) {
+  if (!plan) return [];
+
+  return dayLabels
+    .map((dayLabel, index) => {
+      const dayIndex = index + 1;
+      const items = getMealItemsForDay(plan, dayIndex);
+
+      return { dayLabel, items };
+    })
+    .filter(({ items }) => items.length > 0);
+}
+
+function getMealItemsForDay(plan: MealPlan, dayIndex: number) {
+  return ((plan.meal_plan_days ?? []).find((day) => day.day_index === dayIndex)?.meal_items ?? [])
+    .slice()
+    .sort(
+      (a, b) =>
+        getMealTypePosition(a.meal_type) - getMealTypePosition(b.meal_type) ||
+        a.position - b.position,
+    );
+}
+
+function getMealItemsForCell(plan: MealPlan, dayIndex: number, mealType: string) {
+  return getMealItemsForDay(plan, dayIndex).filter(
+    (item) => formatMealTypeLabel(item.meal_type) === mealType,
+  );
+}
+
+function buildDraftMealPlan(
+  draft: MealPlanDraft,
+  draftItems: DraftMealItem[],
+  patientId: string,
+): MealPlan {
+  return {
+    id: "draft-plan",
+    patient_id: patientId,
+    title: draft.title.trim() || "Plan semanal",
+    start_date: draft.startDate,
+    status: "draft",
+    meal_plan_days: dayLabels
+      .map((dayLabel, dayIndex) => {
+        const items = draftItems
+          .map((item, index) => ({ item, index }))
+          .filter(({ item }) => item.dayIndex === dayIndex + 1)
+          .map(({ item, index }) => ({
+            id: `draft-item-${index}`,
+            meal_plan_day_id: `draft-day-${dayIndex + 1}`,
+            meal_type: item.mealType,
+            title: item.foodName ?? item.title,
+            description: null,
+            quantity: item.quantity,
+            unit: item.unit,
+            food_name: item.foodName ?? item.title,
+            position: index + 1,
+          }));
+
+        return {
+          id: `draft-day-${dayIndex + 1}`,
+          day_index: dayIndex + 1,
+          day_label: dayLabel,
+          notes: null,
+          meal_items: items,
+        };
+      })
+      .filter((day) => day.meal_items.length > 0),
+  };
+}
+
+function createDraftMealItem(patch: Partial<DraftMealItem> = {}): DraftMealItem {
+  return normalizeDraftMealItem({
+    dayIndex: 1,
+    mealType: "Desayuno",
+    quantity: "",
+    unit: "gramos",
+    foodName: "",
+    title: "",
+    description: "",
+    ...patch,
+  });
+}
+
+function normalizePlanDraft(draft: Partial<MealPlanDraft>): MealPlanDraft {
+  const entryRows = normalizeDraftMealItems(draft.entryRows);
+  const draftItems = normalizeDraftMealItems(draft.draftItems);
+
+  return {
+    title: draft.title ?? "Plan semanal",
+    startDate: draft.startDate ?? new Date().toISOString().slice(0, 10),
+    entryRows: entryRows.length > 0 ? entryRows : [createDraftMealItem()],
+    draftItems,
+  };
+}
+
+function normalizeDraftMealItems(items?: Partial<DraftMealItem>[]) {
+  return (items ?? []).map(normalizeDraftMealItem);
+}
+
+function normalizeDraftMealItem(item: Partial<DraftMealItem>): DraftMealItem {
+  const foodName = item.foodName ?? item.title ?? "";
+
+  return {
+    dayIndex: Number(item.dayIndex || 1),
+    mealType: formatMealTypeLabel(item.mealType || "Desayuno"),
+    quantity: item.quantity ?? "",
+    unit: item.unit || "gramos",
+    foodName,
+    title: foodName,
+    description: item.description ?? "",
+  };
+}
+
+function hasCompleteDraftMealItem(item: DraftMealItem) {
+  return Boolean((item.foodName ?? item.title).trim() && (item.quantity ?? "").trim());
+}
+
+function sortDraftItems(items: DraftMealItem[]) {
+  return [...items].sort(
+    (a, b) =>
+      a.dayIndex - b.dayIndex ||
+      getMealTypePosition(a.mealType) - getMealTypePosition(b.mealType),
+  );
+}
+
+function mealItemPayloadFromDraft(
+  item: DraftMealItem,
+  mealPlanDayId: string,
+  position: number,
+) {
+  const foodName = (item.foodName ?? item.title).trim();
+
+  return {
+    meal_plan_day_id: mealPlanDayId,
+    meal_type: item.mealType,
+    title: foodName,
+    description: null,
+    quantity: parseMealQuantity(item.quantity ?? ""),
+    unit: item.unit ?? "gramos",
+    food_name: foodName,
+    position,
+  };
+}
+
+async function insertMealRows(
+  supabase: ReturnType<typeof createSupabaseBrowser>,
+  mealRows: Array<ReturnType<typeof mealItemPayloadFromDraft> | null>,
+) {
+  if (!supabase) return null;
+
+  const rows = mealRows.filter(Boolean) as Array<ReturnType<typeof mealItemPayloadFromDraft>>;
+  const { error } = await supabase.from("meal_items").insert(rows);
+  if (!isMissingMealServingColumnError(error)) return error;
+
+  const { error: fallbackError } = await supabase
+    .from("meal_items")
+    .insert(rows.map(toLegacyMealItemPayload));
+
+  return fallbackError;
+}
+
+async function updateMealItem(
+  supabase: ReturnType<typeof createSupabaseBrowser>,
+  itemId: string,
+  payload: ReturnType<typeof mealItemPayloadFromDraft>,
+) {
+  if (!supabase) return null;
+
+  const { error } = await supabase.from("meal_items").update(payload).eq("id", itemId);
+  if (!isMissingMealServingColumnError(error)) return error;
+
+  const { error: fallbackError } = await supabase
+    .from("meal_items")
+    .update(toLegacyMealItemPayload(payload))
+    .eq("id", itemId);
+
+  return fallbackError;
+}
+
+function toLegacyMealItemPayload(payload: ReturnType<typeof mealItemPayloadFromDraft>) {
+  return {
+    meal_plan_day_id: payload.meal_plan_day_id,
+    meal_type: payload.meal_type,
+    title: payload.food_name,
+    description: formatQuantityAndUnit(payload.quantity, payload.unit),
+    position: payload.position,
+  };
+}
+
+function isMissingMealServingColumnError(error: { message?: string; code?: string } | null) {
+  if (!error) return false;
+
+  return (
+    error.code === "PGRST204" ||
+    /food_name|quantity|unit|schema cache/i.test(error.message ?? "")
+  );
+}
+
+async function getOrCreateMealPlanDayId(
+  supabase: ReturnType<typeof createSupabaseBrowser>,
+  planId: string,
+  planDays: MealPlanDay[],
+  dayIndex: number,
+) {
+  const existingDay = planDays.find((day) => day.day_index === dayIndex);
+  if (existingDay) return existingDay.id;
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from("meal_plan_days")
+    .insert({
+      meal_plan_id: planId,
+      day_index: dayIndex,
+      day_label: dayLabels[dayIndex - 1],
+    })
+    .select("id")
+    .single();
+
+  if (error || !data) return null;
+
+  return data.id as string;
+}
+
+function getMealFoodName(item: MealItem) {
+  return item.food_name?.trim() || item.title;
+}
+
+function getMealQuantity(item: MealItem) {
+  if (item.quantity !== undefined && item.quantity !== null && String(item.quantity).trim()) {
+    return String(item.quantity).replace(".", ",");
+  }
+
+  return "";
+}
+
+function formatMealQuantityValue(item: MealItem) {
+  return getMealQuantity(item).replace(",", ".");
+}
+
+function formatMealQuantity(item: MealItem) {
+  const quantity = getMealQuantity(item);
+  if (quantity && item.unit) return `${quantity} ${item.unit}`;
+  if (item.description) return item.description;
+  return "Sin cantidad indicada";
+}
+
+function formatMealServing(item: MealItem) {
+  return `${formatMealQuantity(item)} · ${getMealFoodName(item)}`;
+}
+
+function formatQuantityAndUnit(quantity: number | null, unit: string | null) {
+  if (quantity === null && !unit) return null;
+
+  return `${quantity ?? ""} ${unit ?? ""}`.trim() || null;
+}
+
+function parseMealQuantity(value: string) {
+  const normalized = value.replace(",", ".").trim();
+  if (!normalized) return null;
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatMealTypeLabel(mealType: string) {
+  if (mealType === "Media mañana") return "Almuerzo";
+  if (mealType === "Merienda") return "Media tarde";
+
+  return mealType;
+}
+
+function getDraftMealIndex(item: MealItem) {
+  const match = /^draft-item-(\d+)$/.exec(item.id);
+
+  return match ? Number(match[1]) : null;
 }
 
 function DataEntryPanel({

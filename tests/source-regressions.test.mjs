@@ -8,6 +8,10 @@ const repairMigrationPath = new URL(
   "../supabase/migrations/202608040003_calendar_event_policy_repair.sql",
   import.meta.url,
 );
+const mealServingMigrationPath = new URL(
+  "../supabase/migrations/202608100001_meal_item_serving_fields.sql",
+  import.meta.url,
+);
 
 test("browser calendar writes go through the server API", async () => {
   const source = await readFile(componentPath, "utf8");
@@ -40,4 +44,18 @@ test("home route is the shared app entry point", async () => {
   assert.match(source, /commonEntry/);
   assert.match(source, /tenantSlug="app"/);
   assert.doesNotMatch(source, /resolveTenantSlugFromHost/);
+});
+
+test("diet builder keeps serving fields and weekly calendar", async () => {
+  const source = await readFile(componentPath, "utf8");
+  const sql = await readFile(mealServingMigrationPath, "utf8");
+
+  assert.match(source, /Nombre de la dieta/);
+  assert.match(source, /Unidad de medida/);
+  assert.match(source, /Tipo de alimento/);
+  assert.match(source, /Publicar dieta/);
+  assert.match(source, /Descargar \/ imprimir/);
+  assert.match(sql, /add column if not exists quantity/i);
+  assert.match(sql, /add column if not exists unit/i);
+  assert.match(sql, /add column if not exists food_name/i);
 });
