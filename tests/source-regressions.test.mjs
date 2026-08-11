@@ -70,3 +70,15 @@ test("diet builder keeps serving fields and weekly calendar", async () => {
   assert.match(sql, /add column if not exists unit/i);
   assert.match(sql, /add column if not exists food_name/i);
 });
+
+test("statistics charts use european dates and stable step trends", async () => {
+  const source = await readFile(componentPath, "utf8");
+
+  assert.match(source, /formatShortEuropeanDate/);
+  assert.match(source, /getMondayDateKey/);
+  assert.match(source, /StepEvolutionChart/);
+  assert.match(source, /ComposedChart/);
+  assert.match(source, /ReferenceLine/);
+  assert.doesNotMatch(source, /date: item\.logged_at\.slice\(5, 10\)/);
+  assert.doesNotMatch(source, /date: item\.logged_on\.slice\(5, 10\)/);
+});

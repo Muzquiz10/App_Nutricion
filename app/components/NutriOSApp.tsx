@@ -45,9 +45,12 @@ import {
   X,
 } from "lucide-react";
 import {
+  Bar,
   CartesianGrid,
+  ComposedChart,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -1621,6 +1624,7 @@ export function NutriOSApp({
                 weights={patientWeights}
                 waists={patientWaists}
                 steps={patientSteps}
+                goals={goals.filter((goal) => goal.patient_id === selectedPatientId)}
                 exercises={exercises.filter((item) => item.patient_id === selectedPatientId)}
                 mealPhotos={mealPhotos.filter((item) => item.patient_id === selectedPatientId)}
                 supabase={supabase}
@@ -5454,6 +5458,7 @@ function StatsPanel({
   weights,
   waists,
   steps,
+  goals,
   exercises,
   mealPhotos,
   supabase,
@@ -5464,6 +5469,7 @@ function StatsPanel({
   weights: WeightLog[];
   waists: WaistLog[];
   steps: StepLog[];
+  goals: PatientGoal[];
   exercises: ExerciseLog[];
   mealPhotos: MealPhoto[];
   supabase: ReturnType<typeof createSupabaseBrowser>;
@@ -5487,6 +5493,9 @@ function StatsPanel({
   const initialBmi = selectedPatient
     ? calculateBmi(selectedPatient.initial_weight_kg, selectedPatient.height_cm)
     : null;
+  const stepGoalTarget =
+    goals.find((goal) => goal.goal_type === "steps_daily" && goal.is_active)
+      ?.target_value ?? null;
   const weightChartData = buildWeightChartData(weights);
   const waistChartData = buildWaistChartData(waists);
   const stepChartData = buildStepChartData(steps);
@@ -5553,11 +5562,10 @@ function StatsPanel({
           color="#4d6fa9"
           emptyText="Sin registros de cintura."
         />
-        <EvolutionChart
+        <StepEvolutionChart
           title="Pasos"
           data={stepChartData}
-          dataKey="pasos"
-          color="#7b7f3b"
+          goalTarget={stepGoalTarget}
           emptyText="Sin registros de pasos."
         />
         <EvolutionChart
@@ -5592,6 +5600,8 @@ function EvolutionChart({
   color: string;
   emptyText: string;
 }) {
+  const domain = getChartDomain(data, dataKey, getMinimumChartSpan(dataKey));
+
   return (
     <div className="rounded-lg border border-[var(--line)] bg-white p-3">
       <p className="mb-3 text-sm font-black">{title}</p>
@@ -5605,8 +5615,8 @@ function EvolutionChart({
             <LineChart data={data}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5dfd3" />
               <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} domain={["auto", "auto"]} />
-              <Tooltip />
+              <YAxis tick={{ fontSize: 12 }} domain={domain} />
+              <Tooltip formatter={formatChartTooltipValue} />
               <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={3} dot />
             </LineChart>
           </ResponsiveContainer>
@@ -5715,6 +5725,93 @@ function ChatPanel({
         </button>
       </form>
     </Panel>
+  );
+}
+
+function StepEvolutionChart({
+  title,
+  data,
+  goalTarget,
+  emptyText,
+}: {
+  title: string;
+  data: Array<{ date: string; pasos: number; mediaSemanal: number }>;
+  goalTarget: number | null;
+  emptyText: string;
+}) {
+  const domain = getStepChartDomain(data, goalTarget);
+
+  return (
+    <div className="rounded-lg border border-[var(--line)] bg-white p-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-black">{title}</p>
+        <div className="flex flex-wrap gap-2 text-[11px] font-bold text-[var(--muted)]">
+          <span className="inline-flex items-center gap-1">
+            <span className="size-2 rounded-sm bg-[#7b7f3b]" />
+            Diario
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="h-0.5 w-4 bg-[#0b2f4a]" />
+            Media semanal
+          </span>
+          {goalTarget ? (
+            <span className="inline-flex items-center gap-1">
+              <span className="h-0.5 w-4 border-t-2 border-dashed border-[#b46a4d]" />
+              Objetivo
+            </span>
+          ) : null}
+        </div>
+      </div>
+      {data.length === 0 ? (
+        <div className="grid h-64 place-items-center sm:h-72">
+          <EmptyState text={emptyText} />
+        </div>
+      ) : (
+        <div className="h-64 sm:h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5dfd3" />
+              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+              <YAxis
+                tick={{ fontSize: 12 }}
+                domain={domain}
+                allowDecimals={false}
+                tickFormatter={(value) => formatInteger(value)}
+              />
+              <Tooltip formatter={formatChartTooltipValue} />
+              <Bar
+                dataKey="pasos"
+                name="Pasos diarios"
+                fill="#7b7f3b"
+                radius={[6, 6, 0, 0]}
+              />
+              <Line
+                type="monotone"
+                dataKey="mediaSemanal"
+                name="Media semanal"
+                stroke="#0b2f4a"
+                strokeWidth={3}
+                dot={false}
+              />
+              {goalTarget ? (
+                <ReferenceLine
+                  y={goalTarget}
+                  stroke="#b46a4d"
+                  strokeDasharray="6 4"
+                  label={{
+                    value: `Objetivo ${formatInteger(goalTarget)}`,
+                    position: "insideTopRight",
+                    fill: "#8d3c2f",
+                    fontSize: 11,
+                    fontWeight: 800,
+                  }}
+                />
+              ) : null}
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -8300,7 +8397,7 @@ function buildWeightChartData(weights: WeightLog[]) {
     .slice()
     .sort((a, b) => new Date(a.logged_at).getTime() - new Date(b.logged_at).getTime())
     .map((item) => ({
-      date: item.logged_at.slice(5, 10),
+      date: formatShortEuropeanDate(item.logged_at),
       peso: Number(item.weight_kg),
     }));
 }
@@ -8310,19 +8407,38 @@ function buildWaistChartData(waists: WaistLog[]) {
     .slice()
     .sort((a, b) => new Date(a.logged_at).getTime() - new Date(b.logged_at).getTime())
     .map((item) => ({
-      date: item.logged_at.slice(5, 10),
+      date: formatShortEuropeanDate(item.logged_at),
       cintura: Number(item.waist_cm),
     }));
 }
 
 function buildStepChartData(steps: StepLog[]) {
-  return steps
+  const sortedSteps = steps
     .slice()
-    .sort((a, b) => new Date(a.logged_on).getTime() - new Date(b.logged_on).getTime())
-    .map((item) => ({
-      date: item.logged_on.slice(5, 10),
+    .sort((a, b) => new Date(a.logged_on).getTime() - new Date(b.logged_on).getTime());
+  const weeklyValues = new Map<string, number[]>();
+
+  for (const item of sortedSteps) {
+    const weekKey = getMondayDateKey(item.logged_on);
+    weeklyValues.set(weekKey, [...(weeklyValues.get(weekKey) ?? []), Number(item.steps)]);
+  }
+
+  const weeklyAverageByKey = new Map(
+    Array.from(weeklyValues.entries()).map(([weekKey, values]) => [
+      weekKey,
+      Math.round(values.reduce((total, value) => total + value, 0) / values.length),
+    ]),
+  );
+
+  return sortedSteps.map((item) => {
+    const weekKey = getMondayDateKey(item.logged_on);
+
+    return {
+      date: formatShortEuropeanDate(item.logged_on),
       pasos: Number(item.steps),
-    }));
+      mediaSemanal: weeklyAverageByKey.get(weekKey) ?? Number(item.steps),
+    };
+  });
 }
 
 function buildBmiChartData(weights: WeightLog[], heightCm: number) {
@@ -8330,10 +8446,89 @@ function buildBmiChartData(weights: WeightLog[], heightCm: number) {
     .slice()
     .sort((a, b) => new Date(a.logged_at).getTime() - new Date(b.logged_at).getTime())
     .map((item) => ({
-      date: item.logged_at.slice(5, 10),
+      date: formatShortEuropeanDate(item.logged_at),
       imc: roundNumber(calculateBmi(item.weight_kg, heightCm), 1),
     }))
     .filter((item): item is { date: string; imc: number } => item.imc !== null);
+}
+
+function formatShortEuropeanDate(value: string) {
+  const dateKey = getLogDateKey(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    return `${dateKey.slice(8, 10)}/${dateKey.slice(5, 7)}`;
+  }
+
+  return new Intl.DateTimeFormat("es-ES", {
+    day: "2-digit",
+    month: "2-digit",
+  }).format(new Date(value));
+}
+
+function getMondayDateKey(value: string) {
+  const date = parseLocalDateKey(getLogDateKey(value));
+  const dayOffset = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - dayOffset);
+  return getLocalDateString(date);
+}
+
+function parseLocalDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function getMinimumChartSpan(dataKey: string) {
+  if (dataKey === "peso") return 8;
+  if (dataKey === "cintura") return 10;
+  if (dataKey === "imc") return 4;
+  return 1;
+}
+
+function getChartDomain(
+  data: Array<Record<string, number | string | undefined>>,
+  dataKey: string,
+  minSpan: number,
+) {
+  const values = data
+    .map((item) => Number(item[dataKey]))
+    .filter((value) => Number.isFinite(value));
+
+  return buildStableDomain(values, minSpan);
+}
+
+function getStepChartDomain(
+  data: Array<{ pasos: number; mediaSemanal: number }>,
+  goalTarget: number | null,
+) {
+  const values = data.flatMap((item) => [item.pasos, item.mediaSemanal]);
+  if (goalTarget) values.push(goalTarget);
+
+  return buildStableDomain(values, goalTarget ? goalTarget * 1.2 : 10000, 0);
+}
+
+function buildStableDomain(values: number[], minSpan: number, floor?: number) {
+  if (values.length === 0) return undefined;
+
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const rawSpan = Math.max(maxValue - minValue, minSpan);
+  const span = rawSpan * 1.25;
+  const center = (minValue + maxValue) / 2;
+  let lower = center - span / 2;
+  let upper = center + span / 2;
+
+  if (floor !== undefined && lower < floor) {
+    upper += floor - lower;
+    lower = floor;
+  }
+
+  return [Math.floor(lower * 10) / 10, Math.ceil(upper * 10) / 10] as [number, number];
+}
+
+function formatChartTooltipValue(value: number | string) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return value;
+  if (Number.isInteger(numericValue)) return formatInteger(numericValue);
+  return numericValue.toLocaleString("es-ES", { maximumFractionDigits: 1 });
 }
 
 function getLatestWeightLog(weights: WeightLog[]) {
