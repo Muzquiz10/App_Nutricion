@@ -79,7 +79,16 @@ a:focus-visible {
   scrollbar-color: #c7c0b2 transparent;
 }
 
+.diet-print-header {
+  display: none;
+}
+
 @media print {
+  @page {
+    size: A4 landscape;
+    margin: 8mm;
+  }
+
   body {
     background: #ffffff;
   }
@@ -102,10 +111,121 @@ a:focus-visible {
     inset: 0 auto auto 0 !important;
     width: 100% !important;
     border: 0 !important;
+    border-radius: 0 !important;
     box-shadow: none !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #17201d !important;
   }
 
-  .diet-calendar-grid {
+  body.printing-diet-calendar .diet-print-header {
+    display: grid !important;
+    grid-template-columns: minmax(180px, 0.8fr) minmax(0, 2fr);
+    gap: 12px;
+    align-items: end;
+    margin-bottom: 8px;
+    border-bottom: 2px solid #0b2f4a;
+    padding-bottom: 8px;
+  }
+
+  body.printing-diet-calendar .diet-print-header h1 {
+    margin: 0;
+    font-size: 22px;
+    line-height: 1.05;
+    font-weight: 900;
+    color: #0b2f4a;
+  }
+
+  body.printing-diet-calendar .diet-print-kicker {
+    margin: 0 0 4px;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    color: #2f7d6d;
+  }
+
+  body.printing-diet-calendar .diet-print-meta {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  body.printing-diet-calendar .diet-print-meta div {
+    border-left: 1px solid #d9ded8;
+    padding-left: 8px;
+  }
+
+  body.printing-diet-calendar .diet-print-meta span {
+    display: block;
+    font-size: 8px;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #68736e;
+  }
+
+  body.printing-diet-calendar .diet-print-meta strong {
+    display: block;
+    overflow-wrap: anywhere;
+    font-size: 10px;
+    line-height: 1.15;
+    color: #17201d;
+  }
+
+  body.printing-diet-calendar .diet-calendar-scroll {
+    margin-top: 0 !important;
+    overflow: visible !important;
+  }
+
+  body.printing-diet-calendar .diet-calendar-grid {
     min-width: 0 !important;
+    width: 100% !important;
+    overflow: hidden !important;
+    break-inside: avoid;
+    border-color: #aeb8b2 !important;
+    border-radius: 8px !important;
+    font-size: 9px !important;
+  }
+
+  body.printing-diet-calendar .diet-calendar-header-row,
+  body.printing-diet-calendar .diet-calendar-row {
+    grid-template-columns: 82px repeat(7, minmax(0, 1fr)) !important;
+  }
+
+  body.printing-diet-calendar .diet-calendar-corner,
+  body.printing-diet-calendar .diet-calendar-day-header,
+  body.printing-diet-calendar .diet-calendar-meal-label {
+    padding: 5px !important;
+    font-size: 8px !important;
+    line-height: 1.15 !important;
+  }
+
+  body.printing-diet-calendar .diet-calendar-day-header {
+    color: #0b2f4a !important;
+  }
+
+  body.printing-diet-calendar .diet-calendar-cell {
+    min-height: 52px !important;
+    padding: 4px !important;
+  }
+
+  body.printing-diet-calendar .diet-calendar-item {
+    border: 1px solid #dfe5df !important;
+    background: #fbfcfa !important;
+    padding: 4px !important;
+    font-size: 8px !important;
+    line-height: 1.15 !important;
+  }
+
+  body.printing-diet-calendar .diet-calendar-item p {
+    margin-top: 1px !important;
+  }
+
+  body.printing-diet-calendar .diet-calendar-empty {
+    border: 0 !important;
+    padding: 3px !important;
+    font-size: 7px !important;
+    line-height: 1.1 !important;
+    color: #a1aaa5 !important;
   }
 }
