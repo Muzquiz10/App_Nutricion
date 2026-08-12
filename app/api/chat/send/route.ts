@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createChatMessageNotification } from "../../../lib/notifications/server";
 import { getSupabaseAdmin } from "../../../lib/supabase/server";
 
 type SendChatMessageBody = {
@@ -119,6 +120,18 @@ export async function POST(request: Request) {
       { error: messageError?.message ?? "No se pudo enviar el mensaje." },
       { status: 500 },
     );
+  }
+
+  try {
+    await createChatMessageNotification({
+      supabase,
+      request,
+      tenantId: body.tenantId,
+      patient,
+      message,
+    });
+  } catch (notificationError) {
+    console.error("Could not send chat notification", notificationError);
   }
 
   return NextResponse.json({ ok: true, conversation, message });

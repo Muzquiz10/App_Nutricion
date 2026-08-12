@@ -18,6 +18,12 @@ NUTRIOS_DEFAULT_TENANT_SLUG=maria
 RESEND_API_KEY=...
 SUPPORT_FROM_EMAIL="DietDesk <soporte@tu-dominio.com>"
 SUPPORT_TO_EMAIL=ej.egmanalytics@gmail.com
+NOTIFICATIONS_FROM_EMAIL="DietDesk <notificaciones@tu-dominio.com>"
+NOTIFICATIONS_CONTACT_EMAIL=ej.egmanalytics@gmail.com
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=...
+VAPID_PRIVATE_KEY=...
+VAPID_SUBJECT=mailto:ej.egmanalytics@gmail.com
+NOTIFICATION_JOB_SECRET=...
 ```
 
 La `service_role key` solo debe existir en servidor. No la pongas nunca en codigo cliente ni en variables que empiecen por `NEXT_PUBLIC_`.
@@ -25,6 +31,8 @@ La `service_role key` solo debe existir en servidor. No la pongas nunca en codig
 `NEXT_PUBLIC_SUPABASE_URL` debe ser la URL base del proyecto. No anadas `/rest/v1` y no pongas comentarios al final de la linea.
 
 Para el boton de asistencia tecnica necesitas una cuenta de Resend y un dominio/remitente validado. `SUPPORT_TO_EMAIL` es opcional si se mantiene `ej.egmanalytics@gmail.com`.
+
+Para notificaciones push ejecuta `npm run vapid:generate` y copia los valores generados en las variables VAPID. `NEXT_PUBLIC_VAPID_PUBLIC_KEY` es publica; `VAPID_PRIVATE_KEY` debe tratarse como secreta.
 
 ## 2. Crear tablas, seguridad y Storage
 
@@ -84,6 +92,38 @@ supabase/migrations/202608020004_one_active_patient_per_user.sql
 ```
 
 Esta migracion sincroniza fichas inactivas con membresias `disabled` y crea indices unicos para permitir solo una ficha/membresia activa por usuario paciente.
+
+Para activar notificaciones de chat, preferencias de usuario, Web Push y fallback por email, ejecuta tambien:
+
+```text
+supabase/migrations/202608120001_chat_notifications.sql
+```
+
+El fallback por email queda preparado con Resend. Para que funcione incluso si nadie tiene la app abierta, configura un cron externo o de Supabase que llame cada minuto a:
+
+```text
+POST https://TU_DOMINIO/api/notifications/process-email-fallback
+Header: x-notification-job-secret: VALOR_DE_NOTIFICATION_JOB_SECRET
+Body: {}
+```
+
+En Supabase puedes hacerlo desde `Database > Extensions`, activando `pg_cron` y `pg_net`, y despues ejecutando este SQL en `SQL Editor`:
+
+```sql
+select cron.schedule(
+  'dietdesk-email-fallback',
+  '* * * * *',
+  $$
+  select net.http_post(
+    url := 'https://nutrios.egmanalytics.com/api/notifications/process-email-fallback',
+    headers := '{"Content-Type":"application/json","x-notification-job-secret":"PEGA_AQUI_NOTIFICATION_JOB_SECRET"}'::jsonb,
+    body := '{}'::jsonb
+  ) as request_id;
+  $$
+);
+```
+
+`PEGA_AQUI_NOTIFICATION_JOB_SECRET` debe ser el mismo valor configurado en local y en produccion. Si necesitas recrearlo, genera un valor aleatorio largo y actualiza `NOTIFICATION_JOB_SECRET` en ambos sitios.
 
 ## 3. Configurar Auth
 

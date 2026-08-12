@@ -17,6 +17,7 @@ export const metadata: Metadata = {
   title: APP_NAME,
   description:
     "Panel web multitenant para nutricionistas y seguimiento de pacientes.",
+  manifest: "/manifest.webmanifest",
   icons: {
     icon: APP_ICON_SRC,
     shortcut: APP_ICON_SRC,

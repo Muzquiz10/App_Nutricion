@@ -12,6 +12,12 @@ const mealServingMigrationPath = new URL(
   "../supabase/migrations/202608100001_meal_item_serving_fields.sql",
   import.meta.url,
 );
+const chatNotificationsMigrationPath = new URL(
+  "../supabase/migrations/202608120001_chat_notifications.sql",
+  import.meta.url,
+);
+const chatSendRoutePath = new URL("../app/api/chat/send/route.ts", import.meta.url);
+const pushWorkerPath = new URL("../public/push-sw.js", import.meta.url);
 
 test("browser calendar writes go through the server API", async () => {
   const source = await readFile(componentPath, "utf8");
@@ -81,4 +87,25 @@ test("statistics charts use european dates and stable step trends", async () => 
   assert.match(source, /ReferenceLine/);
   assert.doesNotMatch(source, /date: item\.logged_at\.slice\(5, 10\)/);
   assert.doesNotMatch(source, /date: item\.logged_on\.slice\(5, 10\)/);
+});
+
+test("chat notifications support push, in-app notices, and email fallback", async () => {
+  const source = await readFile(componentPath, "utf8");
+  const sql = await readFile(chatNotificationsMigrationPath, "utf8");
+  const chatRoute = await readFile(chatSendRoutePath, "utf8");
+  const worker = await readFile(pushWorkerPath, "utf8");
+
+  assert.match(source, /NotificationSettingsPanel/);
+  assert.match(source, /NotificationsPanel/);
+  assert.match(source, /Activar este dispositivo/);
+  assert.match(source, /\/api\/notifications\/preferences/);
+  assert.match(source, /\/api\/notifications\/push-subscriptions/);
+  assert.match(source, /\/api\/chat\/read/);
+  assert.match(source, /process-email-fallback/);
+  assert.match(chatRoute, /createChatMessageNotification/);
+  assert.match(worker, /showNotification/);
+  assert.match(sql, /create table if not exists public\.notification_preferences/i);
+  assert.match(sql, /create table if not exists public\.push_subscriptions/i);
+  assert.match(sql, /create table if not exists public\.app_notifications/i);
+  assert.match(sql, /email_fallback_due_at/i);
 });

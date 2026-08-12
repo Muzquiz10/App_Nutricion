@@ -1,0 +1,40 @@
+self.addEventListener("push", (event) => {
+  const fallback = {
+    title: "Nuevo mensaje",
+    body: "Tienes un nuevo mensaje en DietDesk.",
+    url: "/",
+  };
+  const payload = event.data ? event.data.json() : fallback;
+
+  event.waitUntil(
+    self.registration.showNotification(payload.title || fallback.title, {
+      body: payload.body || fallback.body,
+      icon: "/DietDesk_icono.svg",
+      badge: "/DietDesk_icono.svg",
+      data: {
+        url: payload.url || fallback.url,
+      },
+      tag: "dietdesk-chat-message",
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = new URL(event.notification.data?.url || "/", self.location.origin).href;
+
+  event.waitUntil(
+    clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((clientList) => {
+        for (const client of clientList) {
+          if ("focus" in client) {
+            client.navigate(targetUrl);
+            return client.focus();
+          }
+        }
+
+        return clients.openWindow(targetUrl);
+      }),
+  );
+});

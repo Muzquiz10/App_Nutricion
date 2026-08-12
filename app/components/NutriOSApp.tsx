@@ -259,7 +259,31 @@ type ChatMessage = {
   patient_id: string;
   sender_id: string;
   body: string;
+  read_at?: string | null;
   created_at: string;
+};
+
+type AppNotification = {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  patient_id: string | null;
+  type: "chat_message" | "appointment";
+  title: string;
+  body: string;
+  href: string | null;
+  related_message_id: string | null;
+  read_at: string | null;
+  email_fallback_due_at?: string | null;
+  email_sent_at?: string | null;
+  created_at: string;
+};
+
+type NotificationPreferences = {
+  tenant_id?: string;
+  user_id?: string;
+  email_enabled: boolean;
+  push_enabled: boolean;
 };
 
 type MealPlan = {
@@ -318,6 +342,7 @@ type TabId =
   | "chat"
   | "documents"
   | "agenda"
+  | "notifications"
   | "settings";
 type PatientListView = "active" | "pending" | "inactive";
 
@@ -334,6 +359,19 @@ type SendChatMessageResponse = {
   error?: string;
   conversation?: Conversation;
   message?: ChatMessage;
+};
+
+type MarkChatReadResponse = {
+  error?: string;
+  ok?: boolean;
+  readAt?: string;
+  messageIds?: string[];
+};
+
+type NotificationPreferencesResponse = {
+  error?: string;
+  ok?: boolean;
+  preferences?: NotificationPreferences;
 };
 
 type QuestionnaireResponse = {
@@ -374,6 +412,7 @@ const tabs: Array<{
   { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "documents", label: "Documentos", icon: FileText },
   { id: "agenda", label: "Agenda", icon: CalendarDays },
+  { id: "notifications", label: "Notificaciones", icon: Bell },
   { id: "settings", label: "Configuración", icon: SettingsIcon },
 ];
 
@@ -881,6 +920,12 @@ export function NutriOSApp({
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([demoConversation]);
   const [messages, setMessages] = useState<ChatMessage[]>(demoMessages);
+  const [appNotifications, setAppNotifications] = useState<AppNotification[]>([]);
+  const [notificationPreferences, setNotificationPreferences] =
+    useState<NotificationPreferences>({
+      email_enabled: true,
+      push_enabled: true,
+    });
   const [plans, setPlans] = useState<MealPlan[]>([demoPlan]);
   const [loginIntent, setLoginIntent] = useState<LoginIntent>("patient");
   const [activeTab, setActiveTab] = useStoredValue<TabId>(
@@ -936,6 +981,9 @@ export function NutriOSApp({
   const pendingAppointmentCount = calendarEvents.filter(
     (event) => isPendingCalendarAppointment(event),
   ).length;
+  const unreadAppNotificationCount = appNotifications.filter(
+    (notification) => !notification.read_at,
+  ).length;
 
   function handleSidebarEnter() {
     if (!sidebarCollapsedAfterClick) {
@@ -990,6 +1038,11 @@ export function NutriOSApp({
 
     if (!session) {
       setRole(null);
+      setAppNotifications([]);
+      setNotificationPreferences({
+        email_enabled: true,
+        push_enabled: true,
+      });
       if (commonEntry) {
         setTenant(commonLoginTenant);
       }
@@ -1066,6 +1119,32 @@ export function NutriOSApp({
 
     setTenant(resolvedTenant);
     setRole(resolvedRole);
+
+    const [preferenceRows, notificationRows] = await Promise.all([
+      supabase
+        .from("notification_preferences")
+        .select("tenant_id,user_id,email_enabled,push_enabled")
+        .eq("tenant_id", resolvedTenant.id)
+        .eq("user_id", session.user.id)
+        .maybeSingle(),
+      supabase
+        .from("app_notifications")
+        .select("*")
+        .eq("tenant_id", resolvedTenant.id)
+        .eq("user_id", session.user.id)
+        .order("created_at", { ascending: false })
+        .limit(50),
+    ]);
+
+    setNotificationPreferences(
+      (preferenceRows.data as NotificationPreferences | null) ?? {
+        tenant_id: resolvedTenant.id,
+        user_id: session.user.id,
+        email_enabled: true,
+        push_enabled: true,
+      },
+    );
+    setAppNotifications((notificationRows.data ?? []) as AppNotification[]);
 
     if (["owner", "nutritionist"].includes(resolvedRole)) {
       const { data: invitationRows } = await supabase
@@ -1276,6 +1355,57 @@ export function NutriOSApp({
     };
   }, [selectedConversation, supabase]);
 
+  useEffect(() => {
+    if (!supabase || !sessionUserId) return;
+
+    const channel = supabase
+      .channel(`dietdesk-notifications-${sessionUserId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "app_notifications",
+          filter: `user_id=eq.${sessionUserId}`,
+        },
+        (payload) => {
+          const notification = payload.new as AppNotification;
+          setAppNotifications((current) => {
+            if (current.some((item) => item.id === notification.id)) return current;
+            return [notification, ...current].slice(0, 50);
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [sessionUserId, supabase]);
+
+  useEffect(() => {
+    if (!supabase || !role || !tenant.id) return;
+
+    async function processEmailFallbacks() {
+      const accessToken = await getCurrentAccessToken(supabase);
+      if (!accessToken) return;
+
+      await fetch("/api/notifications/process-email-fallback", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ tenantId: tenant.id }),
+      });
+    }
+
+    void processEmailFallbacks();
+    const timer = window.setInterval(processEmailFallbacks, 60 * 1000);
+
+    return () => window.clearInterval(timer);
+  }, [role, supabase, tenant.id]);
+
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase) return;
@@ -1333,6 +1463,53 @@ export function NutriOSApp({
     if (commonEntry) {
       setTenant(commonLoginTenant);
     }
+  }
+
+  async function markNotificationRead(notificationId: string) {
+    const readAt = new Date().toISOString();
+    setAppNotifications((current) =>
+      current.map((notification) =>
+        notification.id === notificationId
+          ? { ...notification, read_at: notification.read_at ?? readAt }
+          : notification,
+      ),
+    );
+
+    if (!supabase) return;
+    await supabase
+      .from("app_notifications")
+      .update({ read_at: readAt, email_fallback_due_at: null })
+      .eq("id", notificationId);
+  }
+
+  async function markAllNotificationsRead() {
+    const readAt = new Date().toISOString();
+    setAppNotifications((current) =>
+      current.map((notification) => ({
+        ...notification,
+        read_at: notification.read_at ?? readAt,
+      })),
+    );
+
+    if (!supabase) return;
+    await supabase
+      .from("app_notifications")
+      .update({ read_at: readAt, email_fallback_due_at: null })
+      .eq("tenant_id", tenant.id)
+      .eq("user_id", sessionUserId)
+      .is("read_at", null);
+  }
+
+  async function openNotification(notification: AppNotification) {
+    await markNotificationRead(notification.id);
+    if (notification.patient_id) {
+      setSelectedPatientId(notification.patient_id);
+    }
+    if (notification.href === "chat") {
+      setActiveTab("chat");
+      return;
+    }
+    setActiveTab("notifications");
   }
 
   const appStyle = {
@@ -1545,8 +1722,10 @@ export function NutriOSApp({
             tenant={tenant}
             role={role}
             selectedPatient={selectedPatient}
-            pendingAppointmentCount={pendingAppointmentCount}
-            onOpenAgenda={() => setActiveTab("agenda")}
+            notificationCount={
+              unreadAppNotificationCount + (role !== "patient" ? pendingAppointmentCount : 0)
+            }
+            onOpenNotifications={() => setActiveTab("notifications")}
           />
           {workspaceError && (
             <div className="mt-5 rounded-lg border border-[#e8d9aa] bg-[#fff8df] px-4 py-3 text-sm text-[#6b5420]">
@@ -1636,6 +1815,7 @@ export function NutriOSApp({
               <ChatPanel
                 tenant={tenant}
                 selectedPatient={selectedPatient}
+                conversation={selectedConversation}
                 messages={patientMessages}
                 currentUserId={sessionUserId}
                 supabase={supabase}
@@ -1654,6 +1834,21 @@ export function NutriOSApp({
                       : [...current, conversation],
                   )
                 }
+                onMessagesRead={(messageIds, readAt) => {
+                  setMessages((current) =>
+                    current.map((message) =>
+                      messageIds.includes(message.id) ? { ...message, read_at: readAt } : message,
+                    ),
+                  );
+                  setAppNotifications((current) =>
+                    current.map((notification) =>
+                      notification.patient_id === selectedPatientId &&
+                      notification.type === "chat_message"
+                        ? { ...notification, read_at: notification.read_at ?? readAt }
+                        : notification,
+                    ),
+                  );
+                }}
               />
             )}
             {activeTab === "documents" && (
@@ -1681,10 +1876,23 @@ export function NutriOSApp({
                 onReload={loadWorkspace}
               />
             )}
+            {activeTab === "notifications" && (
+              <NotificationsPanel
+                role={role}
+                notifications={appNotifications}
+                patients={patients}
+                pendingAppointmentCount={pendingAppointmentCount}
+                onOpenNotification={openNotification}
+                onMarkAllRead={markAllNotificationsRead}
+                onOpenAgenda={() => setActiveTab("agenda")}
+              />
+            )}
             {activeTab === "settings" && (
               <SettingsPanel
                 tenant={tenant}
                 role={role}
+                preferences={notificationPreferences}
+                onPreferences={setNotificationPreferences}
                 pendingInvitations={pendingInvitations}
                 supabase={supabase}
                 onTenant={setTenant}
@@ -2330,14 +2538,14 @@ function Header({
   tenant,
   role,
   selectedPatient,
-  pendingAppointmentCount,
-  onOpenAgenda,
+  notificationCount,
+  onOpenNotifications,
 }: {
   tenant: Tenant;
   role: UserRole | null;
   selectedPatient: Patient | null;
-  pendingAppointmentCount: number;
-  onOpenAgenda: () => void;
+  notificationCount: number;
+  onOpenNotifications: () => void;
 }) {
   return (
     <header className="flex flex-col gap-4">
@@ -2352,29 +2560,145 @@ function Header({
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-        {role !== "patient" && (
-          <button
-            type="button"
-            className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-semibold text-[#3b4741] shadow-sm hover:border-[var(--tenant-color)]"
-            onClick={onOpenAgenda}
+        <button
+          type="button"
+          className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-semibold text-[#3b4741] shadow-sm hover:border-[var(--tenant-color)]"
+          onClick={onOpenNotifications}
+        >
+          <Bell className="size-4 text-[var(--tenant-color)]" />
+          Notificaciones
+          <span
+            className={`grid min-w-6 place-items-center rounded-md px-1.5 py-0.5 text-xs font-black ${
+              notificationCount > 0
+                ? "bg-[#fff3f0] text-[#8a3327]"
+                : "bg-[#eef3f0] text-[var(--muted)]"
+            }`}
           >
-            <Bell className="size-4 text-[var(--tenant-color)]" />
-            Notificaciones
-            <span
-              className={`grid min-w-6 place-items-center rounded-md px-1.5 py-0.5 text-xs font-black ${
-                pendingAppointmentCount > 0
-                  ? "bg-[#fff3f0] text-[#8a3327]"
-                  : "bg-[#eef3f0] text-[var(--muted)]"
-              }`}
-            >
-              {pendingAppointmentCount}
-            </span>
-          </button>
-        )}
+            {notificationCount}
+          </span>
+        </button>
         <Pill icon={ShieldCheck} label="GDPR preparado" />
         <Pill icon={Bell} label="Chat en tiempo real" />
       </div>
     </header>
+  );
+}
+
+function NotificationsPanel({
+  role,
+  notifications,
+  patients,
+  pendingAppointmentCount,
+  onOpenNotification,
+  onMarkAllRead,
+  onOpenAgenda,
+}: {
+  role: UserRole | null;
+  notifications: AppNotification[];
+  patients: Patient[];
+  pendingAppointmentCount: number;
+  onOpenNotification: (notification: AppNotification) => void;
+  onMarkAllRead: () => Promise<void>;
+  onOpenAgenda: () => void;
+}) {
+  const sortedNotifications = notifications
+    .slice()
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const unreadCount = sortedNotifications.filter((notification) => !notification.read_at).length;
+  const hasAppointmentNotice = role !== "patient" && pendingAppointmentCount > 0;
+
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-black">Notificaciones</h2>
+          <p className="text-sm text-[var(--muted)]">
+            Avisos de nuevos mensajes y citas pendientes.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-black text-[#39433f] disabled:opacity-50"
+          onClick={onMarkAllRead}
+          disabled={unreadCount === 0}
+        >
+          <Check className="size-4 text-[var(--tenant-color)]" />
+          Marcar todo como leido
+        </button>
+      </div>
+
+      <div className="mt-5 grid gap-3">
+        {hasAppointmentNotice && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-lg border border-[#ead39b] bg-[#fff8df] p-4 text-left"
+            onClick={onOpenAgenda}
+          >
+            <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-white text-[#8a6a20]">
+              <CalendarDays className="size-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block font-black text-[#34291a]">
+                Citas pendientes de confirmar
+              </span>
+              <span className="mt-1 block text-sm text-[#6b5420]">
+                Tienes {pendingAppointmentCount} solicitud{pendingAppointmentCount === 1 ? "" : "es"} pendiente{pendingAppointmentCount === 1 ? "" : "s"}.
+              </span>
+            </span>
+          </button>
+        )}
+
+        {sortedNotifications.map((notification) => {
+          const unread = !notification.read_at;
+          const patientName = getPatientName(patients, notification.patient_id);
+
+          return (
+            <button
+              type="button"
+              key={notification.id}
+              className={`flex items-start gap-3 rounded-lg border p-4 text-left transition hover:border-[var(--tenant-color)] ${
+                unread
+                  ? "border-[#bee4d7] bg-[#effaf5]"
+                  : "border-[var(--line)] bg-white"
+              }`}
+              onClick={() => onOpenNotification(notification)}
+            >
+              <span
+                className={`grid size-10 shrink-0 place-items-center rounded-lg ${
+                  unread
+                    ? "bg-[var(--tenant-color)] text-white"
+                    : "bg-[#f0eee7] text-[var(--tenant-color)]"
+                }`}
+              >
+                <MessageCircle className="size-5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="font-black text-[#17201d]">{notification.title}</span>
+                  {unread && (
+                    <span className="rounded-full bg-[#dcefe7] px-2 py-0.5 text-[11px] font-black uppercase text-[var(--tenant-color)]">
+                      Nuevo
+                    </span>
+                  )}
+                </span>
+                <span className="mt-1 block text-sm text-[#39433f]">
+                  {notification.body}
+                </span>
+                <span className="mt-1 block text-xs font-semibold text-[var(--muted)]">
+                  {patientName ? `${patientName} - ` : ""}
+                  {formatDateTime(notification.created_at)}
+                </span>
+              </span>
+              <ChevronRight className="mt-2 size-4 shrink-0 text-[var(--muted)]" />
+            </button>
+          );
+        })}
+
+        {!hasAppointmentNotice && sortedNotifications.length === 0 && (
+          <EmptyState text="No tienes notificaciones pendientes." />
+        )}
+      </div>
+    </Panel>
   );
 }
 
@@ -5629,23 +5953,74 @@ function EvolutionChart({
 function ChatPanel({
   tenant,
   selectedPatient,
+  conversation,
   messages,
   currentUserId,
   supabase,
   onNotice,
   onMessageSent,
   onConversationReady,
+  onMessagesRead,
 }: {
   tenant: Tenant;
   selectedPatient: Patient | null;
+  conversation: Conversation | null;
   messages: ChatMessage[];
   currentUserId: string;
   supabase: ReturnType<typeof createSupabaseBrowser>;
   onNotice: (message: string) => void;
   onMessageSent: (message: ChatMessage) => void;
   onConversationReady: (conversation: Conversation) => void;
+  onMessagesRead: (messageIds: string[], readAt: string) => void;
 }) {
   const [body, setBody] = useState("");
+
+  useEffect(() => {
+    if (!supabase || !selectedPatient || !conversation) return;
+
+    const unreadIncomingMessages = messages.filter(
+      (message) => message.sender_id !== currentUserId && !message.read_at,
+    );
+    if (unreadIncomingMessages.length === 0) return;
+
+    let cancelled = false;
+
+    async function markChatRead() {
+      const accessToken = await getCurrentAccessToken(supabase);
+      if (!accessToken || cancelled) return;
+
+      const response = await fetch("/api/chat/read", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          tenantId: tenant.id,
+          patientId: selectedPatient.id,
+          conversationId: conversation.id,
+        }),
+      });
+      const payload = (await response.json()) as MarkChatReadResponse;
+      if (!response.ok || !payload.readAt || !payload.messageIds?.length || cancelled) return;
+
+      onMessagesRead(payload.messageIds, payload.readAt);
+    }
+
+    void markChatRead();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    conversation,
+    currentUserId,
+    messages,
+    onMessagesRead,
+    selectedPatient,
+    supabase,
+    tenant.id,
+  ]);
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -7129,6 +7504,8 @@ function DocumentsPanel({
 function SettingsPanel({
   tenant,
   role,
+  preferences,
+  onPreferences,
   pendingInvitations,
   supabase,
   onTenant,
@@ -7137,6 +7514,8 @@ function SettingsPanel({
 }: {
   tenant: Tenant;
   role: UserRole | null;
+  preferences: NotificationPreferences;
+  onPreferences: (preferences: NotificationPreferences) => void;
   pendingInvitations: PendingInvitation[];
   supabase: ReturnType<typeof createSupabaseBrowser>;
   onTenant: (tenant: Tenant) => void;
@@ -7338,6 +7717,13 @@ function SettingsPanel({
       )}
 
       <div className={`grid min-w-0 gap-5 ${role === "patient" ? "xl:col-span-2" : ""}`}>
+        <NotificationSettingsPanel
+          tenant={tenant}
+          preferences={preferences}
+          supabase={supabase}
+          onPreferences={onPreferences}
+          onNotice={onNotice}
+        />
         <AccountSecurityPanel
           supabase={supabase}
           onNotice={onNotice}
@@ -7349,6 +7735,259 @@ function SettingsPanel({
         />
       </div>
     </div>
+  );
+}
+
+function NotificationSettingsPanel({
+  tenant,
+  preferences,
+  supabase,
+  onPreferences,
+  onNotice,
+}: {
+  tenant: Tenant;
+  preferences: NotificationPreferences;
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onPreferences: (preferences: NotificationPreferences) => void;
+  onNotice: (message: string) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [deviceSubscribed, setDeviceSubscribed] = useState(false);
+  const [permission, setPermission] = useState("default");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDeviceStatus() {
+      if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+        setPermission("unsupported");
+        return;
+      }
+
+      setPermission(Notification.permission);
+      const registration = await navigator.serviceWorker.getRegistration("/push-sw.js");
+      const subscription = await registration?.pushManager.getSubscription();
+      if (!cancelled) {
+        setDeviceSubscribed(Boolean(subscription));
+      }
+    }
+
+    void loadDeviceStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function savePreferences(patch: Partial<NotificationPreferences>) {
+    if (!supabase) {
+      onPreferences({ ...preferences, ...patch });
+      onNotice("Preferencias actualizadas en modo demo.");
+      return;
+    }
+
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) {
+      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+      return;
+    }
+
+    setSaving(true);
+    const nextPreferences = { ...preferences, ...patch };
+    const response = await fetch("/api/notifications/preferences", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        tenantId: tenant.id,
+        emailEnabled: nextPreferences.email_enabled,
+        pushEnabled: nextPreferences.push_enabled,
+      }),
+    });
+    const payload = (await response.json()) as NotificationPreferencesResponse;
+    setSaving(false);
+
+    if (!response.ok || !payload.preferences) {
+      onNotice(payload.error ?? "No se pudieron guardar las preferencias.");
+      return;
+    }
+
+    onPreferences(payload.preferences);
+    onNotice("Preferencias de notificaciones actualizadas.");
+  }
+
+  async function activateDevicePush() {
+    if (!preferences.push_enabled) {
+      onNotice("Activa primero las notificaciones por la app.");
+      return;
+    }
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para activar notificaciones reales.");
+      return;
+    }
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+      setPermission("unsupported");
+      onNotice("Este navegador no soporta notificaciones web push.");
+      return;
+    }
+
+    const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    if (!vapidPublicKey) {
+      onNotice("Falta configurar NEXT_PUBLIC_VAPID_PUBLIC_KEY.");
+      return;
+    }
+
+    const nextPermission = await Notification.requestPermission();
+    setPermission(nextPermission);
+    if (nextPermission !== "granted") {
+      onNotice("No se han concedido permisos de notificacion en este dispositivo.");
+      return;
+    }
+
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) {
+      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+      return;
+    }
+
+    setSaving(true);
+    const registration = await navigator.serviceWorker.register("/push-sw.js");
+    const subscription =
+      (await registration.pushManager.getSubscription()) ??
+      (await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+      }));
+
+    const response = await fetch("/api/notifications/push-subscriptions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        tenantId: tenant.id,
+        subscription: subscription.toJSON(),
+      }),
+    });
+    const payload = (await response.json()) as { error?: string; ok?: boolean };
+    setSaving(false);
+
+    if (!response.ok) {
+      onNotice(payload.error ?? "No se pudo activar este dispositivo.");
+      return;
+    }
+
+    setDeviceSubscribed(true);
+    onNotice("Notificaciones activadas en este dispositivo.");
+  }
+
+  async function disableDevicePush() {
+    await savePreferences({ push_enabled: false });
+    if (!supabase || !("serviceWorker" in navigator)) return;
+
+    const registration = await navigator.serviceWorker.getRegistration("/push-sw.js");
+    const subscription = await registration?.pushManager.getSubscription();
+    await subscription?.unsubscribe();
+
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) return;
+
+    await fetch("/api/notifications/push-subscriptions", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        tenantId: tenant.id,
+        endpoint: subscription?.endpoint,
+      }),
+    });
+    setDeviceSubscribed(false);
+  }
+
+  const permissionLabel =
+    permission === "granted"
+      ? "Permiso concedido"
+      : permission === "denied"
+        ? "Permiso bloqueado en el navegador"
+        : permission === "unsupported"
+          ? "No soportado en este navegador"
+          : "Permiso pendiente";
+
+  return (
+    <Panel>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-black sm:text-lg">Notificaciones</h2>
+        <Bell className="size-5 text-[var(--tenant-color)]" />
+      </div>
+      <div className="mt-5 grid gap-3">
+        <NotificationToggle
+          title="Notificaciones por email"
+          description="Si un mensaje sigue sin leerse pasados 5 minutos, DietDesk enviara un correo."
+          checked={preferences.email_enabled}
+          disabled={saving}
+          onChange={(checked) => savePreferences({ email_enabled: checked })}
+        />
+        <NotificationToggle
+          title="Notificaciones por la app"
+          description="Permite avisos push en este navegador o movil cuando hay mensajes nuevos."
+          checked={preferences.push_enabled}
+          disabled={saving}
+          onChange={(checked) =>
+            checked ? savePreferences({ push_enabled: true }) : disableDevicePush()
+          }
+        />
+      </div>
+      <div className="mt-4 rounded-lg border border-[var(--line)] bg-white p-3">
+        <p className="text-sm font-black">Este dispositivo</p>
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          {deviceSubscribed ? "Dispositivo activado." : permissionLabel}
+        </p>
+        <button
+          type="button"
+          className="mt-3 inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
+          onClick={activateDevicePush}
+          disabled={saving || !preferences.push_enabled || deviceSubscribed}
+        >
+          {saving ? <Loader2 className="size-4 animate-spin" /> : <Bell className="size-4" />}
+          {deviceSubscribed ? "Dispositivo activado" : "Activar este dispositivo"}
+        </button>
+      </div>
+    </Panel>
+  );
+}
+
+function NotificationToggle({
+  title,
+  description,
+  checked,
+  disabled,
+  onChange,
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-start justify-between gap-4 rounded-lg border border-[var(--line)] bg-white p-3">
+      <span className="min-w-0">
+        <span className="block text-sm font-black text-[#17201d]">{title}</span>
+        <span className="mt-1 block text-sm text-[var(--muted)]">{description}</span>
+      </span>
+      <input
+        type="checkbox"
+        className="mt-1 size-5 shrink-0 accent-[var(--tenant-color)]"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+    </label>
   );
 }
 
@@ -8590,6 +9229,13 @@ function formatInteger(value: number | string) {
 function formatFileSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function urlBase64ToUint8Array(value: string) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  return Uint8Array.from(rawData, (char) => char.charCodeAt(0));
 }
 
 function getLocalDateString(date = new Date()) {
