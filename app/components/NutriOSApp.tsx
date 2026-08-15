@@ -62,6 +62,7 @@ import {
 } from "../lib/supabase/browser";
 import {
   APP_ICON_SRC,
+  APP_LOGO_SRC,
   APP_LOGO_WITH_SLOGAN_SRC,
   APP_NAME,
   APP_PRIMARY_COLOR,
@@ -2503,6 +2504,8 @@ function Brand({
   collapsible?: boolean;
   expanded?: boolean;
 }) {
+  const showHorizontalLogo = collapsible && expanded;
+
   return (
     <div
       className={`flex items-center gap-3 ${
@@ -2513,17 +2516,31 @@ function Brand({
           : ""
       }`}
     >
-      <div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-1.5 shadow-sm ring-1 ring-[var(--line)]">
+      <div
+        className={`grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-1.5 shadow-sm ring-1 ring-[var(--line)] ${
+          showHorizontalLogo ? "lg:hidden" : ""
+        }`}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={APP_ICON_SRC} alt="" className="h-full w-full object-contain" />
       </div>
+      {showHorizontalLogo && (
+        <div className="hidden min-w-0 lg:block">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={APP_LOGO_SRC}
+            alt={APP_NAME}
+            className="h-auto w-44 select-none object-contain"
+          />
+        </div>
+      )}
       <div
         className={`min-w-0 ${
           collapsible && expanded
-            ? "lg:w-auto lg:overflow-hidden lg:opacity-100 lg:transition-opacity"
+            ? "lg:hidden"
             : collapsible
               ? "lg:w-0 lg:overflow-hidden lg:opacity-0 lg:transition-opacity"
-            : ""
+              : ""
         }`}
       >
         <p className="truncate text-base font-black tracking-normal">{APP_NAME}</p>

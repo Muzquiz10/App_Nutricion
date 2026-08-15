@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+  viewBox="0 0 760 240"
+  role="img"
+  aria-labelledby="title desc">
+  <title id="title">B-Aura Connect logo</title>
+  <desc id="desc">Logo horizontal limpio y profesional para B-Aura Connect.</desc>
+
+  <g id="B-Aura-Connect-logo" inkscape:groupmode="layer" inkscape:label="B-Aura Connect logo">
+    <rect id="brand-panel" x="24" y="24" width="712" height="192" rx="42" fill="#123F2E"/>
+
+    <g id="wordmark" inkscape:label="Wordmark">
+      <text
+        id="brand-b-aura"
+        x="92"
+        y="134"
+        fill="#FFFFFF"
+        font-family="Georgia, Cormorant Garamond, Libre Baskerville, Times New Roman, serif"
+        font-size="78"
+        font-weight="700"
+        letter-spacing="0">
+        B-Aura
+      </text>
+      <text
+        id="brand-connect"
+        x="438"
+        y="132"
+        fill="#68BE74"
+        font-family="Aptos, Segoe UI, Manrope, Montserrat, Arial, sans-serif"
+        font-size="48"
+        font-weight="750"
+        letter-spacing="0">
+        Connect
+      </text>
+    </g>
+  </g>
+</svg>

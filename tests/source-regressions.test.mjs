@@ -17,6 +17,8 @@ const chatNotificationsMigrationPath = new URL(
   import.meta.url,
 );
 const chatSendRoutePath = new URL("../app/api/chat/send/route.ts", import.meta.url);
+const brandPath = new URL("../app/lib/brand.ts", import.meta.url);
+const manifestPath = new URL("../public/manifest.webmanifest", import.meta.url);
 const pushWorkerPath = new URL("../public/push-sw.js", import.meta.url);
 
 test("browser calendar writes go through the server API", async () => {
@@ -110,4 +112,18 @@ test("chat notifications support push, in-app notices, and email fallback", asyn
   assert.match(sql, /create table if not exists public\.push_subscriptions/i);
   assert.match(sql, /create table if not exists public\.app_notifications/i);
   assert.match(sql, /email_fallback_due_at/i);
+});
+
+test("visible brand and installed app assets use B-aura Connect", async () => {
+  const brand = await readFile(brandPath, "utf8");
+  const manifest = await readFile(manifestPath, "utf8");
+  const worker = await readFile(pushWorkerPath, "utf8");
+
+  assert.match(brand, /B-aura Connect/);
+  assert.match(brand, /B-Aura_Connect_icono\.svg/);
+  assert.match(brand, /B-Aura_Connect_logo\.svg/);
+  assert.match(brand, /B-Aura_Connect_logo_con_slogan\.svg/);
+  assert.match(manifest, /"id": "\/"/);
+  assert.match(manifest, /B-Aura_Connect_icono\.svg/);
+  assert.match(worker, /B-Aura_Connect_icono\.svg/);
 });

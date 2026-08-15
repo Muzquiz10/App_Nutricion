@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+  viewBox="0 0 256 256"
+  role="img"
+  aria-labelledby="title desc">
+  <title id="title">B-Aura Connect icono</title>
+  <desc id="desc">Icono tipografico limpio para B-Aura Connect.</desc>
+
+  <g id="B-Aura-Connect-icono" inkscape:groupmode="layer" inkscape:label="B-Aura Connect icono">
+    <rect id="icon-panel" x="20" y="20" width="216" height="216" rx="48" fill="#123F2E"/>
+    <text
+      id="icon-mark"
+      x="49"
+      y="135"
+      fill="#FFFFFF"
+      font-family="Georgia, Cormorant Garamond, Libre Baskerville, Times New Roman, serif"
+      font-size="78"
+      font-weight="700"
+      letter-spacing="0">
+      <tspan id="icon-b">B</tspan><tspan id="icon-hyphen" fill="#FFFFFF">-</tspan><tspan id="icon-a" fill="#68BE74">A</tspan>
+    </text>
+    <text
+      id="icon-connect"
+      x="54"
+      y="176"
+      fill="#68BE74"
+      font-family="Aptos, Segoe UI, Manrope, Montserrat, Arial, sans-serif"
+      font-size="20"
+      font-weight="750"
+      letter-spacing="1.5">
+      CONNECT
+    </text>
+  </g>
+</svg>

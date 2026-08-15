@@ -18,9 +18,15 @@ export const metadata: Metadata = {
   description:
     "Panel web multitenant para nutricionistas y seguimiento de pacientes.",
   manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: APP_NAME,
+    statusBarStyle: "default",
+  },
   icons: {
     icon: APP_ICON_SRC,
     shortcut: APP_ICON_SRC,
+    apple: APP_ICON_SRC,
   },
 };
 

@@ -9,12 +9,12 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification(payload.title || fallback.title, {
       body: payload.body || fallback.body,
-      icon: "/DietDesk_icono.svg",
-      badge: "/DietDesk_icono.svg",
+      icon: "/B-Aura_Connect_icono.svg",
+      badge: "/B-Aura_Connect_icono.svg",
       data: {
         url: payload.url || fallback.url,
       },
-      tag: "dietdesk-chat-message",
+      tag: "baura-connect-chat-message",
     }),
   );
 });
