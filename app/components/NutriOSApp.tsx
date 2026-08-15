@@ -10,6 +10,7 @@ import {
   CalendarDays,
   Camera,
   Check,
+  ChevronLeft,
   ChevronRight,
   ClipboardList,
   Clock,
@@ -5567,6 +5568,7 @@ function DataEntryPanel({
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [savingTracking, setSavingTracking] = useState(false);
   const [durationPickerOpen, setDurationPickerOpen] = useState(false);
+  const [distancePickerOpen, setDistancePickerOpen] = useState(false);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const activeCustomGoals = goals
@@ -5815,13 +5817,19 @@ function DataEntryPanel({
                 <Clock className="size-4 text-[var(--tenant-color)]" />
               </button>
             </div>
-            <Field
-              label="Distancia km"
-              type="number"
-              value={trackingDraft.distanceKm}
-              onChange={(value) => updateTrackingDraft("distanceKm", value)}
-              step="0.01"
-            />
+            <div>
+              <span className="mb-1 block text-sm font-semibold text-[#39433f]">
+                Distancia
+              </span>
+              <button
+                type="button"
+                className="flex h-11 w-full items-center justify-between gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-left text-sm font-semibold text-[#27312d] transition hover:border-[var(--tenant-color)]"
+                onClick={() => setDistancePickerOpen(true)}
+              >
+                <span>{formatDistanceForInput(Number(trackingDraft.distanceKm || 0))}</span>
+                <MapPin className="size-4 text-[var(--tenant-color)]" />
+              </button>
+            </div>
           </div>
           {durationPickerOpen && (
             <DurationPickerDialog
@@ -5830,6 +5838,19 @@ function DataEntryPanel({
               onDone={(totalSeconds) => {
                 updateTrackingDraft("durationSeconds", totalSeconds ? String(totalSeconds) : "");
                 setDurationPickerOpen(false);
+              }}
+            />
+          )}
+          {distancePickerOpen && (
+            <DistancePickerDialog
+              valueKm={trackingDraft.distanceKm}
+              onCancel={() => setDistancePickerOpen(false)}
+              onDone={(totalMeters) => {
+                updateTrackingDraft(
+                  "distanceKm",
+                  totalMeters ? formatDistanceKmForStorage(totalMeters) : "",
+                );
+                setDistancePickerOpen(false);
               }}
             />
           )}
@@ -6067,6 +6088,111 @@ function DurationPartInput({
   );
 }
 
+function DistancePickerDialog({
+  valueKm,
+  onCancel,
+  onDone,
+}: {
+  valueKm: string;
+  onCancel: () => void;
+  onDone: (totalMeters: number) => void;
+}) {
+  const initialMeters = Math.max(0, Math.round((Number(valueKm || 0) || 0) * 1000));
+  const [kilometers, setKilometers] = useState(() => Math.floor(initialMeters / 1000));
+  const [meters, setMeters] = useState(() => initialMeters % 1000);
+  const totalMeters = kilometers * 1000 + meters;
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#121715]/45 px-4 py-6">
+      <div
+        className="w-full max-w-md rounded-lg border border-[var(--line)] bg-[#f7f5ef] p-4 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Elegir distancia de actividad"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-bold uppercase text-[var(--tenant-color)]">
+              Distancia
+            </p>
+            <p className="mt-1 text-3xl font-black">
+              {formatDistanceForInput(totalMeters / 1000)}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="grid size-9 place-items-center rounded-lg border border-[var(--line)] bg-white text-[#39433f]"
+            onClick={onCancel}
+            aria-label="Cerrar"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <DistancePartInput
+            label="Kilómetros"
+            value={kilometers}
+            max={1000}
+            onChange={setKilometers}
+          />
+          <DistancePartInput
+            label="Metros"
+            value={meters}
+            max={999}
+            onChange={setMeters}
+          />
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-black text-[#39433f]"
+            onClick={onCancel}
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-10 items-center justify-center rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white"
+            onClick={() => onDone(totalMeters)}
+          >
+            Hecho
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DistancePartInput({
+  label,
+  value,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-center text-xs font-black uppercase text-[var(--muted)]">
+        {label}
+      </span>
+      <input
+        className="h-16 w-full rounded-lg border border-[var(--line)] bg-white text-center text-2xl font-black text-[#27312d]"
+        type="number"
+        min="0"
+        max={max}
+        value={value}
+        onChange={(event) =>
+          onChange(clampDurationPart(event.target.value, max))
+        }
+      />
+    </label>
+  );
+}
+
 function ActivitiesPanel({
   selectedPatient,
   exercises,
@@ -6096,6 +6222,53 @@ function ActivitiesPanel({
   const nextWeekStart = addDaysToDateKey(selectedWeekStart, 7);
   const previousWeekStart = addDaysToDateKey(selectedWeekStart, -7);
   const canMoveNext = nextWeekStart <= currentWeekStart;
+  const activitySummaryMetrics = [
+    {
+      label: "Duración",
+      value: formatDurationSeconds(selectedSummary.durationSeconds),
+      comparison: formatActivityComparison(
+        selectedSummary.durationSeconds,
+        previousSummary.durationSeconds,
+        "semana anterior",
+      ),
+      average: formatActivityComparison(
+        selectedSummary.durationSeconds,
+        fourWeekAverage.durationSeconds,
+        "media 4 semanas",
+      ),
+      icon: Clock,
+    },
+    {
+      label: "Actividades",
+      value: `${selectedSummary.activityCount}`,
+      comparison: formatActivityComparison(
+        selectedSummary.activityCount,
+        previousSummary.activityCount,
+        "semana anterior",
+      ),
+      average: formatActivityComparison(
+        selectedSummary.activityCount,
+        fourWeekAverage.activityCount,
+        "media 4 semanas",
+      ),
+      icon: Dumbbell,
+    },
+    {
+      label: "Distancia",
+      value: formatActivityDistance(selectedSummary.distanceKm),
+      comparison: formatActivityComparison(
+        selectedSummary.distanceKm,
+        previousSummary.distanceKm,
+        "semana anterior",
+      ),
+      average: formatActivityComparison(
+        selectedSummary.distanceKm,
+        fourWeekAverage.distanceKm,
+        "media 4 semanas",
+      ),
+      icon: MapPin,
+    },
+  ];
 
   return (
     <Panel>
@@ -6114,83 +6287,13 @@ function ActivitiesPanel({
         </div>
       ) : (
         <div className="mt-5 space-y-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-xs font-bold uppercase text-[var(--muted)]">
-                Semana seleccionada
-              </p>
-              <p className="text-xl font-black">{formatActivityWeekTitle(selectedSummary)}</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="inline-flex h-10 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-black text-[#39433f]"
-                onClick={() => setSelectedWeekStart(previousWeekStart)}
-              >
-                Semana anterior
-              </button>
-              <button
-                type="button"
-                className="inline-flex h-10 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-black text-[#39433f] disabled:opacity-50"
-                disabled={!canMoveNext}
-                onClick={() => setSelectedWeekStart(nextWeekStart)}
-              >
-                Semana siguiente
-              </button>
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <ActivitySummaryMetric
-              label="Duración"
-              value={formatDurationSeconds(selectedSummary.durationSeconds)}
-              comparison={formatActivityComparison(
-                selectedSummary.durationSeconds,
-                previousSummary.durationSeconds,
-                "semana anterior",
-              )}
-              average={formatActivityComparison(
-                selectedSummary.durationSeconds,
-                fourWeekAverage.durationSeconds,
-                "media 4 semanas",
-              )}
-              icon={Clock}
-            />
-            <ActivitySummaryMetric
-              label="Actividades"
-              value={`${selectedSummary.activityCount}`}
-              comparison={formatActivityComparison(
-                selectedSummary.activityCount,
-                previousSummary.activityCount,
-                "semana anterior",
-              )}
-              average={formatActivityComparison(
-                selectedSummary.activityCount,
-                fourWeekAverage.activityCount,
-                "media 4 semanas",
-              )}
-              icon={Dumbbell}
-            />
-            <ActivitySummaryMetric
-              label="Distancia"
-              value={formatActivityDistance(selectedSummary.distanceKm)}
-              comparison={formatActivityComparison(
-                selectedSummary.distanceKm,
-                previousSummary.distanceKm,
-                "semana anterior",
-              )}
-              average={formatActivityComparison(
-                selectedSummary.distanceKm,
-                fourWeekAverage.distanceKm,
-                "media 4 semanas",
-              )}
-              icon={MapPin}
-            />
-          </div>
-
           <ActivityWeekChart
             title="Instantánea semanal"
             summary={selectedSummary}
+            metrics={activitySummaryMetrics}
+            onPreviousWeek={() => setSelectedWeekStart(previousWeekStart)}
+            onNextWeek={() => setSelectedWeekStart(nextWeekStart)}
+            canMoveNext={canMoveNext}
             emptyText="Sin actividades en esta semana."
           />
 
@@ -6294,17 +6397,17 @@ function ActivitySummaryMetric({
   icon: typeof Users;
 }) {
   return (
-    <div className="rounded-lg border border-[var(--line)] bg-white p-4">
+    <div className="rounded-lg bg-[#f6f3eb] p-3">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-bold text-[var(--muted)]">{label}</p>
-          <p className="mt-2 text-2xl font-black">{value}</p>
+          <p className="mt-1 text-xl font-black">{value}</p>
         </div>
-        <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#eaf4ef] text-[var(--tenant-color)]">
-          <Icon className="size-5" />
+        <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-white text-[var(--tenant-color)]">
+          <Icon className="size-4" />
         </div>
       </div>
-      <div className="mt-3 grid gap-1 text-xs font-semibold text-[var(--muted)]">
+      <div className="mt-2 grid gap-1 text-[11px] font-semibold text-[var(--muted)]">
         <span>{comparison}</span>
         <span>{average}</span>
       </div>
@@ -6315,10 +6418,24 @@ function ActivitySummaryMetric({
 function ActivityWeekChart({
   title,
   summary,
+  metrics,
+  onPreviousWeek,
+  onNextWeek,
+  canMoveNext = false,
   emptyText,
 }: {
   title: string;
   summary: ActivityWeekSummary;
+  metrics?: Array<{
+    label: string;
+    value: string;
+    comparison: string;
+    average: string;
+    icon: typeof Users;
+  }>;
+  onPreviousWeek?: () => void;
+  onNextWeek?: () => void;
+  canMoveNext?: boolean;
   emptyText: string;
 }) {
   const data = summary.days.map((day) => ({
@@ -6330,12 +6447,48 @@ function ActivityWeekChart({
 
   return (
     <div className="rounded-lg border border-[var(--line)] bg-white p-3">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-black">{title}</p>
-        <p className="text-xs font-semibold text-[var(--muted)]">
-          {formatActivityWeekTitle(summary)}
-        </p>
+      <div className="mb-3 grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-2">
+        {onPreviousWeek ? (
+          <button
+            type="button"
+            className="grid size-11 place-items-center rounded-lg border border-[var(--line)] bg-[#f7f5ef] text-[#39433f] transition hover:border-[var(--tenant-color)]"
+            onClick={onPreviousWeek}
+            aria-label="Ver semana anterior"
+            title="Semana anterior"
+          >
+            <ChevronLeft className="size-5" />
+          </button>
+        ) : (
+          <span />
+        )}
+        <div className="min-w-0 text-center">
+          <p className="truncate text-sm font-black">{title}</p>
+          <p className="truncate text-xs font-semibold text-[var(--muted)]">
+            {formatActivityWeekTitle(summary)}
+          </p>
+        </div>
+        {onNextWeek ? (
+          <button
+            type="button"
+            className="grid size-11 place-items-center rounded-lg border border-[var(--line)] bg-[#f7f5ef] text-[#39433f] transition hover:border-[var(--tenant-color)] disabled:cursor-not-allowed disabled:opacity-45"
+            onClick={onNextWeek}
+            disabled={!canMoveNext}
+            aria-label="Ver semana siguiente"
+            title="Semana siguiente"
+          >
+            <ChevronRight className="size-5" />
+          </button>
+        ) : (
+          <span />
+        )}
       </div>
+      {metrics?.length ? (
+        <div className="mb-4 grid gap-2 sm:grid-cols-3">
+          {metrics.map((metric) => (
+            <ActivitySummaryMetric key={metric.label} {...metric} />
+          ))}
+        </div>
+      ) : null}
       {!hasData ? (
         <div className="grid h-64 place-items-center sm:h-72">
           <EmptyState text={emptyText} />
@@ -9669,6 +9822,18 @@ function formatActivityDistance(distanceKm: number | null | undefined) {
   return `${distance.toLocaleString("es-ES", {
     maximumFractionDigits: distance >= 10 ? 1 : 2,
   })} km`;
+}
+
+function formatDistanceForInput(distanceKm: number | null | undefined) {
+  const totalMeters = Math.max(0, Math.round((Number(distanceKm) || 0) * 1000));
+  const kilometers = Math.floor(totalMeters / 1000);
+  const meters = totalMeters % 1000;
+
+  return `${kilometers} km ${meters} m`;
+}
+
+function formatDistanceKmForStorage(totalMeters: number) {
+  return (totalMeters / 1000).toFixed(3).replace(/\.?0+$/, "");
 }
 
 function addDaysToDateKey(dateKey: string, days: number) {

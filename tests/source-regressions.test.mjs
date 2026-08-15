@@ -141,8 +141,11 @@ test("activity tracking has structured sport, duration and weekly summaries", as
   assert.match(source, /\{ id: "activities", label: "Actividades", icon: Dumbbell \}/);
   assert.match(source, /activityOptions/);
   assert.match(source, /DurationPickerDialog/);
+  assert.match(source, /DistancePickerDialog/);
+  assert.match(source, /formatDistanceForInput/);
   assert.match(source, /buildActivityWeekSummary/);
   assert.match(source, /ActivityWeekChart/);
+  assert.match(source, /onPreviousWeek/);
   assert.match(source, /distanceKm/);
   assert.match(route, /durationSeconds/);
   assert.match(route, /distanceKm/);
