@@ -59,6 +59,17 @@ test("home route is the shared app entry point", async () => {
   assert.doesNotMatch(source, /resolveTenantSlugFromHost/);
 });
 
+test("goals tab is first and goals stay visible", async () => {
+  const source = await readFile(componentPath, "utf8");
+
+  assert.ok(
+    source.indexOf('{ id: "goals", label: "Objetivos", icon: Target }') <
+      source.indexOf('{ id: "patients", label: "Clientes", icon: Users }'),
+  );
+  assert.match(source, /const showGoalsPanel = Boolean\(role\);/);
+  assert.doesNotMatch(source, /goals-panel-open/);
+});
+
 test("diet builder keeps serving fields and weekly calendar", async () => {
   const source = await readFile(componentPath, "utf8");
   const sql = await readFile(mealServingMigrationPath, "utf8");

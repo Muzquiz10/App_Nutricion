@@ -427,9 +427,9 @@ const tabs: Array<{
   patientOnly?: boolean;
   nutritionistOnly?: boolean;
 }> = [
+  { id: "goals", label: "Objetivos", icon: Target },
   { id: "patients", label: "Clientes", icon: Users },
   { id: "plans", label: "Dietas", icon: BookOpen },
-  { id: "goals", label: "Objetivos", icon: Target },
   { id: "data-entry", label: "Registro de datos", icon: Plus, patientOnly: true },
   { id: "activities", label: "Actividades", icon: Dumbbell },
   { id: "stats", label: "Estadísticas", icon: Activity },
@@ -1034,7 +1034,7 @@ export function NutriOSApp({
   const [loginIntent, setLoginIntent] = useState<LoginIntent>("patient");
   const [activeTab, setActiveTab] = useStoredValue<TabId>(
     `nutrios:${commonEntry ? "common" : tenantSlug}:active-tab`,
-    "patients",
+    "goals",
   );
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [sidebarCollapsedAfterClick, setSidebarCollapsedAfterClick] = useState(false);
@@ -1079,9 +1079,7 @@ export function NutriOSApp({
     .filter((item) => item.conversation_id === selectedConversation?.id)
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   const patientPlans = plans.filter((plan) => plan.patient_id === selectedPatientId);
-  const showGoalsPanel =
-    activeTab === "goals" ||
-    (role === "patient" && activeTab === "data-entry");
+  const showGoalsPanel = Boolean(role);
   const pendingAppointmentCount = calendarEvents.filter(
     (event) => isPendingCalendarAppointment(event),
   ).length;
@@ -1838,7 +1836,6 @@ export function NutriOSApp({
           )}
           {showGoalsPanel && (
             <GoalsPanel
-              tenant={tenant}
               selectedPatient={selectedPatient}
               goals={goals}
               weights={weights}
@@ -2021,7 +2018,6 @@ export function NutriOSApp({
 }
 
 function GoalsPanel({
-  tenant,
   selectedPatient,
   goals,
   weights,
@@ -2029,7 +2025,6 @@ function GoalsPanel({
   exercises,
   goalLogs,
 }: {
-  tenant: Tenant;
   selectedPatient: Patient | null;
   goals: PatientGoal[];
   weights: WeightLog[];
@@ -2037,10 +2032,6 @@ function GoalsPanel({
   exercises: ExerciseLog[];
   goalLogs: PatientGoalLog[];
 }) {
-  const [isOpen, setIsOpen] = useStoredValue(
-    `nutrios:${tenant.slug}:goals-panel-open`,
-    true,
-  );
   const goalSummaries = selectedPatient
     ? buildGoalSummaries({
         patient: selectedPatient,
@@ -2054,12 +2045,7 @@ function GoalsPanel({
 
   return (
     <Panel className="mt-5">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between gap-3 text-left"
-        onClick={() => setIsOpen((current) => !current)}
-        aria-expanded={isOpen}
-      >
+      <div className="flex w-full items-center justify-between gap-3 text-left">
         <div className="flex min-w-0 items-center gap-3">
           <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#eaf4ef] text-[var(--tenant-color)]">
             <Target className="size-5" />
@@ -2073,31 +2059,22 @@ function GoalsPanel({
             </p>
           </div>
         </div>
-        <ChevronRight
-          className={`size-5 shrink-0 text-[var(--muted)] transition ${
-            isOpen ? "rotate-90" : ""
-          }`}
-        />
-      </button>
+      </div>
 
-      {isOpen && (
-        <div className="mt-4">
-          {!selectedPatient ? (
-            <EmptyState text="No hay cliente seleccionado." />
-          ) : (
-            <>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {goalSummaries.map((summary) => (
-                  <GoalStatusCard key={summary.id} summary={summary} />
-                ))}
-                {goalSummaries.length === 0 && (
-                  <EmptyState text="Sin objetivos activos para hoy." />
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      )}
+      <div className="mt-4">
+        {!selectedPatient ? (
+          <EmptyState text="No hay cliente seleccionado." />
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {goalSummaries.map((summary) => (
+              <GoalStatusCard key={summary.id} summary={summary} />
+            ))}
+            {goalSummaries.length === 0 && (
+              <EmptyState text="Sin objetivos activos para hoy." />
+            )}
+          </div>
+        )}
+      </div>
     </Panel>
   );
 }
