@@ -14,6 +14,7 @@ import {
   ClipboardList,
   Clock,
   Copy,
+  Dumbbell,
   FileText,
   Footprints,
   Frown,
@@ -127,8 +128,26 @@ type ExerciseLog = {
   patient_id: string;
   activity: string;
   duration_minutes: number | null;
+  duration_seconds?: number | null;
+  distance_km?: number | null;
   intensity: string | null;
   logged_at: string;
+};
+
+type ActivityWeekSummary = {
+  weekStart: string;
+  weekEnd: string;
+  durationSeconds: number;
+  distanceKm: number;
+  activityCount: number;
+  days: Array<{
+    dateKey: string;
+    label: string;
+    shortLabel: string;
+    durationSeconds: number;
+    distanceKm: number;
+    logs: ExerciseLog[];
+  }>;
 };
 
 type StepLog = {
@@ -339,6 +358,7 @@ type TabId =
   | "plans"
   | "goals"
   | "data-entry"
+  | "activities"
   | "stats"
   | "tracking"
   | "chat"
@@ -410,6 +430,7 @@ const tabs: Array<{
   { id: "plans", label: "Dietas", icon: BookOpen },
   { id: "goals", label: "Objetivos", icon: Target },
   { id: "data-entry", label: "Registro de datos", icon: Plus, patientOnly: true },
+  { id: "activities", label: "Actividades", icon: Dumbbell },
   { id: "stats", label: "Estadísticas", icon: Activity },
   { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "documents", label: "Documentos", icon: FileText },
@@ -427,6 +448,16 @@ const dayLabels = [
   "Sábado",
   "Domingo",
 ];
+const activityWeekdayLabels = [
+  "Lunes",
+  "Martes",
+  "Miércoles",
+  "Jueves",
+  "Viernes",
+  "Sábado",
+  "Domingo",
+];
+const activityWeekdayShortLabels = ["L", "M", "X", "J", "V", "S", "D"];
 
 const mealTypes = ["Desayuno", "Almuerzo", "Comida", "Media tarde", "Cena"];
 const mealPhotoTypes = [...mealTypes, "Snack"];
@@ -441,6 +472,33 @@ const mealUnitOptions = [
   "Tazas",
   "Raciones",
 ];
+const activityOptions = [
+  "",
+  "Correr",
+  "Caminar",
+  "Bicicleta",
+  "Bicicleta Interior",
+  "Bicicleta Rodillo",
+  "Natación",
+  "Fuerza",
+  "Yoga",
+  "Elíptica",
+  "Cardio",
+  "Pilates",
+  "Senderismo",
+  "Pádel",
+  "Tenis",
+  "Fútbol",
+  "Baloncesto",
+  "Remo",
+  "HIIT",
+  "Boxeo",
+  "Movilidad",
+  "Otro",
+].map((label) => ({
+  value: label,
+  label: label || "Selecciona un deporte",
+}));
 const maxLogoFileSizeBytes = 2 * 1024 * 1024;
 const maxMealPhotoDimension = 1600;
 const mealPhotoQuality = 0.82;
@@ -667,6 +725,49 @@ const demoSteps: StepLog[] = [
   { id: "s2", patient_id: "demo-patient-1", steps: 8400, logged_on: "2026-07-23", source: "patient" },
   { id: "s3", patient_id: "demo-patient-1", steps: 9200, logged_on: "2026-07-24", source: "patient" },
   { id: "s4", patient_id: "demo-patient-1", steps: 6200, logged_on: getLocalDateString(), source: "patient" },
+];
+
+const demoExercises: ExerciseLog[] = [
+  {
+    id: "ex-demo-1",
+    patient_id: "demo-patient-1",
+    activity: "Fuerza",
+    duration_minutes: 45,
+    duration_seconds: 45 * 60,
+    distance_km: null,
+    intensity: "normal",
+    logged_at: addDaysToDateKey(getMondayDateKey(getLocalDateString()), 0),
+  },
+  {
+    id: "ex-demo-2",
+    patient_id: "demo-patient-1",
+    activity: "Correr",
+    duration_minutes: 36,
+    duration_seconds: 36 * 60 + 20,
+    distance_km: 6.2,
+    intensity: "normal",
+    logged_at: addDaysToDateKey(getMondayDateKey(getLocalDateString()), 2),
+  },
+  {
+    id: "ex-demo-3",
+    patient_id: "demo-patient-1",
+    activity: "Yoga",
+    duration_minutes: 30,
+    duration_seconds: 30 * 60,
+    distance_km: null,
+    intensity: "normal",
+    logged_at: addDaysToDateKey(getMondayDateKey(getLocalDateString()), 5),
+  },
+  {
+    id: "ex-demo-4",
+    patient_id: "demo-patient-1",
+    activity: "Bicicleta",
+    duration_minutes: 58,
+    duration_seconds: 58 * 60,
+    distance_km: 18.4,
+    intensity: "normal",
+    logged_at: addDaysToDateKey(addDaysToDateKey(getMondayDateKey(getLocalDateString()), -7), 1),
+  },
 ];
 
 const demoGoals: PatientGoal[] = [
@@ -917,7 +1018,7 @@ export function NutriOSApp({
     useState<CalendarEvent[]>(demoCalendarEvents);
   const [calendarBusySlots, setCalendarBusySlots] =
     useState<CalendarBusySlot[]>(demoBusySlots);
-  const [exercises, setExercises] = useState<ExerciseLog[]>([]);
+  const [exercises, setExercises] = useState<ExerciseLog[]>(demoExercises);
   const [mealPhotos, setMealPhotos] = useState<MealPhoto[]>([]);
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([demoConversation]);
@@ -1797,6 +1898,13 @@ export function NutriOSApp({
                 goalLogs={patientGoalLogs}
                 onNotice={setNotice}
                 onReload={loadWorkspace}
+              />
+            )}
+            {activeTab === "activities" && (
+              <ActivitiesPanel
+                key={`activities-${selectedPatientId || "none"}`}
+                selectedPatient={selectedPatient}
+                exercises={exercises.filter((item) => item.patient_id === selectedPatientId)}
               />
             )}
             {activeTab === "stats" && (
@@ -5440,7 +5548,8 @@ function DataEntryPanel({
       waist: "",
       steps: "",
       exercise: "",
-      duration: "",
+      durationSeconds: "",
+      distanceKm: "",
       mealType: "Comida",
       mealNotes: "",
     }),
@@ -5457,6 +5566,7 @@ function DataEntryPanel({
   );
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [savingTracking, setSavingTracking] = useState(false);
+  const [durationPickerOpen, setDurationPickerOpen] = useState(false);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const activeCustomGoals = goals
@@ -5510,18 +5620,38 @@ function DataEntryPanel({
         }
       }
 
-      if (trackingDraft.duration) {
-        const durationMinutes = Number(trackingDraft.duration);
-        if (!Number.isFinite(durationMinutes) || durationMinutes < 0) {
-          onNotice("Duracion de actividad no valida.");
-          return;
-        }
+      const durationSeconds = trackingDraft.durationSeconds
+        ? Number(trackingDraft.durationSeconds)
+        : null;
+      const distanceKm = trackingDraft.distanceKm
+        ? Number(trackingDraft.distanceKm)
+        : null;
+
+      if (
+        durationSeconds != null &&
+        (!Number.isInteger(durationSeconds) || durationSeconds < 0 || durationSeconds > 86400)
+      ) {
+        onNotice("Duración de actividad no válida.");
+        return;
+      }
+
+      if (
+        distanceKm != null &&
+        (!Number.isFinite(distanceKm) || distanceKm < 0 || distanceKm > 1000)
+      ) {
+        onNotice("Distancia no válida.");
+        return;
+      }
+
+      if ((durationSeconds || distanceKm) && !trackingDraft.exercise) {
+        onNotice("Selecciona el deporte realizado.");
+        return;
       }
 
       if (trackingDraft.exercise) {
         const activity = trackingDraft.exercise.trim();
         if (!activity) {
-          onNotice("Actividad no valida.");
+          onNotice("Actividad no válida.");
           return;
         }
       }
@@ -5592,7 +5722,9 @@ function DataEntryPanel({
         waistCm: trackingDraft.waist ? Number(trackingDraft.waist) : null,
         steps: trackingDraft.steps ? Number(trackingDraft.steps) : null,
         exercise: trackingDraft.exercise.trim() || null,
-        durationMinutes: trackingDraft.duration ? Number(trackingDraft.duration) : null,
+        durationMinutes: durationSeconds != null ? Math.round(durationSeconds / 60) : null,
+        durationSeconds,
+        distanceKm,
         customGoalLogs,
         mealPhoto,
       });
@@ -5663,19 +5795,44 @@ function DataEntryPanel({
             onChange={(value) => updateTrackingDraft("steps", value)}
             step="1"
           />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field
+          <div className="grid gap-3 sm:grid-cols-3">
+            <SelectField
               label="Ejercicio realizado"
               value={trackingDraft.exercise}
               onChange={(value) => updateTrackingDraft("exercise", value)}
+              options={activityOptions}
             />
+            <div>
+              <span className="mb-1 block text-sm font-semibold text-[#39433f]">
+                Tiempo de actividad
+              </span>
+              <button
+                type="button"
+                className="flex h-11 w-full items-center justify-between gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-left text-sm font-semibold text-[#27312d] transition hover:border-[var(--tenant-color)]"
+                onClick={() => setDurationPickerOpen(true)}
+              >
+                <span>{formatDurationSeconds(Number(trackingDraft.durationSeconds || 0))}</span>
+                <Clock className="size-4 text-[var(--tenant-color)]" />
+              </button>
+            </div>
             <Field
-              label="Minutos"
+              label="Distancia km"
               type="number"
-              value={trackingDraft.duration}
-              onChange={(value) => updateTrackingDraft("duration", value)}
+              value={trackingDraft.distanceKm}
+              onChange={(value) => updateTrackingDraft("distanceKm", value)}
+              step="0.01"
             />
           </div>
+          {durationPickerOpen && (
+            <DurationPickerDialog
+              value={trackingDraft.durationSeconds}
+              onCancel={() => setDurationPickerOpen(false)}
+              onDone={(totalSeconds) => {
+                updateTrackingDraft("durationSeconds", totalSeconds ? String(totalSeconds) : "");
+                setDurationPickerOpen(false);
+              }}
+            />
+          )}
           <SelectField
             label="Comida fotografiada"
             value={trackingDraft.mealType}
@@ -5795,6 +5952,426 @@ function DataEntryPanel({
   );
 }
 
+function DurationPickerDialog({
+  value,
+  onCancel,
+  onDone,
+}: {
+  value: string;
+  onCancel: () => void;
+  onDone: (totalSeconds: number) => void;
+}) {
+  const initialSeconds = Math.max(0, Math.trunc(Number(value || 0) || 0));
+  const [hours, setHours] = useState(() => Math.floor(initialSeconds / 3600));
+  const [minutes, setMinutes] = useState(() =>
+    Math.floor((initialSeconds % 3600) / 60),
+  );
+  const [seconds, setSeconds] = useState(() => initialSeconds % 60);
+
+  const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#121715]/45 px-4 py-6">
+      <div
+        className="w-full max-w-md rounded-lg border border-[var(--line)] bg-[#f7f5ef] p-4 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Elegir tiempo de actividad"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-bold uppercase text-[var(--tenant-color)]">
+              Duración
+            </p>
+            <p className="mt-1 text-3xl font-black">
+              {formatDurationSeconds(totalSeconds)}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="grid size-9 place-items-center rounded-lg border border-[var(--line)] bg-white text-[#39433f]"
+            onClick={onCancel}
+            aria-label="Cerrar"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="mt-5 grid grid-cols-3 gap-3">
+          <DurationPartInput
+            label="Horas"
+            value={hours}
+            max={24}
+            onChange={setHours}
+          />
+          <DurationPartInput
+            label="Minutos"
+            value={minutes}
+            max={59}
+            onChange={setMinutes}
+          />
+          <DurationPartInput
+            label="Segundos"
+            value={seconds}
+            max={59}
+            onChange={setSeconds}
+          />
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-black text-[#39433f]"
+            onClick={onCancel}
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-10 items-center justify-center rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white"
+            onClick={() => onDone(totalSeconds)}
+          >
+            Hecho
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DurationPartInput({
+  label,
+  value,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-center text-xs font-black uppercase text-[var(--muted)]">
+        {label}
+      </span>
+      <input
+        className="h-16 w-full rounded-lg border border-[var(--line)] bg-white text-center text-2xl font-black text-[#27312d]"
+        type="number"
+        min="0"
+        max={max}
+        value={value}
+        onChange={(event) =>
+          onChange(clampDurationPart(event.target.value, max))
+        }
+      />
+    </label>
+  );
+}
+
+function ActivitiesPanel({
+  selectedPatient,
+  exercises,
+}: {
+  selectedPatient: Patient | null;
+  exercises: ExerciseLog[];
+}) {
+  const currentWeekStart = getMondayDateKey(getLocalDateString());
+  const [selectedWeekStart, setSelectedWeekStart] = useState(currentWeekStart);
+
+  const weekKeys = useMemo(
+    () => buildActivityWeekKeys(exercises, currentWeekStart),
+    [currentWeekStart, exercises],
+  );
+  const selectedSummary = useMemo(
+    () => buildActivityWeekSummary(exercises, selectedWeekStart),
+    [exercises, selectedWeekStart],
+  );
+  const previousSummary = useMemo(
+    () => buildActivityWeekSummary(exercises, addDaysToDateKey(selectedWeekStart, -7)),
+    [exercises, selectedWeekStart],
+  );
+  const fourWeekAverage = useMemo(
+    () => buildPreviousActivityWeekAverage(exercises, selectedWeekStart, 4),
+    [exercises, selectedWeekStart],
+  );
+  const nextWeekStart = addDaysToDateKey(selectedWeekStart, 7);
+  const previousWeekStart = addDaysToDateKey(selectedWeekStart, -7);
+  const canMoveNext = nextWeekStart <= currentWeekStart;
+
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-black">Actividades</h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Resumen semanal e histórico de ejercicio registrado.
+          </p>
+        </div>
+        <Dumbbell className="size-5 text-[var(--tenant-color)]" />
+      </div>
+      {!selectedPatient ? (
+        <div className="mt-5">
+          <EmptyState text="No hay ficha de cliente seleccionada." />
+        </div>
+      ) : (
+        <div className="mt-5 space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-bold uppercase text-[var(--muted)]">
+                Semana seleccionada
+              </p>
+              <p className="text-xl font-black">{formatActivityWeekTitle(selectedSummary)}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-black text-[#39433f]"
+                onClick={() => setSelectedWeekStart(previousWeekStart)}
+              >
+                Semana anterior
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-black text-[#39433f] disabled:opacity-50"
+                disabled={!canMoveNext}
+                onClick={() => setSelectedWeekStart(nextWeekStart)}
+              >
+                Semana siguiente
+              </button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <ActivitySummaryMetric
+              label="Duración"
+              value={formatDurationSeconds(selectedSummary.durationSeconds)}
+              comparison={formatActivityComparison(
+                selectedSummary.durationSeconds,
+                previousSummary.durationSeconds,
+                "semana anterior",
+              )}
+              average={formatActivityComparison(
+                selectedSummary.durationSeconds,
+                fourWeekAverage.durationSeconds,
+                "media 4 semanas",
+              )}
+              icon={Clock}
+            />
+            <ActivitySummaryMetric
+              label="Actividades"
+              value={`${selectedSummary.activityCount}`}
+              comparison={formatActivityComparison(
+                selectedSummary.activityCount,
+                previousSummary.activityCount,
+                "semana anterior",
+              )}
+              average={formatActivityComparison(
+                selectedSummary.activityCount,
+                fourWeekAverage.activityCount,
+                "media 4 semanas",
+              )}
+              icon={Dumbbell}
+            />
+            <ActivitySummaryMetric
+              label="Distancia"
+              value={formatActivityDistance(selectedSummary.distanceKm)}
+              comparison={formatActivityComparison(
+                selectedSummary.distanceKm,
+                previousSummary.distanceKm,
+                "semana anterior",
+              )}
+              average={formatActivityComparison(
+                selectedSummary.distanceKm,
+                fourWeekAverage.distanceKm,
+                "media 4 semanas",
+              )}
+              icon={MapPin}
+            />
+          </div>
+
+          <ActivityWeekChart
+            title="Instantánea semanal"
+            summary={selectedSummary}
+            emptyText="Sin actividades en esta semana."
+          />
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+            <div>
+              <p className="mb-2 text-sm font-black">Actividades por día</p>
+              <div className="grid gap-2">
+                {selectedSummary.days.map((day) => (
+                  <details
+                    key={day.dateKey}
+                    className="group rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3"
+                    open={day.logs.length > 0}
+                  >
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <ChevronRight className="size-4 shrink-0 text-[var(--muted)] transition group-open:rotate-90" />
+                        <span className="truncate text-sm font-black">
+                          {day.label} · {formatDate(`${day.dateKey}T12:00:00`)}
+                        </span>
+                      </div>
+                      <span className="shrink-0 rounded-md bg-white px-2 py-1 text-xs font-bold text-[var(--muted)]">
+                        {day.logs.length} act.
+                      </span>
+                    </summary>
+                    <div className="mt-3 grid gap-2">
+                      {day.logs.map((log) => (
+                        <div
+                          key={log.id}
+                          className="grid gap-2 rounded-lg bg-white p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto]"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-black">{log.activity}</p>
+                            <p className="mt-1 text-xs text-[var(--muted)]">
+                              {formatPhotoTime(log.logged_at)}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2 sm:justify-end">
+                            <span className="rounded-md bg-[#f6f3eb] px-2 py-1 font-bold">
+                              {formatDurationSeconds(getExerciseDurationSeconds(log))}
+                            </span>
+                            <span className="rounded-md bg-[#f6f3eb] px-2 py-1 font-bold">
+                              {formatActivityDistance(getExerciseDistanceKm(log))}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                      {day.logs.length === 0 && <EmptyState text="Sin actividades." />}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-black">Histórico de semanas</p>
+              <div className="grid max-h-[520px] gap-2 overflow-y-auto pr-1">
+                {weekKeys.map((weekKey) => {
+                  const summary = buildActivityWeekSummary(exercises, weekKey);
+                  const active = weekKey === selectedWeekStart;
+
+                  return (
+                    <button
+                      key={weekKey}
+                      type="button"
+                      className={`rounded-lg border p-3 text-left transition ${
+                        active
+                          ? "border-[var(--tenant-color)] bg-[#eef8f0]"
+                          : "border-[var(--line)] bg-white hover:border-[var(--tenant-color)]"
+                      }`}
+                      onClick={() => setSelectedWeekStart(weekKey)}
+                    >
+                      <p className="text-sm font-black">{formatActivityWeekTitle(summary)}</p>
+                      <p className="mt-1 text-xs font-semibold text-[var(--muted)]">
+                        {formatDurationSeconds(summary.durationSeconds)} ·{" "}
+                        {summary.activityCount} actividades ·{" "}
+                        {formatActivityDistance(summary.distanceKm)}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function ActivitySummaryMetric({
+  label,
+  value,
+  comparison,
+  average,
+  icon: Icon,
+}: {
+  label: string;
+  value: string;
+  comparison: string;
+  average: string;
+  icon: typeof Users;
+}) {
+  return (
+    <div className="rounded-lg border border-[var(--line)] bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold text-[var(--muted)]">{label}</p>
+          <p className="mt-2 text-2xl font-black">{value}</p>
+        </div>
+        <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#eaf4ef] text-[var(--tenant-color)]">
+          <Icon className="size-5" />
+        </div>
+      </div>
+      <div className="mt-3 grid gap-1 text-xs font-semibold text-[var(--muted)]">
+        <span>{comparison}</span>
+        <span>{average}</span>
+      </div>
+    </div>
+  );
+}
+
+function ActivityWeekChart({
+  title,
+  summary,
+  emptyText,
+}: {
+  title: string;
+  summary: ActivityWeekSummary;
+  emptyText: string;
+}) {
+  const data = summary.days.map((day) => ({
+    day: day.shortLabel,
+    horas: roundNumber(day.durationSeconds / 3600, 2) ?? 0,
+    actividades: day.logs.length,
+  }));
+  const hasData = summary.activityCount > 0;
+
+  return (
+    <div className="rounded-lg border border-[var(--line)] bg-white p-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-black">{title}</p>
+        <p className="text-xs font-semibold text-[var(--muted)]">
+          {formatActivityWeekTitle(summary)}
+        </p>
+      </div>
+      {!hasData ? (
+        <div className="grid h-64 place-items-center sm:h-72">
+          <EmptyState text={emptyText} />
+        </div>
+      ) : (
+        <div className="h-64 sm:h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5dfd3" />
+              <XAxis dataKey="day" tick={{ fontSize: 12 }} />
+              <YAxis
+                tick={{ fontSize: 12 }}
+                allowDecimals
+                tickFormatter={(value) => `${formatOptionalNumber(Number(value), 1)} h`}
+              />
+              <Tooltip
+                formatter={(value, name) =>
+                  name === "horas"
+                    ? [`${formatOptionalNumber(Number(value), 2)} h`, "Duración"]
+                    : [formatInteger(Number(value)), "Actividades"]
+                }
+              />
+              <Bar
+                dataKey="horas"
+                name="Duración"
+                fill={APP_PRIMARY_COLOR}
+                radius={[6, 6, 0, 0]}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StatsPanel({
   selectedPatient,
   weights,
@@ -5828,7 +6405,6 @@ function StatsPanel({
       .slice()
       .sort((a, b) => new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime())[0]
       ?.waist_cm ?? selectedPatient?.waist_cm ?? null;
-  const todayStepLog = steps.find((item) => item.logged_on === getLocalDateString());
   const currentBmi = selectedPatient
     ? calculateBmi(latestWeight, selectedPatient.height_cm)
     : null;
@@ -5844,6 +6420,10 @@ function StatsPanel({
   const bmiChartData = selectedPatient
     ? buildBmiChartData(weights, selectedPatient.height_cm)
     : [];
+  const currentActivityWeekSummary = buildActivityWeekSummary(
+    exercises,
+    getMondayDateKey(getLocalDateString()),
+  );
 
   async function deleteMealPhoto(photo: MealPhoto) {
     if (!supabase) {
@@ -5882,10 +6462,9 @@ function StatsPanel({
         <h2 className="text-lg font-black">Estadísticas</h2>
         <Activity className="size-5 text-[var(--tenant-color)]" />
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric label="Peso actual" value={latestWeight ? `${latestWeight} kg` : "-"} />
         <Metric label="Cintura actual" value={latestWaist ? `${latestWaist} cm` : "-"} />
-        <Metric label="Pasos hoy" value={todayStepLog ? formatInteger(todayStepLog.steps) : "-"} />
         <Metric label="IMC inicial" value={formatOptionalNumber(initialBmi, 1)} />
         <Metric label="IMC actual" value={formatOptionalNumber(currentBmi, 1)} />
       </div>
@@ -5917,13 +6496,14 @@ function StatsPanel({
           color="#b46a4d"
           emptyText="Sin registros de peso para calcular IMC."
         />
+        <ActivityWeekChart
+          title="Actividades esta semana"
+          summary={currentActivityWeekSummary}
+          emptyText="Sin actividades esta semana."
+        />
       </div>
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        <LogList title="Ejercicio" items={exercises.map((item) => `${formatDate(item.logged_at)} - ${item.activity}${item.duration_minutes ? `, ${item.duration_minutes} min` : ""}`)} />
-        <LogList title="Pasos diarios" items={steps.map((item) => `${formatDate(item.logged_on)} - ${formatInteger(item.steps)} pasos`)} />
-        <div className="lg:col-span-2">
-          <PhotoList photos={mealPhotos} onDeletePhoto={deleteMealPhoto} />
-        </div>
+      <div className="mt-5">
+        <PhotoList photos={mealPhotos} onDeletePhoto={deleteMealPhoto} />
       </div>
     </Panel>
   );
@@ -7376,6 +7956,8 @@ async function postTrackingLogs(
     steps: number | null;
     exercise: string | null;
     durationMinutes: number | null;
+    durationSeconds: number | null;
+    distanceKm: number | null;
     customGoalLogs: Array<{
       goalId: string;
       status: GoalStatus;
@@ -8407,22 +8989,6 @@ function EmptyState({ text }: { text: string }) {
   );
 }
 
-function LogList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div>
-      <p className="mb-2 text-sm font-black">{title}</p>
-      <div className="grid gap-2">
-        {items.map((item) => (
-          <div key={item} className="rounded-md bg-[#f7f5ef] px-3 py-2 text-sm">
-            {item}
-          </div>
-        ))}
-        {items.length === 0 && <EmptyState text="Sin registros." />}
-      </div>
-    </div>
-  );
-}
-
 function PhotoList({
   photos,
   onDeletePhoto,
@@ -9055,6 +9621,157 @@ function getMealTypePosition(mealType: string) {
 
 function getMealPhotoTypePosition(mealType: string | null) {
   return mealPhotoTypeOrder.get(mealType ?? "") ?? mealPhotoTypes.length;
+}
+
+function clampDurationPart(value: string, max: number) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return 0;
+  return Math.min(max, Math.max(0, Math.trunc(numericValue)));
+}
+
+function formatDurationSeconds(totalSeconds: number | null | undefined) {
+  const safeSeconds = Math.max(0, Math.trunc(Number(totalSeconds) || 0));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+  const parts: string[] = [];
+
+  if (hours) parts.push(`${hours}h`);
+  if (minutes) parts.push(`${minutes}m`);
+  if (seconds || parts.length === 0) parts.push(`${seconds}s`);
+
+  return parts.join(" ");
+}
+
+function getExerciseDurationSeconds(log: ExerciseLog) {
+  const durationSeconds = Number(log.duration_seconds);
+  if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
+    return durationSeconds;
+  }
+
+  const durationMinutes = Number(log.duration_minutes);
+  if (Number.isFinite(durationMinutes) && durationMinutes > 0) {
+    return durationMinutes * 60;
+  }
+
+  return 0;
+}
+
+function getExerciseDistanceKm(log: ExerciseLog) {
+  const distance = Number(log.distance_km);
+  return Number.isFinite(distance) && distance > 0 ? distance : 0;
+}
+
+function formatActivityDistance(distanceKm: number | null | undefined) {
+  const distance = Number(distanceKm);
+  if (!Number.isFinite(distance) || distance <= 0) return "0 km";
+
+  return `${distance.toLocaleString("es-ES", {
+    maximumFractionDigits: distance >= 10 ? 1 : 2,
+  })} km`;
+}
+
+function addDaysToDateKey(dateKey: string, days: number) {
+  const date = parseLocalDateKey(dateKey);
+  date.setDate(date.getDate() + days);
+  return getLocalDateString(date);
+}
+
+function buildActivityWeekKeys(exercises: ExerciseLog[], currentWeekStart: string) {
+  const weekKeys = new Set<string>([currentWeekStart]);
+
+  for (const exercise of exercises) {
+    weekKeys.add(getMondayDateKey(exercise.logged_at));
+  }
+
+  return Array.from(weekKeys).sort((a, b) => b.localeCompare(a));
+}
+
+function buildActivityWeekSummary(
+  exercises: ExerciseLog[],
+  weekStart: string,
+): ActivityWeekSummary {
+  const weekEnd = addDaysToDateKey(weekStart, 6);
+  const days = activityWeekdayLabels.map((label, index) => {
+    const dateKey = addDaysToDateKey(weekStart, index);
+    const logs = exercises
+      .filter((log) => getLogDateKey(log.logged_at) === dateKey)
+      .sort((a, b) => new Date(a.logged_at).getTime() - new Date(b.logged_at).getTime());
+    const durationSeconds = logs.reduce(
+      (total, log) => total + getExerciseDurationSeconds(log),
+      0,
+    );
+    const distanceKm = logs.reduce(
+      (total, log) => total + getExerciseDistanceKm(log),
+      0,
+    );
+
+    return {
+      dateKey,
+      label,
+      shortLabel: activityWeekdayShortLabels[index] ?? label.slice(0, 1),
+      durationSeconds,
+      distanceKm,
+      logs,
+    };
+  });
+
+  return {
+    weekStart,
+    weekEnd,
+    durationSeconds: days.reduce((total, day) => total + day.durationSeconds, 0),
+    distanceKm: days.reduce((total, day) => total + day.distanceKm, 0),
+    activityCount: days.reduce((total, day) => total + day.logs.length, 0),
+    days,
+  };
+}
+
+function buildPreviousActivityWeekAverage(
+  exercises: ExerciseLog[],
+  selectedWeekStart: string,
+  numberOfWeeks: number,
+) {
+  const summaries = Array.from({ length: numberOfWeeks }, (_, index) =>
+    buildActivityWeekSummary(
+      exercises,
+      addDaysToDateKey(selectedWeekStart, -7 * (index + 1)),
+    ),
+  );
+
+  return {
+    durationSeconds:
+      summaries.reduce((total, summary) => total + summary.durationSeconds, 0) /
+      numberOfWeeks,
+    distanceKm:
+      summaries.reduce((total, summary) => total + summary.distanceKm, 0) /
+      numberOfWeeks,
+    activityCount:
+      summaries.reduce((total, summary) => total + summary.activityCount, 0) /
+      numberOfWeeks,
+  };
+}
+
+function formatActivityComparison(current: number, reference: number, label: string) {
+  if (!reference) {
+    return `${label}: sin referencia`;
+  }
+
+  const change = ((current - reference) / reference) * 100;
+  if (Math.abs(change) < 1) return `${label}: igual`;
+
+  return `${label}: ${change > 0 ? "+" : ""}${Math.round(change)}%`;
+}
+
+function formatActivityWeekTitle(summary: ActivityWeekSummary) {
+  const currentWeekStart = getMondayDateKey(getLocalDateString());
+  const previousWeekStart = addDaysToDateKey(currentWeekStart, -7);
+
+  if (summary.weekStart === currentWeekStart) return "Esta semana";
+  if (summary.weekStart === previousWeekStart) return "Última semana";
+
+  return `${formatDate(`${summary.weekStart}T12:00:00`)} - ${formatDate(
+    `${summary.weekEnd}T12:00:00`,
+  )}`;
 }
 
 function groupMealPhotosByDay(photos: MealPhoto[]) {

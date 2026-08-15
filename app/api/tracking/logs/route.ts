@@ -24,6 +24,8 @@ type TrackingLogsBody = {
   steps?: number | null;
   exercise?: string | null;
   durationMinutes?: number | null;
+  durationSeconds?: number | null;
+  distanceKm?: number | null;
   customGoalLogs?: CustomGoalLogInput[];
   mealPhoto?: MealPhotoLogInput | null;
 };
@@ -125,6 +127,22 @@ function validateTrackingPayload(body: TrackingLogsBody) {
     (!Number.isFinite(body.durationMinutes) || body.durationMinutes < 0)
   ) {
     return "Duracion de actividad no valida.";
+  }
+
+  if (
+    body.durationSeconds != null &&
+    (!Number.isInteger(body.durationSeconds) ||
+      body.durationSeconds < 0 ||
+      body.durationSeconds > 86400)
+  ) {
+    return "Duracion de actividad no valida.";
+  }
+
+  if (
+    body.distanceKm != null &&
+    (!Number.isFinite(body.distanceKm) || body.distanceKm < 0 || body.distanceKm > 1000)
+  ) {
+    return "Distancia de actividad no valida.";
   }
 
   for (const goalLog of body.customGoalLogs ?? []) {
@@ -230,14 +248,34 @@ async function writeTrackingLogs(
   }
 
   if (body.exercise?.trim()) {
-    const { error } = await supabase.from("exercise_logs").insert({
+    const durationSeconds = body.durationSeconds ?? null;
+    const durationMinutes =
+      durationSeconds != null
+        ? Math.round(durationSeconds / 60)
+        : body.durationMinutes ?? null;
+    const exerciseRow = {
       tenant_id: body.tenantId,
       patient_id: body.patientId,
       activity: body.exercise.trim(),
-      duration_minutes: body.durationMinutes ?? null,
+      duration_minutes: durationMinutes,
+      duration_seconds: durationSeconds,
+      distance_km: body.distanceKm ?? null,
       intensity: "normal",
-    });
-    if (error) return formatTrackingDatabaseError(error);
+    };
+    const { error } = await supabase.from("exercise_logs").insert(exerciseRow);
+
+    if (error && isMissingExerciseDetailsColumn(error)) {
+      const { error: fallbackError } = await supabase.from("exercise_logs").insert({
+        tenant_id: body.tenantId,
+        patient_id: body.patientId,
+        activity: body.exercise.trim(),
+        duration_minutes: durationMinutes,
+        intensity: "normal",
+      });
+      if (fallbackError) return formatTrackingDatabaseError(fallbackError);
+    } else if (error) {
+      return formatTrackingDatabaseError(error);
+    }
   }
 
   for (const goalLog of body.customGoalLogs ?? []) {
@@ -297,4 +335,18 @@ function formatTrackingDatabaseError(error: unknown) {
   }
 
   return details.message ?? "No se pudo registrar el dato.";
+}
+
+function isMissingExerciseDetailsColumn(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const details = error as { code?: string; message?: string };
+  const message = details.message?.toLowerCase() ?? "";
+
+  return (
+    details.code === "42703" ||
+    details.code === "PGRST204" ||
+    message.includes("duration_seconds") ||
+    message.includes("distance_km") ||
+    message.includes("schema cache")
+  );
 }

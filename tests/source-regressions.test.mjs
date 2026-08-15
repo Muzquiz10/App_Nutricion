@@ -16,6 +16,11 @@ const chatNotificationsMigrationPath = new URL(
   "../supabase/migrations/202608120001_chat_notifications.sql",
   import.meta.url,
 );
+const activityDetailsMigrationPath = new URL(
+  "../supabase/migrations/202608150001_exercise_activity_details.sql",
+  import.meta.url,
+);
+const trackingRoutePath = new URL("../app/api/tracking/logs/route.ts", import.meta.url);
 const chatSendRoutePath = new URL("../app/api/chat/send/route.ts", import.meta.url);
 const brandPath = new URL("../app/lib/brand.ts", import.meta.url);
 const manifestPath = new URL("../public/manifest.webmanifest", import.meta.url);
@@ -126,4 +131,22 @@ test("visible brand and installed app assets use B-aura Connect", async () => {
   assert.match(manifest, /"id": "\/"/);
   assert.match(manifest, /B-Aura_Connect_icono\.svg/);
   assert.match(worker, /B-Aura_Connect_icono\.svg/);
+});
+
+test("activity tracking has structured sport, duration and weekly summaries", async () => {
+  const source = await readFile(componentPath, "utf8");
+  const route = await readFile(trackingRoutePath, "utf8");
+  const sql = await readFile(activityDetailsMigrationPath, "utf8");
+
+  assert.match(source, /\{ id: "activities", label: "Actividades", icon: Dumbbell \}/);
+  assert.match(source, /activityOptions/);
+  assert.match(source, /DurationPickerDialog/);
+  assert.match(source, /buildActivityWeekSummary/);
+  assert.match(source, /ActivityWeekChart/);
+  assert.match(source, /distanceKm/);
+  assert.match(route, /durationSeconds/);
+  assert.match(route, /distanceKm/);
+  assert.match(route, /isMissingExerciseDetailsColumn/);
+  assert.match(sql, /add column if not exists duration_seconds/i);
+  assert.match(sql, /add column if not exists distance_km/i);
 });
