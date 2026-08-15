@@ -420,6 +420,28 @@ type SupportRequestResponse = {
   ok?: boolean;
 };
 
+type AnalyticsEventName = "session_start" | "tab_view" | "session_end";
+
+type AnalyticsEventPayload = {
+  eventName: AnalyticsEventName;
+  tabId?: TabId | "";
+  tabLabel?: string;
+  patientId?: string | null;
+  durationSeconds?: number;
+  metadata?: Record<string, string | number | boolean | null>;
+};
+
+type AnalyticsViewState = {
+  sessionId: string;
+  userKey: string;
+  sentSessionStart: boolean;
+  activeTabId: TabId | "";
+  activeTabLabel: string;
+  activePatientId: string | null;
+  activeViewKey: string;
+  activeStartedAt: number;
+};
+
 const tabs: Array<{
   id: TabId;
   label: string;
@@ -1079,13 +1101,23 @@ export function NutriOSApp({
     .filter((item) => item.conversation_id === selectedConversation?.id)
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   const patientPlans = plans.filter((plan) => plan.patient_id === selectedPatientId);
-  const showGoalsPanel = Boolean(role);
   const pendingAppointmentCount = calendarEvents.filter(
     (event) => isPendingCalendarAppointment(event),
   ).length;
   const unreadAppNotificationCount = appNotifications.filter(
     (notification) => !notification.read_at,
   ).length;
+  const analyticsStateRef = useRef<AnalyticsViewState>({
+    sessionId: "",
+    userKey: "",
+    sentSessionStart: false,
+    activeTabId: "",
+    activeTabLabel: "",
+    activePatientId: null,
+    activeViewKey: "",
+    activeStartedAt: 0,
+  });
+  const accessTokenRef = useRef("");
 
   function handleSidebarEnter() {
     if (!sidebarCollapsedAfterClick) {
@@ -1123,6 +1155,55 @@ export function NutriOSApp({
     [supabase],
   );
 
+  const sendAnalyticsEvent = useCallback(
+    async (eventPayload: AnalyticsEventPayload, keepalive = false) => {
+      if (!supabase || !role || !sessionUserId || !tenant.id || tenant.id === "common-login") {
+        return;
+      }
+
+      const userKey = `${tenant.id}:${sessionUserId}`;
+      const sessionId = getOrCreateAnalyticsSessionId(userKey);
+      analyticsStateRef.current.sessionId = sessionId;
+      analyticsStateRef.current.userKey = userKey;
+
+      let accessToken = accessTokenRef.current;
+      if (!accessToken) {
+        accessToken = await getCurrentAccessToken(supabase);
+        accessTokenRef.current = accessToken;
+      }
+
+      if (!accessToken) return;
+
+      const body = JSON.stringify({
+        tenantId: tenant.id,
+        sessionId,
+        role,
+        patientId: (eventPayload.patientId ?? selectedPatientId) || null,
+        eventName: eventPayload.eventName,
+        tabId: eventPayload.tabId ?? "",
+        tabLabel: eventPayload.tabLabel ?? "",
+        durationSeconds: eventPayload.durationSeconds ?? null,
+        deviceType: getAnalyticsDeviceType(),
+        metadata: eventPayload.metadata ?? {},
+      });
+
+      try {
+        await fetch("/api/analytics/events", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body,
+          keepalive,
+        });
+      } catch {
+        // La analitica nunca debe bloquear el uso normal de la aplicacion.
+      }
+    },
+    [role, selectedPatientId, sessionUserId, supabase, tenant.id],
+  );
+
   const loadWorkspace = useCallback(async () => {
     if (!supabase) return;
     if (!hasResolvedWorkspace.current) {
@@ -1139,6 +1220,7 @@ export function NutriOSApp({
     } = await supabase.auth.getSession();
 
     if (!session) {
+      accessTokenRef.current = "";
       setRole(null);
       setAppNotifications([]);
       setNotificationPreferences({
@@ -1153,6 +1235,7 @@ export function NutriOSApp({
     }
 
     setSessionUserId(session.user.id);
+    accessTokenRef.current = session.access_token ?? "";
 
     let resolvedTenant: Tenant | null = null;
     let resolvedRole: UserRole | null = null;
@@ -1508,6 +1591,121 @@ export function NutriOSApp({
     return () => window.clearInterval(timer);
   }, [role, supabase, tenant.id]);
 
+  useEffect(() => {
+    if (!role || !sessionUserId || !tenant.id || tenant.id === "common-login") {
+      return;
+    }
+
+    const state = analyticsStateRef.current;
+    const userKey = `${tenant.id}:${sessionUserId}`;
+    const now = Date.now();
+    const nextSessionId = getOrCreateAnalyticsSessionId(userKey);
+    const tabLabel = getAnalyticsTabLabel(activeTab, role);
+    const viewKey = `${activeTab}:${selectedPatientId || "none"}`;
+
+    if (state.userKey && state.userKey !== userKey) {
+      state.sentSessionStart = false;
+      state.activeTabId = "";
+      state.activeStartedAt = 0;
+      state.activeViewKey = "";
+    }
+
+    state.sessionId = nextSessionId;
+    state.userKey = userKey;
+
+    if (!state.sentSessionStart) {
+      state.sentSessionStart = true;
+      void sendAnalyticsEvent({
+        eventName: "session_start",
+        tabId: activeTab,
+        tabLabel,
+        patientId: selectedPatientId || null,
+      });
+    }
+
+    if (
+      state.activeViewKey &&
+      state.activeViewKey !== viewKey &&
+      state.activeTabId &&
+      state.activeStartedAt
+    ) {
+      const durationSeconds = Math.round((now - state.activeStartedAt) / 1000);
+      if (durationSeconds > 0) {
+        void sendAnalyticsEvent({
+          eventName: "tab_view",
+          tabId: state.activeTabId,
+          tabLabel: state.activeTabLabel,
+          patientId: state.activePatientId,
+          durationSeconds,
+        });
+      }
+    }
+
+    state.activeTabId = activeTab;
+    state.activeTabLabel = tabLabel;
+    state.activePatientId = selectedPatientId || null;
+    state.activeViewKey = viewKey;
+    state.activeStartedAt = now;
+  }, [
+    activeTab,
+    role,
+    selectedPatientId,
+    sendAnalyticsEvent,
+    sessionUserId,
+    tenant.id,
+  ]);
+
+  useEffect(() => {
+    if (!role) return;
+
+    function flushCurrentTab(keepalive: boolean) {
+      const state = analyticsStateRef.current;
+      if (!state.activeTabId || !state.activeStartedAt) return;
+
+      const now = Date.now();
+      const durationSeconds = Math.round((now - state.activeStartedAt) / 1000);
+      state.activeStartedAt = now;
+
+      if (durationSeconds <= 0) return;
+
+      void sendAnalyticsEvent(
+        {
+          eventName: "tab_view",
+          tabId: state.activeTabId,
+          tabLabel: state.activeTabLabel,
+          patientId: state.activePatientId,
+          durationSeconds,
+        },
+        keepalive,
+      );
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") {
+        flushCurrentTab(true);
+        return;
+      }
+
+      const state = analyticsStateRef.current;
+      if (state.activeTabId) {
+        state.activeStartedAt = Date.now();
+      }
+    }
+
+    function handlePageHide() {
+      flushCurrentTab(true);
+      void sendAnalyticsEvent({ eventName: "session_end" }, true);
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [role, sendAnalyticsEvent]);
+
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase) return;
@@ -1559,6 +1757,31 @@ export function NutriOSApp({
 
   async function handleLogout() {
     if (!supabase) return;
+    const state = analyticsStateRef.current;
+    if (state.activeTabId && state.activeStartedAt) {
+      const durationSeconds = Math.round((Date.now() - state.activeStartedAt) / 1000);
+      if (durationSeconds > 0) {
+        await sendAnalyticsEvent({
+          eventName: "tab_view",
+          tabId: state.activeTabId,
+          tabLabel: state.activeTabLabel,
+          patientId: state.activePatientId,
+          durationSeconds,
+        });
+      }
+      await sendAnalyticsEvent({ eventName: "session_end" });
+    }
+    analyticsStateRef.current = {
+      sessionId: "",
+      userKey: "",
+      sentSessionStart: false,
+      activeTabId: "",
+      activeTabLabel: "",
+      activePatientId: null,
+      activeViewKey: "",
+      activeStartedAt: 0,
+    };
+    accessTokenRef.current = "";
     await supabase.auth.signOut();
     setRole(null);
     setSessionUserId("");
@@ -1834,7 +2057,7 @@ export function NutriOSApp({
               {workspaceError}
             </div>
           )}
-          {showGoalsPanel && (
+          {activeTab === "goals" && (
             <GoalsPanel
               selectedPatient={selectedPatient}
               goals={goals}
@@ -2463,9 +2686,14 @@ function GoalStatusCard({ summary }: { summary: GoalSummary }) {
           <Icon className="size-5" />
         </span>
         <div className="min-w-0">
-          <p className="truncate text-sm font-black text-[#24342f]">
-            {summary.title}
-          </p>
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <p className="min-w-0 truncate text-sm font-black text-[#24342f]">
+              {summary.title}
+            </p>
+            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white/80 text-[var(--tenant-color)] shadow-sm">
+              <GoalReferenceIcon goal={summary} />
+            </span>
+          </div>
           <p className="mt-1 min-h-5 text-sm text-[#4a554f]">{summary.detail}</p>
           <span className={`mt-3 inline-flex rounded-md px-2 py-1 text-xs font-black ${meta.badgeClass}`}>
             {meta.label}
@@ -2474,6 +2702,24 @@ function GoalStatusCard({ summary }: { summary: GoalSummary }) {
       </div>
     </div>
   );
+}
+
+function GoalReferenceIcon({ goal }: { goal: PatientGoal }) {
+  const className = "size-4";
+
+  if (goal.goal_type === "steps_daily") {
+    return <Footprints className={className} />;
+  }
+
+  if (goal.goal_type === "weight_logged") {
+    return <Weight className={className} />;
+  }
+
+  if (goal.goal_type === "activity_logged") {
+    return <Dumbbell className={className} />;
+  }
+
+  return <Target className={className} />;
 }
 
 function GoalManagementRow({
@@ -10157,6 +10403,53 @@ function formatSex(sex: Patient["sex"]) {
   if (sex === "male") return "Hombre";
   if (sex === "female") return "Mujer";
   return null;
+}
+
+function getOrCreateAnalyticsSessionId(userKey: string) {
+  const fallbackId = createBrowserUuid();
+  if (typeof window === "undefined") return fallbackId;
+
+  const storedUserKey = window.sessionStorage.getItem("baura:analytics-user-key");
+  const storedSessionId = window.sessionStorage.getItem("baura:analytics-session-id");
+
+  if (storedUserKey === userKey && storedSessionId && isUuid(storedSessionId)) {
+    return storedSessionId;
+  }
+
+  window.sessionStorage.setItem("baura:analytics-user-key", userKey);
+  window.sessionStorage.setItem("baura:analytics-session-id", fallbackId);
+  return fallbackId;
+}
+
+function createBrowserUuid() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (char) =>
+    (
+      Number(char) ^
+      (Math.random() * 16) >> (Number(char) / 4)
+    ).toString(16),
+  );
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function getAnalyticsDeviceType() {
+  if (typeof navigator === "undefined") return "unknown";
+  const userAgent = navigator.userAgent.toLowerCase();
+  if (/ipad|tablet/.test(userAgent)) return "tablet";
+  if (/mobi|android|iphone/.test(userAgent)) return "mobile";
+  return "desktop";
+}
+
+function getAnalyticsTabLabel(tabId: TabId, role: UserRole) {
+  if (role === "patient" && tabId === "patients") return "Mi Ficha Personal";
+  if (role === "patient" && tabId === "agenda") return "Citas";
+  return tabs.find((tab) => tab.id === tabId)?.label ?? tabId;
 }
 
 async function getCurrentAccessToken(

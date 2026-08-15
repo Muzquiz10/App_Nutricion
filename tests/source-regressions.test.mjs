@@ -20,7 +20,12 @@ const activityDetailsMigrationPath = new URL(
   "../supabase/migrations/202608150001_exercise_activity_details.sql",
   import.meta.url,
 );
+const usageAnalyticsMigrationPath = new URL(
+  "../supabase/migrations/202608150002_usage_analytics.sql",
+  import.meta.url,
+);
 const trackingRoutePath = new URL("../app/api/tracking/logs/route.ts", import.meta.url);
+const analyticsRoutePath = new URL("../app/api/analytics/events/route.ts", import.meta.url);
 const chatSendRoutePath = new URL("../app/api/chat/send/route.ts", import.meta.url);
 const brandPath = new URL("../app/lib/brand.ts", import.meta.url);
 const manifestPath = new URL("../public/manifest.webmanifest", import.meta.url);
@@ -59,14 +64,14 @@ test("home route is the shared app entry point", async () => {
   assert.doesNotMatch(source, /resolveTenantSlugFromHost/);
 });
 
-test("goals tab is first and goals stay visible", async () => {
+test("goals tab is first and goals panel stays only there", async () => {
   const source = await readFile(componentPath, "utf8");
 
   assert.ok(
     source.indexOf('{ id: "goals", label: "Objetivos", icon: Target }') <
       source.indexOf('{ id: "patients", label: "Clientes", icon: Users }'),
   );
-  assert.match(source, /const showGoalsPanel = Boolean\(role\);/);
+  assert.match(source, /activeTab === "goals" && \(\s*<GoalsPanel/);
   assert.doesNotMatch(source, /goals-panel-open/);
 });
 
@@ -163,4 +168,25 @@ test("activity tracking has structured sport, duration and weekly summaries", as
   assert.match(route, /isMissingExerciseDetailsColumn/);
   assert.match(sql, /add column if not exists duration_seconds/i);
   assert.match(sql, /add column if not exists distance_km/i);
+});
+
+test("usage analytics records tab sessions through the server API", async () => {
+  const source = await readFile(componentPath, "utf8");
+  const route = await readFile(analyticsRoutePath, "utf8");
+  const sql = await readFile(usageAnalyticsMigrationPath, "utf8");
+
+  assert.match(source, /getOrCreateAnalyticsSessionId/);
+  assert.match(source, /eventName: "tab_view"/);
+  assert.match(source, /fetch\("\/api\/analytics\/events"/);
+  assert.match(source, /GoalReferenceIcon/);
+  assert.match(source, /Footprints/);
+  assert.match(source, /Weight/);
+  assert.match(source, /Dumbbell/);
+  assert.match(route, /analytics_sessions/);
+  assert.match(route, /analytics_events/);
+  assert.match(route, /sanitizeAnalyticsMetadata/);
+  assert.match(sql, /create table if not exists public\.analytics_sessions/i);
+  assert.match(sql, /create table if not exists public\.analytics_events/i);
+  assert.match(sql, /enable row level security/i);
+  assert.match(sql, /analytics_powerbi_tab_usage/i);
 });
