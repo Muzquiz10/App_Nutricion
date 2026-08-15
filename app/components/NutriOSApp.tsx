@@ -7756,6 +7756,43 @@ function NotificationSettingsPanel({
   const [deviceSubscribed, setDeviceSubscribed] = useState(false);
   const [permission, setPermission] = useState("default");
 
+  const registerDeviceSubscription = useCallback(
+    async (subscription: PushSubscription, quiet = false) => {
+      if (!supabase) return false;
+
+      const accessToken = await getCurrentAccessToken(supabase);
+      if (!accessToken) {
+        if (!quiet) {
+          onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+        }
+        return false;
+      }
+
+      const response = await fetch("/api/notifications/push-subscriptions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          tenantId: tenant.id,
+          subscription: subscription.toJSON(),
+        }),
+      });
+      const payload = (await response.json()) as { error?: string; ok?: boolean };
+
+      if (!response.ok) {
+        if (!quiet) {
+          onNotice(payload.error ?? "No se pudo activar este dispositivo.");
+        }
+        return false;
+      }
+
+      return true;
+    },
+    [onNotice, supabase, tenant.id],
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -7768,8 +7805,16 @@ function NotificationSettingsPanel({
       setPermission(Notification.permission);
       const registration = await navigator.serviceWorker.getRegistration("/push-sw.js");
       const subscription = await registration?.pushManager.getSubscription();
+      if (!subscription || Notification.permission !== "granted" || !preferences.push_enabled) {
+        if (!cancelled) {
+          setDeviceSubscribed(false);
+        }
+        return;
+      }
+
+      const saved = await registerDeviceSubscription(subscription, true);
       if (!cancelled) {
-        setDeviceSubscribed(Boolean(subscription));
+        setDeviceSubscribed(saved);
       }
     }
 
@@ -7778,7 +7823,7 @@ function NotificationSettingsPanel({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [preferences.push_enabled, registerDeviceSubscription]);
 
   async function savePreferences(patch: Partial<NotificationPreferences>) {
     if (!supabase) {
@@ -7847,42 +7892,28 @@ function NotificationSettingsPanel({
       return;
     }
 
-    const accessToken = await getCurrentAccessToken(supabase);
-    if (!accessToken) {
-      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
-      return;
-    }
-
     setSaving(true);
-    const registration = await navigator.serviceWorker.register("/push-sw.js");
-    const subscription =
-      (await registration.pushManager.getSubscription()) ??
-      (await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-      }));
+    try {
+      const registration = await navigator.serviceWorker.register("/push-sw.js");
+      await registration.update().catch(() => undefined);
+      const subscription =
+        (await registration.pushManager.getSubscription()) ??
+        (await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+        }));
 
-    const response = await fetch("/api/notifications/push-subscriptions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        tenantId: tenant.id,
-        subscription: subscription.toJSON(),
-      }),
-    });
-    const payload = (await response.json()) as { error?: string; ok?: boolean };
-    setSaving(false);
-
-    if (!response.ok) {
-      onNotice(payload.error ?? "No se pudo activar este dispositivo.");
-      return;
+      const saved = await registerDeviceSubscription(subscription);
+      setDeviceSubscribed(saved);
+      if (saved) {
+        onNotice("Notificaciones activadas en este dispositivo.");
+      }
+    } catch {
+      setDeviceSubscribed(false);
+      onNotice("No se pudo activar este dispositivo. Revisa los permisos del navegador.");
+    } finally {
+      setSaving(false);
     }
-
-    setDeviceSubscribed(true);
-    onNotice("Notificaciones activadas en este dispositivo.");
   }
 
   async function disableDevicePush() {

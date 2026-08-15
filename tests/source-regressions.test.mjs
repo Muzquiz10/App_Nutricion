@@ -98,6 +98,8 @@ test("chat notifications support push, in-app notices, and email fallback", asyn
   assert.match(source, /NotificationSettingsPanel/);
   assert.match(source, /NotificationsPanel/);
   assert.match(source, /Activar este dispositivo/);
+  assert.match(source, /registerDeviceSubscription/);
+  assert.match(source, /setDeviceSubscribed\(saved\)/);
   assert.match(source, /\/api\/notifications\/preferences/);
   assert.match(source, /\/api\/notifications\/push-subscriptions/);
   assert.match(source, /\/api\/chat\/read/);
