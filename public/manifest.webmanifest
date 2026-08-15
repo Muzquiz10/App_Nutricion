@@ -1,12 +1,12 @@
 {
-  "name": "DietDesk",
-  "short_name": "DietDesk",
+  "name": "B-aura Connect",
+  "short_name": "B-aura",
   "description": "Seguimiento nutricional y comunicación con tu profesional.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f7f5ef",
-  "theme_color": "#0b2f4a",
+  "theme_color": "#71c176",
   "icons": [
     {
       "src": "/DietDesk_icono.svg",

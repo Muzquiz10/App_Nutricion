@@ -6,7 +6,7 @@ import {
   createSupabaseBrowser,
   type SupabasePublicConfig,
 } from "../lib/supabase/browser";
-import { APP_ICON_SRC, APP_NAME } from "../lib/brand";
+import { APP_ICON_SRC, APP_NAME, APP_PRIMARY_COLOR } from "../lib/brand";
 
 type InvitationPayload = {
   id: string;
@@ -91,7 +91,7 @@ export function InvitationAcceptApp({
     loadInvitation();
   }, [supabase, token]);
 
-  const color = invitation?.tenant.primary_color ?? "#2f7d6d";
+  const color = invitation?.tenant.primary_color ?? APP_PRIMARY_COLOR;
   const style = {
     "--tenant-color": color,
     "--tenant-color-dark": color,

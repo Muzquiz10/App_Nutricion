@@ -6,7 +6,7 @@ create table if not exists public.tenants (
   slug text not null unique check (slug ~ '^[a-z0-9-]+$'),
   name text not null,
   logo_url text,
-  primary_color text not null default '#2f7d6d',
+  primary_color text not null default '#71c176',
   privacy_policy_url text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

@@ -3,10 +3,10 @@
 :root {
   --background: #f7f5ef;
   --foreground: #17201d;
-  --tenant-color: #0b2f4a;
-  --tenant-color-dark: #071f31;
-  --brand-accent: #8bd8f7;
-  --brand-accent-soft: #eaf8fd;
+  --tenant-color: #71c176;
+  --tenant-color-dark: #4b9f51;
+  --brand-accent: #fd878e;
+  --brand-accent-soft: #fff1f3;
   --panel: #fffdf8;
   --muted: #6c756f;
   --line: #ded9cc;
@@ -124,7 +124,7 @@ a:focus-visible {
     gap: 12px;
     align-items: end;
     margin-bottom: 8px;
-    border-bottom: 2px solid #0b2f4a;
+    border-bottom: 2px solid #71c176;
     padding-bottom: 8px;
   }
 
@@ -133,7 +133,7 @@ a:focus-visible {
     font-size: 22px;
     line-height: 1.05;
     font-weight: 900;
-    color: #0b2f4a;
+    color: #4b9f51;
   }
 
   body.printing-diet-calendar .diet-print-kicker {
@@ -142,7 +142,7 @@ a:focus-visible {
     font-weight: 900;
     letter-spacing: 0;
     text-transform: uppercase;
-    color: #2f7d6d;
+    color: #fd878e;
   }
 
   body.printing-diet-calendar .diet-print-meta {
@@ -201,7 +201,7 @@ a:focus-visible {
   }
 
   body.printing-diet-calendar .diet-calendar-day-header {
-    color: #0b2f4a !important;
+    color: #4b9f51 !important;
   }
 
   body.printing-diet-calendar .diet-calendar-cell {

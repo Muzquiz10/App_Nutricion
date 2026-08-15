@@ -22,14 +22,14 @@ async function render() {
   );
 }
 
-test("server-renders DietDesk", async () => {
+test("server-renders B-aura Connect", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>DietDesk<\/title>/i);
-  assert.match(html, /DietDesk/);
+  assert.match(html, /<title>B-aura Connect<\/title>/i);
+  assert.match(html, /B-aura Connect/);
   assert.doesNotMatch(html, /Your site is taking shape/);
   assert.doesNotMatch(html, /react-loading-skeleton/);
 });

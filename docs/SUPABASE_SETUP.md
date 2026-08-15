@@ -1,4 +1,4 @@
-# Configuración de Supabase para NutriOS
+# Configuración de Supabase para B-aura Connect
 
 ## 1. Crear el proyecto
 
@@ -16,9 +16,9 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 NUTRIOS_ROOT_DOMAIN=tuapp.com
 NUTRIOS_DEFAULT_TENANT_SLUG=maria
 RESEND_API_KEY=...
-SUPPORT_FROM_EMAIL="DietDesk <soporte@tu-dominio.com>"
+SUPPORT_FROM_EMAIL="B-aura Connect <soporte@tu-dominio.com>"
 SUPPORT_TO_EMAIL=ej.egmanalytics@gmail.com
-NOTIFICATIONS_FROM_EMAIL="DietDesk <notificaciones@tu-dominio.com>"
+NOTIFICATIONS_FROM_EMAIL="B-aura Connect <notificaciones@tu-dominio.com>"
 NOTIFICATIONS_CONTACT_EMAIL=ej.egmanalytics@gmail.com
 NEXT_PUBLIC_VAPID_PUBLIC_KEY=...
 VAPID_PRIVATE_KEY=...
@@ -83,7 +83,7 @@ Para usar clientes antiguos como estado inactivo real, ejecuta tambien:
 supabase/migrations/202608020003_patient_inactive_status.sql
 ```
 
-Esta migracion cambia los pacientes antiguos de `archived` a `inactive`. Cuando un nutricionista mueve un cliente a antiguos, DietDesk desactiva tambien su acceso en ese nutricionista y permite reactivarlo despues.
+Esta migracion cambia los pacientes antiguos de `archived` a `inactive`. Cuando un nutricionista mueve un cliente a antiguos, B-aura Connect desactiva tambien su acceso en ese nutricionista y permite reactivarlo despues.
 
 Para bloquear que un mismo cliente este activo con dos nutricionistas a la vez, ejecuta tambien:
 
@@ -111,7 +111,7 @@ En Supabase puedes hacerlo desde `Database > Extensions`, activando `pg_cron` y 
 
 ```sql
 select cron.schedule(
-  'dietdesk-email-fallback',
+  'baura-connect-email-fallback',
   '* * * * *',
   $$
   select net.http_post(
@@ -148,7 +148,7 @@ Supabase permite enviar invitaciones desde servidor con `auth.admin.inviteUserBy
 
 El enlace de "Has olvidado tu contraseña?" usa el mismo callback y después lleva al usuario a `/auth/reset-password` para crear una nueva contraseña.
 
-Durante pruebas, Supabase puede mostrar `email rate limit exceeded` porque el SMTP incluido tiene un limite muy bajo. En ese caso NutriOS creara la invitacion igualmente y mostrara un enlace manual de Supabase para copiarlo y enviarlo al cliente. Para produccion configura SMTP propio en `Authentication > SMTP Settings`.
+Durante pruebas, Supabase puede mostrar `email rate limit exceeded` porque el SMTP incluido tiene un limite muy bajo. En ese caso B-aura Connect creara la invitacion igualmente y mostrara un enlace manual de Supabase para copiarlo y enviarlo al cliente. Para produccion configura SMTP propio en `Authentication > SMTP Settings`.
 
 ## 4. Crear el primer nutricionista
 
@@ -159,7 +159,7 @@ Despues ejecuta este SQL cambiando el correo y los datos:
 ```sql
 with created_tenant as (
   insert into public.tenants (slug, name, primary_color, privacy_policy_url)
-  values ('maria', 'Nutricion Maria', '#2f7d6d', null)
+  values ('maria', 'Nutricion Maria', '#71c176', null)
   on conflict (slug) do update
   set name = excluded.name,
       primary_color = excluded.primary_color
@@ -203,7 +203,7 @@ El enlace de Supabase redirige a:
 /auth/callback?next=/invitacion/{token}
 ```
 
-Cuando el paciente acepta, NutriOS le pide:
+Cuando el paciente acepta, B-aura Connect le pide:
 
 - nombre y apellidos
 - edad

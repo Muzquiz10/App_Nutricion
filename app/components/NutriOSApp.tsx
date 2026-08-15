@@ -64,6 +64,7 @@ import {
   APP_ICON_SRC,
   APP_LOGO_WITH_SLOGAN_SRC,
   APP_NAME,
+  APP_PRIMARY_COLOR,
 } from "../lib/brand";
 import type { Tenant } from "../lib/types";
 
@@ -513,7 +514,7 @@ const goalStatusMeta: Record<
     label: "Cumplido",
     icon: Smile,
     cardClass: "border-[#b8dccd] bg-[#effaf5]",
-    iconClass: "bg-[#dcefe7] text-[#2f7d6d]",
+    iconClass: "bg-[#e4f4e6] text-[#4b9f51]",
     badgeClass: "bg-[#dcefe7] text-[#255d50]",
   },
   in_progress: {
@@ -548,7 +549,7 @@ const demoTenant = (slug: string): Tenant => ({
   slug,
   name: `Espacio ${APP_NAME}`,
   logo_url: null,
-  primary_color: "#2f7d6d",
+  primary_color: APP_PRIMARY_COLOR,
   privacy_policy_url: null,
 });
 
@@ -557,7 +558,7 @@ const commonLoginTenant: Tenant = {
   slug: "app",
   name: "Acceso común",
   logo_url: null,
-  primary_color: "#0b2f4a",
+  primary_color: APP_PRIMARY_COLOR,
   privacy_policy_url: null,
 };
 
@@ -2709,12 +2710,12 @@ function AppFooter() {
         <p className="font-semibold text-[#39433f]">
           © 2026 EgmAnalytics. Todos los derechos reservados.
         </p>
-        <p className="mt-1">DietDesk es propiedad de EgmAnalytics.</p>
+        <p className="mt-1">{APP_NAME} es propiedad de EgmAnalytics.</p>
       </div>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={APP_LOGO_WITH_SLOGAN_SRC}
-        alt="DietDesk. Menos gestion. Mas nutricion."
+        alt={`${APP_NAME}. Menos gestion. Mas nutricion.`}
         className="h-auto w-44 select-none object-contain sm:w-56"
       />
     </footer>
@@ -4463,7 +4464,7 @@ function MealPlanCalendar({
 
     const shareText = [
       `Dieta: ${plan.title}`,
-      `Profesional: ${professionalName || "DietDesk"}`,
+      `Profesional: ${professionalName || APP_NAME}`,
       patientName ? `Cliente: ${patientName}` : "",
       `Inicio: ${formatDate(plan.start_date)}`,
       `Estado: ${isDraft ? "Borrador" : formatMealPlanStatus(plan)}`,
@@ -4565,13 +4566,13 @@ function MealPlanCalendar({
       {plan && (
         <div className="diet-print-header">
           <div>
-            <p className="diet-print-kicker">DietDesk</p>
+            <p className="diet-print-kicker">{APP_NAME}</p>
             <h1>Calendario de dieta</h1>
           </div>
           <div className="diet-print-meta">
             <div>
               <span>Profesional</span>
-              <strong>{professionalName || "DietDesk"}</strong>
+              <strong>{professionalName || APP_NAME}</strong>
             </div>
             <div>
               <span>Cliente</span>
@@ -5876,7 +5877,7 @@ function StatsPanel({
           title="Peso"
           data={weightChartData}
           dataKey="peso"
-          color="#2f7d6d"
+          color={APP_PRIMARY_COLOR}
           emptyText="Sin registros de peso."
         />
         <EvolutionChart
@@ -6126,7 +6127,7 @@ function StepEvolutionChart({
             Diario
           </span>
           <span className="inline-flex items-center gap-1">
-            <span className="h-0.5 w-4 bg-[#0b2f4a]" />
+            <span className="h-0.5 w-4 bg-[#4b9f51]" />
             Media semanal
           </span>
           {goalTarget ? (
@@ -6164,7 +6165,7 @@ function StepEvolutionChart({
                 type="monotone"
                 dataKey="mediaSemanal"
                 name="Media semanal"
-                stroke="#0b2f4a"
+                stroke="#4b9f51"
                 strokeWidth={3}
                 dot={false}
               />
@@ -7927,7 +7928,7 @@ function NotificationSettingsPanel({
       <div className="mt-5 grid gap-3">
         <NotificationToggle
           title="Notificaciones por email"
-          description="Si un mensaje sigue sin leerse pasados 5 minutos, DietDesk enviara un correo."
+          description={`Si un mensaje sigue sin leerse pasados 5 minutos, ${APP_NAME} enviara un correo.`}
           checked={preferences.email_enabled}
           disabled={saving}
           onChange={(checked) => savePreferences({ email_enabled: checked })}

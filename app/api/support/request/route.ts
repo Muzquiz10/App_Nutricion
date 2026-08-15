@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { APP_NAME } from "../../../lib/brand";
 import { getSupabaseAdmin, readRuntimeEnv } from "../../../lib/supabase/server";
 
 type SupportRequestBody = {
@@ -119,7 +120,7 @@ export async function POST(request: Request) {
       from: fromEmail,
       to: [supportToEmail],
       reply_to: email,
-      subject: `[DietDesk soporte] ${subject}`,
+      subject: `[${APP_NAME} soporte] ${subject}`,
       text,
       html: textToHtml(text),
     }),
@@ -167,7 +168,7 @@ function buildSupportText({
   tenantSlug: string;
 }) {
   return [
-    "Nueva solicitud de asistencia tecnica en DietDesk",
+    `Nueva solicitud de asistencia tecnica en ${APP_NAME}`,
     "",
     `Nombre: ${name}`,
     `Correo indicado: ${email}`,

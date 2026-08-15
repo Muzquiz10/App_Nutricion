@@ -1,7 +1,7 @@
 self.addEventListener("push", (event) => {
   const fallback = {
     title: "Nuevo mensaje",
-    body: "Tienes un nuevo mensaje en DietDesk.",
+    body: "Tienes un nuevo mensaje en B-aura Connect.",
     url: "/",
   };
   const payload = event.data ? event.data.json() : fallback;

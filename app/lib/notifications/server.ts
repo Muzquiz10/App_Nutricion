@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { APP_NAME } from "../brand";
 import { getPublicAppOrigin, readRuntimeEnv } from "../supabase/server";
 import { sendWebPush, type StoredPushSubscription } from "./web-push";
 
@@ -69,7 +70,7 @@ export async function createChatMessageNotification({
     patient_id: patient.id,
     type: "chat_message",
     title: "Nuevo mensaje",
-    body: "Tienes un nuevo mensaje en DietDesk.",
+    body: `Tienes un nuevo mensaje en ${APP_NAME}.`,
     href: "chat",
     related_message_id: message.id,
     email_fallback_due_at: emailFallbackDueAt,
@@ -292,11 +293,11 @@ async function sendUnreadMessageEmail({
   const appOrigin = await getPublicAppOrigin(request);
   const appUrl = `${appOrigin}/`;
   const text = [
-    "Tienes un nuevo mensaje sin leer en DietDesk.",
+    `Tienes un nuevo mensaje sin leer en ${APP_NAME}.`,
     "",
     "Por privacidad, el contenido del mensaje solo se muestra dentro de la aplicación.",
     "",
-    `Abrir DietDesk: ${appUrl}`,
+    `Abrir ${APP_NAME}: ${appUrl}`,
   ].join("\n");
 
   const response = await fetch("https://api.resend.com/emails", {
@@ -308,11 +309,11 @@ async function sendUnreadMessageEmail({
     body: JSON.stringify({
       from: fromEmail,
       to: [to],
-      subject: "[DietDesk] Tienes un nuevo mensaje",
+      subject: `[${APP_NAME}] Tienes un nuevo mensaje`,
       text,
       html: textToHtml(text),
       headers: {
-        "X-DietDesk-Notification-Id": notification.id,
+        "X-Baura-Connect-Notification-Id": notification.id,
       },
     }),
   });
