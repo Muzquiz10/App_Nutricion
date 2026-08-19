@@ -1956,9 +1956,9 @@ export function NutriOSApp({
     <main className="nutrios-app tenant-bg" style={appStyle}>
       <div className="mx-auto grid min-h-screen max-w-[1440px] grid-cols-1 lg:grid-cols-[5rem_minmax(0,1fr)]">
         <aside
-          className={`border-b border-[var(--line)] bg-[#fffbf3]/90 px-4 py-4 transition-[width,box-shadow,background-color] duration-200 lg:sticky lg:top-0 lg:z-30 lg:h-screen lg:overflow-hidden lg:border-b-0 lg:border-r lg:px-4 lg:py-6 ${
+          className={`border-b border-[var(--line)] bg-[#fffbf3]/95 px-4 py-4 transition-[width,box-shadow,background-color] duration-200 lg:sticky lg:top-0 lg:z-30 lg:flex lg:h-screen lg:flex-col lg:overflow-hidden lg:border-b-0 lg:border-r lg:px-3 lg:py-4 ${
             sidebarExpanded
-              ? "lg:w-72 lg:bg-[#fffbf3]/95 lg:shadow-[var(--shadow-soft)]"
+              ? "lg:w-72 lg:bg-[#fffbf3] lg:shadow-[var(--shadow-soft)]"
               : "lg:w-20"
           }`}
           onMouseEnter={handleSidebarEnter}
@@ -1974,10 +1974,10 @@ export function NutriOSApp({
           }}
           data-expanded={sidebarExpanded}
         >
-          <div className="flex items-center justify-between gap-3 lg:block">
+          <div className="flex shrink-0 items-center justify-between gap-3 lg:block">
             <Brand tenant={tenant} compact collapsible expanded={sidebarExpanded} />
             <div
-              className={`flex items-center gap-2 lg:mt-6 lg:transition-all ${
+              className={`flex items-center gap-2 lg:mt-4 lg:transition-all ${
                 sidebarExpanded ? "lg:justify-start" : "lg:justify-center"
               }`}
             >
@@ -2002,7 +2002,7 @@ export function NutriOSApp({
             </div>
           </div>
 
-          <nav className="mt-5 flex gap-2 overflow-x-auto pb-1 lg:grid lg:overflow-visible lg:pb-0">
+          <nav className="mt-5 flex gap-2 overflow-x-auto pb-1 lg:mt-4 lg:grid lg:min-h-0 lg:flex-1 lg:content-start lg:gap-1.5 lg:overflow-y-auto lg:overflow-x-hidden lg:pb-2 lg:pr-1 scrollbar-thin">
             {tabs
               .filter((tab) => !tab.patientOnly || role === "patient")
               .filter((tab) => !tab.nutritionistOnly || role !== "patient")
@@ -2019,7 +2019,9 @@ export function NutriOSApp({
                   <button
                     key={tab.id}
                     type="button"
-                    className={`inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-black shadow-sm transition-all lg:w-full ${
+                    className={`inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-black shadow-sm transition-all lg:h-10 lg:w-full lg:text-[13px] ${
+                      tab.id === "settings" ? "lg:hidden" : ""
+                    } ${
                       sidebarExpanded ? "lg:gap-2 lg:px-3" : "lg:gap-0 lg:px-0"
                     } ${
                       active
@@ -2050,6 +2052,29 @@ export function NutriOSApp({
             role={role}
             expanded={sidebarExpanded}
           />
+
+          <button
+            type="button"
+            className={`mt-3 hidden h-10 shrink-0 items-center justify-center rounded-lg border text-[13px] font-black shadow-sm transition-all lg:inline-flex ${
+              sidebarExpanded ? "gap-2 px-3" : "gap-0 px-0"
+            } ${
+              activeTab === "settings"
+                ? "border-[var(--tenant-color)] bg-[var(--tenant-color)] text-white shadow-md"
+                : "border-[var(--line)] bg-white/90 text-[#39433f] hover:border-[var(--tenant-color)] hover:bg-white"
+            }`}
+            onClick={(event) => handleTabClick("settings", event.currentTarget)}
+            aria-current={activeTab === "settings" ? "page" : undefined}
+            title="Configuración"
+          >
+            <SettingsIcon className="size-4 shrink-0" />
+            <span
+              className={`whitespace-nowrap transition-opacity lg:overflow-hidden ${
+                sidebarExpanded ? "lg:w-auto lg:opacity-100" : "lg:w-0 lg:opacity-0"
+              }`}
+            >
+              Configuración
+            </span>
+          </button>
         </aside>
 
         <section className="min-w-0 overflow-x-hidden px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
@@ -3218,28 +3243,37 @@ function PatientSwitcher({
 
   return (
     <div
-      className={`mt-6 hidden lg:block lg:transition-all ${
+      className={`hidden shrink-0 border-t border-[var(--line)] pt-3 lg:block lg:transition-all ${
         expanded
-          ? "lg:pointer-events-auto lg:translate-x-0 lg:opacity-100"
-          : "lg:pointer-events-none lg:translate-x-2 lg:opacity-0"
+          ? "lg:pointer-events-auto lg:mt-3 lg:max-h-56 lg:translate-x-0 lg:opacity-100"
+          : "lg:pointer-events-none lg:mt-0 lg:max-h-0 lg:translate-x-2 lg:overflow-hidden lg:pt-0 lg:opacity-0"
       }`}
     >
-      <p className="mb-2 text-xs font-bold uppercase text-[var(--muted)]">Clientes</p>
-      <div className="grid max-h-[45vh] gap-2 overflow-y-auto pr-1 scrollbar-thin">
+      <p className="mb-2 text-[11px] font-black uppercase text-[var(--muted)]">
+        Cliente seleccionado
+      </p>
+      <div className="grid max-h-40 gap-1.5 overflow-y-auto pr-1 scrollbar-thin">
         {patients.map((patient) => (
           <button
             key={patient.id}
-            className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+            className={`rounded-lg border px-2.5 py-2 text-left text-xs transition ${
               patient.id === selectedPatientId
                 ? "border-[var(--tenant-color)] bg-white text-[#17201d]"
                 : "border-transparent text-[#59645f] hover:bg-white"
             }`}
             onClick={() => onSelect(patient.id)}
           >
-            <span className="block truncate font-semibold">{patient.full_name}</span>
-            <span className="text-xs text-[var(--muted)]">{patient.patient_code}</span>
+            <span className="block truncate font-black leading-4">{patient.full_name}</span>
+            <span className="block truncate text-[11px] font-semibold text-[var(--muted)]">
+              {patient.patient_code}
+            </span>
           </button>
         ))}
+        {patients.length === 0 && (
+          <p className="rounded-lg border border-dashed border-[var(--line)] bg-white/70 px-2 py-3 text-xs font-semibold text-[var(--muted)]">
+            Sin clientes activos
+          </p>
+        )}
       </div>
     </div>
   );
