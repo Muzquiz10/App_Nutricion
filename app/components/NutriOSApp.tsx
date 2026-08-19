@@ -488,7 +488,7 @@ const activityWeekdayLabels = [
 ];
 const activityWeekdayShortLabels = ["L", "M", "X", "J", "V", "S", "D"];
 
-const mealTypes = ["Desayuno", "Almuerzo", "Comida", "Media tarde", "Cena"];
+const mealTypes = ["Desayuno", "Almuerzo", "Comida", "Merienda", "Cena"];
 const mealPhotoTypes = [...mealTypes, "Snack"];
 const mealUnitOptions = [
   "Gramos",
@@ -526,7 +526,7 @@ const activityOptions = [
   "Otro",
 ].map((label) => ({
   value: label,
-  label: label || "Selecciona un deporte",
+  label: label || "Tipo de Actividad",
 }));
 const maxLogoFileSizeBytes = 2 * 1024 * 1024;
 const maxMealPhotoDimension = 1600;
@@ -6061,7 +6061,7 @@ function DataEntryPanel({
           />
           <div className="grid gap-3 sm:grid-cols-3">
             <SelectField
-              label="Ejercicio realizado"
+              label="Actividad realizada"
               value={trackingDraft.exercise}
               onChange={(value) => updateTrackingDraft("exercise", value)}
               options={activityOptions}
