@@ -64,7 +64,6 @@ import {
 } from "../lib/supabase/browser";
 import {
   APP_ICON_SRC,
-  APP_LOGO_SRC,
   APP_LOGO_WITH_SLOGAN_SRC,
   APP_NAME,
   APP_PRIMARY_COLOR,
@@ -227,6 +226,7 @@ type CalendarEvent = {
   notes: string | null;
   event_type: CalendarEventType;
   appointment_mode: AppointmentMode | null;
+  video_url?: string | null;
   blocks_availability: boolean;
   start_at: string;
   end_at: string;
@@ -418,6 +418,12 @@ type UpdatePatientStatusResponse = {
 type SupportRequestResponse = {
   error?: string;
   ok?: boolean;
+};
+
+type ExerciseMutationResponse = {
+  error?: string;
+  ok?: boolean;
+  exercise?: ExerciseLog;
 };
 
 type AnalyticsEventName = "session_start" | "tab_view" | "session_end";
@@ -2124,8 +2130,13 @@ export function NutriOSApp({
             {activeTab === "activities" && (
               <ActivitiesPanel
                 key={`activities-${selectedPatientId || "none"}`}
+                tenant={tenant}
+                role={role}
                 selectedPatient={selectedPatient}
                 exercises={exercises.filter((item) => item.patient_id === selectedPatientId)}
+                supabase={supabase}
+                onNotice={setNotice}
+                onReload={loadWorkspace}
               />
             )}
             {activeTab === "stats" && (
@@ -2135,6 +2146,7 @@ export function NutriOSApp({
                 waists={patientWaists}
                 steps={patientSteps}
                 goals={goals.filter((goal) => goal.patient_id === selectedPatientId)}
+                goalLogs={patientGoalLogs}
                 exercises={exercises.filter((item) => item.patient_id === selectedPatientId)}
                 mealPhotos={mealPhotos.filter((item) => item.patient_id === selectedPatientId)}
                 supabase={supabase}
@@ -2220,6 +2232,7 @@ export function NutriOSApp({
             )}
             {activeTab === "settings" && (
               <SettingsPanel
+                key={`settings-${tenant.id}-${tenant.name}-${tenant.logo_url ?? ""}-${tenant.primary_color}`}
                 tenant={tenant}
                 role={role}
                 preferences={notificationPreferences}
@@ -2836,8 +2849,6 @@ function Brand({
   collapsible?: boolean;
   expanded?: boolean;
 }) {
-  const showHorizontalLogo = collapsible && expanded;
-
   return (
     <div
       className={`flex items-center gap-3 ${
@@ -2846,38 +2857,32 @@ function Brand({
           : collapsible
             ? "lg:justify-center lg:transition-all"
           : ""
-      }`}
+        }`}
     >
       <div
-        className={`grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-1.5 shadow-sm ring-1 ring-[var(--line)] ${
-          showHorizontalLogo ? "lg:hidden" : ""
-        }`}
+        className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-1.5 shadow-sm ring-1 ring-[var(--line)]"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={APP_ICON_SRC} alt="" className="h-full w-full object-contain" />
+        <img
+          src={tenant.logo_url || APP_ICON_SRC}
+          alt=""
+          className="h-full w-full object-contain"
+        />
       </div>
-      {showHorizontalLogo && (
-        <div className="hidden min-w-0 lg:block">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={APP_LOGO_SRC}
-            alt={APP_NAME}
-            className="h-auto w-44 select-none object-contain"
-          />
-        </div>
-      )}
       <div
         className={`min-w-0 ${
           collapsible && expanded
-            ? "lg:hidden"
+            ? "lg:block"
             : collapsible
               ? "lg:w-0 lg:overflow-hidden lg:opacity-0 lg:transition-opacity"
               : ""
         }`}
       >
-        <p className="truncate text-base font-black tracking-normal">{APP_NAME}</p>
-        <p className="truncate text-sm text-[var(--muted)]">
-          {compact ? tenant.name : `${tenant.name} - ${tenant.slug}`}
+        <p className="truncate text-base font-black tracking-normal text-[var(--tenant-color)]">
+          {tenant.name}
+        </p>
+        <p className="truncate text-xs font-semibold text-[var(--muted)]">
+          {compact ? APP_NAME : `${APP_NAME} - ${tenant.slug}`}
         </p>
       </div>
     </div>
@@ -2897,16 +2902,44 @@ function Header({
   notificationCount: number;
   onOpenNotifications: () => void;
 }) {
+  const contextName = selectedPatient?.full_name ?? "";
+
   return (
     <header className="flex flex-col gap-4">
-      <div className="flex items-start justify-between gap-8">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold uppercase text-[var(--tenant-color)]">
-            {role === "patient" ? "Area paciente" : "Panel nutricionista"}
-          </p>
-          <h1 className="mt-1 break-words text-xl font-black tracking-normal text-[#17201d] sm:text-3xl">
-            {selectedPatient ? selectedPatient.full_name : tenant.name}
-          </h1>
+      <div className="flex flex-col gap-4 rounded-lg border border-[var(--line)] bg-white/70 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-4">
+          <div className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-2 shadow-sm ring-1 ring-[var(--line)] sm:size-20">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={tenant.logo_url || APP_ICON_SRC}
+              alt=""
+              className="h-full w-full object-contain"
+            />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-black uppercase tracking-normal text-[var(--tenant-color)]">
+              {role === "patient" ? "Area paciente" : "Panel nutricionista"}
+            </p>
+            <h1 className="mt-1 break-words text-2xl font-black tracking-normal text-[var(--tenant-color)] sm:text-4xl">
+              {tenant.name}
+            </h1>
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-sm font-semibold text-[var(--muted)]">
+              <span>{APP_NAME}</span>
+              {contextName && (
+                <>
+                  <span className="text-[#b9b1a4]">/</span>
+                  <span className="min-w-0 truncate">
+                    {role === "patient" ? "Paciente" : "Cliente"}: {contextName}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 self-start rounded-lg bg-[#fbfaf6] px-3 py-2 sm:self-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={APP_ICON_SRC} alt="" className="size-7 object-contain" />
+          <span className="text-xs font-black text-[#39433f]">{APP_NAME}</span>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 sm:justify-end">
@@ -6206,13 +6239,18 @@ function DurationPickerDialog({
   onDone: (totalSeconds: number) => void;
 }) {
   const initialSeconds = Math.max(0, Math.trunc(Number(value || 0) || 0));
-  const [hours, setHours] = useState(() => Math.floor(initialSeconds / 3600));
-  const [minutes, setMinutes] = useState(() =>
-    Math.floor((initialSeconds % 3600) / 60),
+  const [hours, setHours] = useState(() =>
+    String(Math.floor(initialSeconds / 3600)),
   );
-  const [seconds, setSeconds] = useState(() => initialSeconds % 60);
+  const [minutes, setMinutes] = useState(() =>
+    String(Math.floor((initialSeconds % 3600) / 60)),
+  );
+  const [seconds, setSeconds] = useState(() => String(initialSeconds % 60));
 
-  const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+  const totalSeconds =
+    parseDurationPart(hours) * 3600 +
+    parseDurationPart(minutes) * 60 +
+    parseDurationPart(seconds);
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-[#121715]/45 px-4 py-6">
@@ -6288,9 +6326,9 @@ function DurationPartInput({
   onChange,
 }: {
   label: string;
-  value: number;
+  value: string;
   max: number;
-  onChange: (value: number) => void;
+  onChange: (value: string) => void;
 }) {
   return (
     <label className="block">
@@ -6304,7 +6342,7 @@ function DurationPartInput({
         max={max}
         value={value}
         onChange={(event) =>
-          onChange(clampDurationPart(event.target.value, max))
+          onChange(clampDurationPartInput(event.target.value, max))
         }
       />
     </label>
@@ -6321,9 +6359,11 @@ function DistancePickerDialog({
   onDone: (totalMeters: number) => void;
 }) {
   const initialMeters = Math.max(0, Math.round((Number(valueKm || 0) || 0) * 1000));
-  const [kilometers, setKilometers] = useState(() => Math.floor(initialMeters / 1000));
-  const [meters, setMeters] = useState(() => initialMeters % 1000);
-  const totalMeters = kilometers * 1000 + meters;
+  const [kilometers, setKilometers] = useState(() =>
+    String(Math.floor(initialMeters / 1000)),
+  );
+  const [meters, setMeters] = useState(() => String(initialMeters % 1000));
+  const totalMeters = parseDurationPart(kilometers) * 1000 + parseDurationPart(meters);
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-[#121715]/45 px-4 py-6">
@@ -6393,9 +6433,9 @@ function DistancePartInput({
   onChange,
 }: {
   label: string;
-  value: number;
+  value: string;
   max: number;
-  onChange: (value: number) => void;
+  onChange: (value: string) => void;
 }) {
   return (
     <label className="block">
@@ -6409,7 +6449,7 @@ function DistancePartInput({
         max={max}
         value={value}
         onChange={(event) =>
-          onChange(clampDurationPart(event.target.value, max))
+          onChange(clampDurationPartInput(event.target.value, max))
         }
       />
     </label>
@@ -6417,14 +6457,33 @@ function DistancePartInput({
 }
 
 function ActivitiesPanel({
+  tenant,
+  role,
   selectedPatient,
   exercises,
+  supabase,
+  onNotice,
+  onReload,
 }: {
+  tenant: Tenant;
+  role: UserRole | null;
   selectedPatient: Patient | null;
   exercises: ExerciseLog[];
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
 }) {
   const currentWeekStart = getMondayDateKey(getLocalDateString());
   const [selectedWeekStart, setSelectedWeekStart] = useState(currentWeekStart);
+  const [editingExerciseId, setEditingExerciseId] = useState("");
+  const [exerciseDraft, setExerciseDraft] = useState({
+    activity: "",
+    durationSeconds: "",
+    distanceKm: "",
+  });
+  const [savingExerciseId, setSavingExerciseId] = useState("");
+  const [editDurationPickerOpen, setEditDurationPickerOpen] = useState(false);
+  const [editDistancePickerOpen, setEditDistancePickerOpen] = useState(false);
 
   const weekKeys = useMemo(
     () => buildActivityWeekKeys(exercises, currentWeekStart),
@@ -6445,6 +6504,7 @@ function ActivitiesPanel({
   const nextWeekStart = addDaysToDateKey(selectedWeekStart, 7);
   const previousWeekStart = addDaysToDateKey(selectedWeekStart, -7);
   const canMoveNext = nextWeekStart <= currentWeekStart;
+  const canManageActivities = role === "patient";
   const activitySummaryMetrics = [
     {
       label: "Duración",
@@ -6492,6 +6552,113 @@ function ActivitiesPanel({
       icon: MapPin,
     },
   ];
+
+  function startEditingExercise(log: ExerciseLog) {
+    setEditingExerciseId(log.id);
+    setExerciseDraft({
+      activity: log.activity,
+      durationSeconds: getExerciseDurationSeconds(log)
+        ? String(getExerciseDurationSeconds(log))
+        : "",
+      distanceKm: getExerciseDistanceKm(log)
+        ? formatDistanceKmForStorage(Math.round(getExerciseDistanceKm(log) * 1000))
+        : "",
+    });
+  }
+
+  function stopEditingExercise() {
+    setEditingExerciseId("");
+    setExerciseDraft({
+      activity: "",
+      durationSeconds: "",
+      distanceKm: "",
+    });
+    setEditDurationPickerOpen(false);
+    setEditDistancePickerOpen(false);
+  }
+
+  async function saveExerciseEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedPatient || !editingExerciseId) return;
+
+    const activity = exerciseDraft.activity.trim();
+    const durationSeconds = exerciseDraft.durationSeconds
+      ? Number(exerciseDraft.durationSeconds)
+      : null;
+    const distanceKm = exerciseDraft.distanceKm ? Number(exerciseDraft.distanceKm) : null;
+
+    if (!activity) {
+      onNotice("Selecciona el deporte realizado.");
+      return;
+    }
+
+    if (
+      durationSeconds != null &&
+      (!Number.isInteger(durationSeconds) || durationSeconds < 0 || durationSeconds > 86400)
+    ) {
+      onNotice("Duracion de actividad no valida.");
+      return;
+    }
+
+    if (
+      distanceKm != null &&
+      (!Number.isFinite(distanceKm) || distanceKm < 0 || distanceKm > 1000)
+    ) {
+      onNotice("Distancia no valida.");
+      return;
+    }
+
+    setSavingExerciseId(editingExerciseId);
+    const { error } = await postExerciseMutation(supabase, {
+      action: "update",
+      tenantId: tenant.id,
+      patientId: selectedPatient.id,
+      exerciseId: editingExerciseId,
+      activity,
+      durationSeconds,
+      distanceKm,
+    });
+    setSavingExerciseId("");
+
+    if (error) {
+      onNotice(error);
+      return;
+    }
+
+    stopEditingExercise();
+    onNotice("Actividad actualizada.");
+    await onReload();
+  }
+
+  async function deleteExercise(log: ExerciseLog) {
+    if (!selectedPatient) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm("¿Quieres eliminar esta actividad?")
+    ) {
+      return;
+    }
+
+    setSavingExerciseId(log.id);
+    const { error } = await postExerciseMutation(supabase, {
+      action: "delete",
+      tenantId: tenant.id,
+      patientId: selectedPatient.id,
+      exerciseId: log.id,
+    });
+    setSavingExerciseId("");
+
+    if (error) {
+      onNotice(error);
+      return;
+    }
+
+    if (editingExerciseId === log.id) {
+      stopEditingExercise();
+    }
+    onNotice("Actividad eliminada.");
+    await onReload();
+  }
 
   return (
     <Panel>
@@ -6543,25 +6710,128 @@ function ActivitiesPanel({
                     </summary>
                     <div className="mt-3 grid gap-2">
                       {day.logs.map((log) => (
-                        <div
-                          key={log.id}
-                          className="grid gap-2 rounded-lg bg-white p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto]"
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate font-black">{log.activity}</p>
-                            <p className="mt-1 text-xs text-[var(--muted)]">
-                              {formatPhotoTime(log.logged_at)}
-                            </p>
+                        editingExerciseId === log.id ? (
+                          <form
+                            key={log.id}
+                            className="grid gap-3 rounded-lg bg-white p-3 text-sm"
+                            onSubmit={saveExerciseEdit}
+                          >
+                            <div className="grid gap-3 md:grid-cols-3">
+                              <SelectField
+                                label="Ejercicio realizado"
+                                value={exerciseDraft.activity}
+                                onChange={(value) =>
+                                  setExerciseDraft((current) => ({
+                                    ...current,
+                                    activity: value,
+                                  }))
+                                }
+                                options={activityOptions}
+                              />
+                              <div>
+                                <span className="mb-1 block text-sm font-semibold text-[#39433f]">
+                                  Tiempo
+                                </span>
+                                <button
+                                  type="button"
+                                  className="flex h-11 w-full items-center justify-between gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-left text-sm font-semibold text-[#27312d]"
+                                  onClick={() => setEditDurationPickerOpen(true)}
+                                >
+                                  <span>
+                                    {formatDurationSeconds(Number(exerciseDraft.durationSeconds || 0))}
+                                  </span>
+                                  <Clock className="size-4 text-[var(--tenant-color)]" />
+                                </button>
+                              </div>
+                              <div>
+                                <span className="mb-1 block text-sm font-semibold text-[#39433f]">
+                                  Distancia
+                                </span>
+                                <button
+                                  type="button"
+                                  className="flex h-11 w-full items-center justify-between gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-left text-sm font-semibold text-[#27312d]"
+                                  onClick={() => setEditDistancePickerOpen(true)}
+                                >
+                                  <span>
+                                    {formatDistanceForInput(Number(exerciseDraft.distanceKm || 0))}
+                                  </span>
+                                  <MapPin className="size-4 text-[var(--tenant-color)]" />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <button
+                                type="button"
+                                className="inline-flex h-9 items-center justify-center rounded-lg border border-[var(--line)] bg-[#fbfaf6] px-3 text-xs font-black text-[#39433f]"
+                                onClick={stopEditingExercise}
+                                disabled={savingExerciseId === log.id}
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[#efc4ba] bg-[#fff3f0] px-3 text-xs font-black text-[#8a3327]"
+                                onClick={() => deleteExercise(log)}
+                                disabled={savingExerciseId === log.id}
+                              >
+                                <Trash2 className="size-4" />
+                                Eliminar
+                              </button>
+                              <button
+                                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-3 text-xs font-black text-white disabled:opacity-60"
+                                disabled={savingExerciseId === log.id}
+                              >
+                                {savingExerciseId === log.id ? (
+                                  <Loader2 className="size-4 animate-spin" />
+                                ) : (
+                                  <Check className="size-4" />
+                                )}
+                                Guardar
+                              </button>
+                            </div>
+                          </form>
+                        ) : (
+                          <div
+                            key={log.id}
+                            className="grid gap-2 rounded-lg bg-white p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto]"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate font-black">{log.activity}</p>
+                              <p className="mt-1 text-xs text-[var(--muted)]">
+                                {formatPhotoTime(log.logged_at)}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2 sm:justify-end">
+                              <span className="rounded-md bg-[#f6f3eb] px-2 py-1 font-bold">
+                                {formatDurationSeconds(getExerciseDurationSeconds(log))}
+                              </span>
+                              <span className="rounded-md bg-[#f6f3eb] px-2 py-1 font-bold">
+                                {formatActivityDistance(getExerciseDistanceKm(log))}
+                              </span>
+                              {canManageActivities && (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-[var(--line)] bg-white px-2 text-xs font-black text-[#39433f]"
+                                    onClick={() => startEditingExercise(log)}
+                                  >
+                                    <Pencil className="size-3.5" />
+                                    Modificar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-[#efc4ba] bg-[#fff3f0] px-2 text-xs font-black text-[#8a3327]"
+                                    onClick={() => deleteExercise(log)}
+                                    disabled={savingExerciseId === log.id}
+                                  >
+                                    <Trash2 className="size-3.5" />
+                                    Borrar
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </div>
-                          <div className="flex flex-wrap gap-2 sm:justify-end">
-                            <span className="rounded-md bg-[#f6f3eb] px-2 py-1 font-bold">
-                              {formatDurationSeconds(getExerciseDurationSeconds(log))}
-                            </span>
-                            <span className="rounded-md bg-[#f6f3eb] px-2 py-1 font-bold">
-                              {formatActivityDistance(getExerciseDistanceKm(log))}
-                            </span>
-                          </div>
-                        </div>
+                        )
                       ))}
                       {day.logs.length === 0 && <EmptyState text="Sin actividades." />}
                     </div>
@@ -6601,6 +6871,32 @@ function ActivitiesPanel({
             </div>
           </div>
         </div>
+      )}
+      {editDurationPickerOpen && (
+        <DurationPickerDialog
+          value={exerciseDraft.durationSeconds}
+          onCancel={() => setEditDurationPickerOpen(false)}
+          onDone={(totalSeconds) => {
+            setExerciseDraft((current) => ({
+              ...current,
+              durationSeconds: totalSeconds ? String(totalSeconds) : "",
+            }));
+            setEditDurationPickerOpen(false);
+          }}
+        />
+      )}
+      {editDistancePickerOpen && (
+        <DistancePickerDialog
+          valueKm={exerciseDraft.distanceKm}
+          onCancel={() => setEditDistancePickerOpen(false)}
+          onDone={(totalMeters) => {
+            setExerciseDraft((current) => ({
+              ...current,
+              distanceKm: totalMeters ? formatDistanceKmForStorage(totalMeters) : "",
+            }));
+            setEditDistancePickerOpen(false);
+          }}
+        />
       )}
     </Panel>
   );
@@ -6754,6 +7050,7 @@ function StatsPanel({
   waists,
   steps,
   goals,
+  goalLogs,
   exercises,
   mealPhotos,
   supabase,
@@ -6765,6 +7062,7 @@ function StatsPanel({
   waists: WaistLog[];
   steps: StepLog[];
   goals: PatientGoal[];
+  goalLogs: PatientGoalLog[];
   exercises: ExerciseLog[];
   mealPhotos: MealPhoto[];
   supabase: ReturnType<typeof createSupabaseBrowser>;
@@ -6796,6 +7094,14 @@ function StatsPanel({
   const bmiChartData = selectedPatient
     ? buildBmiChartData(weights, selectedPatient.height_cm)
     : [];
+  const sleepGoals = goals.filter(
+    (goal) => getCustomGoalInputType(goal) === "sleep_hours",
+  );
+  const sleepGoalTarget =
+    sleepGoals.find((goal) => goal.is_active)?.target_value ??
+    sleepGoals[0]?.target_value ??
+    null;
+  const sleepChartData = buildSleepChartData(sleepGoals, goalLogs);
   const currentActivityWeekSummary = buildActivityWeekSummary(
     exercises,
     getMondayDateKey(getLocalDateString()),
@@ -6877,6 +7183,12 @@ function StatsPanel({
           summary={currentActivityWeekSummary}
           emptyText="Sin actividades esta semana."
         />
+        <SleepEvolutionChart
+          title="Sueño"
+          data={sleepChartData}
+          goalTarget={sleepGoalTarget}
+          emptyText="Sin registros de sueño."
+        />
       </div>
       <div className="mt-5">
         <PhotoList photos={mealPhotos} onDeletePhoto={deleteMealPhoto} />
@@ -6916,6 +7228,72 @@ function EvolutionChart({
               <YAxis tick={{ fontSize: 12 }} domain={domain} />
               <Tooltip formatter={formatChartTooltipValue} />
               <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={3} dot />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SleepEvolutionChart({
+  title,
+  data,
+  goalTarget,
+  emptyText,
+}: {
+  title: string;
+  data: Array<{ date: string; sueno: number }>;
+  goalTarget: number | null;
+  emptyText: string;
+}) {
+  const domain = getChartDomain(data, "sueno", getMinimumChartSpan("sueno"));
+
+  return (
+    <div className="rounded-lg border border-[var(--line)] bg-white p-3">
+      <p className="mb-3 text-sm font-black">{title}</p>
+      {data.length === 0 ? (
+        <div className="grid h-64 place-items-center sm:h-72">
+          <EmptyState text={emptyText} />
+        </div>
+      ) : (
+        <div className="h-64 sm:h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5dfd3" />
+              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+              <YAxis
+                tick={{ fontSize: 12 }}
+                domain={domain}
+                tickFormatter={(value) => `${formatOptionalNumber(Number(value), 1)} h`}
+              />
+              <Tooltip
+                formatter={(value) => [
+                  `${formatOptionalNumber(Number(value), 1)} h`,
+                  "Sueño",
+                ]}
+              />
+              <Line
+                type="monotone"
+                dataKey="sueno"
+                stroke="#5667b5"
+                strokeWidth={3}
+                dot
+              />
+              {goalTarget ? (
+                <ReferenceLine
+                  y={goalTarget}
+                  stroke="#8d3c2f"
+                  strokeDasharray="6 6"
+                  label={{
+                    value: `Objetivo ${formatOptionalNumber(Number(goalTarget), 1)} h`,
+                    position: "insideTopRight",
+                    fill: "#8d3c2f",
+                    fontSize: 11,
+                    fontWeight: 800,
+                  }}
+                />
+              ) : null}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -7405,6 +7783,7 @@ function NutritionistAgendaPanel({
     startTime: "09:00",
     durationMinutes: "60",
     mode: "online" as AppointmentMode,
+    videoUrl: "",
     notes: "",
   });
   const [eventDraft, setEventDraft] = useState({
@@ -7503,6 +7882,10 @@ function NutritionistAgendaPanel({
         notes: appointmentDraft.notes || null,
         event_type: "appointment",
         appointment_mode: appointmentDraft.mode,
+        video_url:
+          appointmentDraft.mode === "online" && appointmentDraft.videoUrl.trim()
+            ? appointmentDraft.videoUrl.trim()
+            : undefined,
         blocks_availability: true,
         start_at: buildLocalDateTimeIso(appointmentDraft.date, appointmentDraft.startTime),
         end_at: addMinutesIso(
@@ -7749,6 +8132,19 @@ function NutritionistAgendaPanel({
                 }
                 options={appointmentModeOptions}
               />
+              {appointmentDraft.mode === "online" && (
+                <Field
+                  label="Enlace de videollamada"
+                  value={appointmentDraft.videoUrl}
+                  onChange={(value) =>
+                    setAppointmentDraft((current) => ({
+                      ...current,
+                      videoUrl: value,
+                    }))
+                  }
+                  placeholder="https://meet.google.com/..."
+                />
+              )}
               <Field
                 label="Fecha"
                 type="date"
@@ -8219,6 +8615,17 @@ function AgendaEventCard({
           {event.notes}
         </p>
       )}
+      {event.appointment_mode === "online" && event.video_url && (
+        <a
+          href={event.video_url}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 inline-flex h-8 max-w-full items-center gap-1.5 rounded-lg bg-white px-2 text-[11px] font-black text-[var(--tenant-color)]"
+        >
+          <Video className="size-3.5 shrink-0" />
+          <span className="truncate">Abrir videollamada</span>
+        </a>
+      )}
       {onCancel && event.status !== "cancelled" && (
         <button
           type="button"
@@ -8368,6 +8775,51 @@ async function postTrackingLogs(
 
   if (!response.ok || !payload.ok) {
     return { error: payload.error ?? "No se pudo registrar el dato." };
+  }
+
+  return { error: "" };
+}
+
+async function postExerciseMutation(
+  supabase: ReturnType<typeof createSupabaseBrowser>,
+  body:
+    | {
+        action: "update";
+        tenantId: string;
+        patientId: string;
+        exerciseId: string;
+        activity: string;
+        durationSeconds: number | null;
+        distanceKm: number | null;
+      }
+    | {
+        action: "delete";
+        tenantId: string;
+        patientId: string;
+        exerciseId: string;
+      },
+) {
+  if (!supabase) {
+    return { error: "Modo demo: conecta Supabase para modificar actividades reales." };
+  }
+
+  const accessToken = await getCurrentAccessToken(supabase);
+  if (!accessToken) {
+    return { error: "Tu sesion ha caducado. Cierra sesion y vuelve a entrar." };
+  }
+
+  const response = await fetch("/api/tracking/exercises", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json()) as ExerciseMutationResponse;
+
+  if (!response.ok || !payload.ok) {
+    return { error: payload.error ?? "No se pudo modificar la actividad." };
   }
 
   return { error: "" };
@@ -9284,6 +9736,7 @@ function Field({
   type = "text",
   required = false,
   step,
+  placeholder,
 }: {
   label: string;
   value: string;
@@ -9291,6 +9744,7 @@ function Field({
   type?: string;
   required?: boolean;
   step?: string;
+  placeholder?: string;
 }) {
   return (
     <label className="block">
@@ -9302,6 +9756,7 @@ function Field({
         type={type}
         required={required}
         step={step}
+        placeholder={placeholder}
       />
     </label>
   );
@@ -9999,10 +10454,17 @@ function getMealPhotoTypePosition(mealType: string | null) {
   return mealPhotoTypeOrder.get(mealType ?? "") ?? mealPhotoTypes.length;
 }
 
-function clampDurationPart(value: string, max: number) {
+function clampDurationPartInput(value: string, max: number) {
+  if (value === "") return "";
+  if (!/^\d+$/.test(value)) return "0";
   const numericValue = Number(value);
-  if (!Number.isFinite(numericValue)) return 0;
-  return Math.min(max, Math.max(0, Math.trunc(numericValue)));
+  if (!Number.isFinite(numericValue)) return "0";
+  return String(Math.min(max, Math.max(0, Math.trunc(numericValue))));
+}
+
+function parseDurationPart(value: string) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? Math.max(0, Math.trunc(numericValue)) : 0;
 }
 
 function formatDurationSeconds(totalSeconds: number | null | undefined) {
@@ -10245,6 +10707,32 @@ function buildBmiChartData(weights: WeightLog[], heightCm: number) {
     .filter((item): item is { date: string; imc: number } => item.imc !== null);
 }
 
+function buildSleepChartData(
+  sleepGoals: PatientGoal[],
+  goalLogs: PatientGoalLog[],
+) {
+  const sleepGoalIds = new Set(sleepGoals.map((goal) => goal.id));
+  const sleepByDate = new Map<string, number>();
+
+  for (const goalLog of goalLogs) {
+    if (!sleepGoalIds.has(goalLog.goal_id)) continue;
+    const value = Number(goalLog.value);
+    if (!Number.isFinite(value)) continue;
+    const currentValue = sleepByDate.get(goalLog.logged_on);
+    sleepByDate.set(
+      goalLog.logged_on,
+      currentValue === undefined ? value : Math.max(currentValue, value),
+    );
+  }
+
+  return Array.from(sleepByDate.entries())
+    .sort(([firstDate], [secondDate]) => firstDate.localeCompare(secondDate))
+    .map(([dateKey, value]) => ({
+      date: formatShortEuropeanDate(dateKey),
+      sueno: roundNumber(value, 1) ?? value,
+    }));
+}
+
 function formatShortEuropeanDate(value: string) {
   const dateKey = getLogDateKey(value);
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
@@ -10273,6 +10761,7 @@ function getMinimumChartSpan(dataKey: string) {
   if (dataKey === "peso") return 8;
   if (dataKey === "cintura") return 10;
   if (dataKey === "imc") return 4;
+  if (dataKey === "sueno") return 2;
   return 1;
 }
 

@@ -14,6 +14,7 @@ type CalendarEventRow = {
   notes?: string | null;
   event_type?: CalendarEventType;
   appointment_mode?: AppointmentMode | null;
+  video_url?: string | null;
   blocks_availability?: boolean;
   start_at?: string;
   end_at?: string;
@@ -121,7 +122,18 @@ async function createCalendarEvent(
     }
   }
 
-  let insertRow = { ...row };
+  const normalizedVideoUrl = normalizeVideoUrl(row.video_url);
+  if (row.video_url && !normalizedVideoUrl) {
+    return NextResponse.json(
+      { error: "El enlace de videollamada no es valido." },
+      { status: 400 },
+    );
+  }
+
+  let insertRow = {
+    ...row,
+    ...(normalizedVideoUrl ? { video_url: normalizedVideoUrl } : {}),
+  };
   let { data, error } = await supabase
     .from("calendar_events")
     .insert(insertRow)
@@ -243,6 +255,23 @@ function validateCalendarRow(row: CalendarEventRow | undefined) {
   return "";
 }
 
+function normalizeVideoUrl(value: string | null | undefined) {
+  const rawValue = value?.trim();
+  if (!rawValue) return "";
+
+  const withProtocol = /^https?:\/\//i.test(rawValue)
+    ? rawValue
+    : `https://${rawValue}`;
+
+  try {
+    const parsedUrl = new URL(withProtocol);
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) return "";
+    return parsedUrl.toString();
+  } catch {
+    return "";
+  }
+}
+
 async function getMembership(
   supabase: Awaited<ReturnType<typeof getSupabaseAdmin>>,
   tenantId: string,
@@ -341,6 +370,14 @@ function formatCalendarDatabaseError(error: unknown) {
 
   if (isCalendarStatusConstraintError(error)) {
     return "Supabase tiene la restriccion de estados de agenda desactualizada. Ejecuta la migracion 202608040003_calendar_event_policy_repair.sql.";
+  }
+
+  if (
+    details.code === "42703" ||
+    details.code === "PGRST204" ||
+    details.message?.toLowerCase().includes("video_url")
+  ) {
+    return "Falta ejecutar la migracion 202608190001_calendar_video_links.sql para guardar enlaces de videollamada.";
   }
 
   return details.message ?? "No se pudo guardar la agenda.";

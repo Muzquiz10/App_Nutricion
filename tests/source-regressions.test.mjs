@@ -24,7 +24,12 @@ const usageAnalyticsMigrationPath = new URL(
   "../supabase/migrations/202608150002_usage_analytics.sql",
   import.meta.url,
 );
+const calendarVideoLinksMigrationPath = new URL(
+  "../supabase/migrations/202608190001_calendar_video_links.sql",
+  import.meta.url,
+);
 const trackingRoutePath = new URL("../app/api/tracking/logs/route.ts", import.meta.url);
+const exerciseRoutePath = new URL("../app/api/tracking/exercises/route.ts", import.meta.url);
 const analyticsRoutePath = new URL("../app/api/analytics/events/route.ts", import.meta.url);
 const chatSendRoutePath = new URL("../app/api/chat/send/route.ts", import.meta.url);
 const brandPath = new URL("../app/lib/brand.ts", import.meta.url);
@@ -152,12 +157,15 @@ test("visible brand and installed app assets use B-aura Connect", async () => {
 test("activity tracking has structured sport, duration and weekly summaries", async () => {
   const source = await readFile(componentPath, "utf8");
   const route = await readFile(trackingRoutePath, "utf8");
+  const exerciseRoute = await readFile(exerciseRoutePath, "utf8");
   const sql = await readFile(activityDetailsMigrationPath, "utf8");
 
   assert.match(source, /\{ id: "activities", label: "Actividades", icon: Dumbbell \}/);
   assert.match(source, /activityOptions/);
   assert.match(source, /DurationPickerDialog/);
   assert.match(source, /DistancePickerDialog/);
+  assert.match(source, /Modificar/);
+  assert.match(source, /postExerciseMutation/);
   assert.match(source, /formatDistanceForInput/);
   assert.match(source, /buildActivityWeekSummary/);
   assert.match(source, /ActivityWeekChart/);
@@ -166,6 +174,9 @@ test("activity tracking has structured sport, duration and weekly summaries", as
   assert.match(route, /durationSeconds/);
   assert.match(route, /distanceKm/);
   assert.match(route, /isMissingExerciseDetailsColumn/);
+  assert.match(exerciseRoute, /action\?: "update"/);
+  assert.match(exerciseRoute, /action\?: "delete"/);
+  assert.match(exerciseRoute, /Solo el cliente puede modificar sus actividades/);
   assert.match(sql, /add column if not exists duration_seconds/i);
   assert.match(sql, /add column if not exists distance_km/i);
 });
@@ -189,4 +200,20 @@ test("usage analytics records tab sessions through the server API", async () => 
   assert.match(sql, /create table if not exists public\.analytics_events/i);
   assert.match(sql, /enable row level security/i);
   assert.match(sql, /analytics_powerbi_tab_usage/i);
+});
+
+test("calendar and statistics support video links and sleep charts", async () => {
+  const source = await readFile(componentPath, "utf8");
+  const calendarRoute = await readFile(new URL("../app/api/calendar/events/route.ts", import.meta.url), "utf8");
+  const sql = await readFile(calendarVideoLinksMigrationPath, "utf8");
+
+  assert.match(source, /Enlace de videollamada/);
+  assert.match(source, /Abrir videollamada/);
+  assert.match(source, /SleepEvolutionChart/);
+  assert.match(source, /buildSleepChartData/);
+  assert.match(source, /goalLogs=\{patientGoalLogs\}/);
+  assert.match(source, /tenant\.logo_url \|\| APP_ICON_SRC/);
+  assert.match(calendarRoute, /normalizeVideoUrl/);
+  assert.match(calendarRoute, /video_url/);
+  assert.match(sql, /add column if not exists video_url/i);
 });
