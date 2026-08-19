@@ -1108,7 +1108,7 @@ export function NutriOSApp({
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   const patientPlans = plans.filter((plan) => plan.patient_id === selectedPatientId);
   const pendingAppointmentCount = calendarEvents.filter(
-    (event) => isPendingCalendarAppointment(event),
+    (event) => isPendingNutritionistConfirmation(event, patients),
   ).length;
   const unreadAppNotificationCount = appNotifications.filter(
     (notification) => !notification.read_at,
@@ -1838,6 +1838,10 @@ export function NutriOSApp({
     }
     if (notification.href === "chat") {
       setActiveTab("chat");
+      return;
+    }
+    if (notification.href === "agenda") {
+      setActiveTab("agenda");
       return;
     }
     setActiveTab("notifications");
@@ -3034,6 +3038,8 @@ function NotificationsPanel({
         {sortedNotifications.map((notification) => {
           const unread = !notification.read_at;
           const patientName = getPatientName(patients, notification.patient_id);
+          const NotificationIcon =
+            notification.type === "appointment" ? CalendarDays : MessageCircle;
 
           return (
             <button
@@ -3053,7 +3059,7 @@ function NotificationsPanel({
                     : "bg-[#f0eee7] text-[var(--tenant-color)]"
                 }`}
               >
-                <MessageCircle className="size-5" />
+                <NotificationIcon className="size-5" />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-2">
@@ -7671,6 +7677,27 @@ function PatientAgendaPanel({
     await onReload();
   }
 
+  async function confirmProposedAppointment(event: CalendarEvent) {
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para confirmar citas reales.");
+      return;
+    }
+
+    const { error } = await postCalendarEventMutation(supabase, {
+      action: "update-status",
+      eventId: event.id,
+      status: "confirmed",
+    });
+
+    if (error) {
+      onNotice(error);
+      return;
+    }
+
+    onNotice("Cita confirmada. Tu nutricionista recibirá la notificación.");
+    await onReload();
+  }
+
   return (
     <div className="grid gap-5">
       <Panel>
@@ -7745,6 +7772,8 @@ function PatientAgendaPanel({
         title="Calendario"
         events={patientEvents}
         patients={selectedPatient ? [selectedPatient] : []}
+        confirmablePatient={selectedPatient}
+        onConfirm={confirmProposedAppointment}
       />
     </div>
   );
@@ -7800,7 +7829,7 @@ function NutritionistAgendaPanel({
   const [savingAgenda, setSavingAgenda] = useState(false);
   const visibleEvents = [...calendarEvents].sort(compareCalendarEvents);
   const pendingAppointments = visibleEvents.filter(
-    (event) => isPendingCalendarAppointment(event),
+    (event) => isPendingNutritionistConfirmation(event, patients),
   );
   const appointmentPatientId = appointmentDraft.patientId || patients[0]?.id || "";
   const availableSlots = useMemo(
@@ -7892,9 +7921,9 @@ function NutritionistAgendaPanel({
           buildLocalDateTimeIso(appointmentDraft.date, appointmentDraft.startTime),
           Number(appointmentDraft.durationMinutes) || 60,
         ),
-        status: "confirmed",
+        status: "pending",
       },
-      successMessage: "Cita agendada.",
+      successMessage: "Cita enviada al cliente para confirmar.",
     });
   }
 
@@ -8329,11 +8358,15 @@ function AgendaCalendar({
   events,
   patients,
   onCancel,
+  onConfirm,
+  confirmablePatient,
 }: {
   title: string;
   events: CalendarEvent[];
   patients: Patient[];
   onCancel?: (event: CalendarEvent) => void;
+  onConfirm?: (event: CalendarEvent) => void;
+  confirmablePatient?: Patient | null;
 }) {
   const weeks = getAgendaWeeks(4);
   const eventsByDay = groupCalendarEventsByDay(events);
@@ -8398,6 +8431,11 @@ function AgendaCalendar({
                           event={event}
                           patientName={getPatientName(patients, event.patient_id)}
                           onCancel={onCancel}
+                          onConfirm={onConfirm}
+                          canConfirm={
+                            Boolean(confirmablePatient) &&
+                            isPendingPatientConfirmation(event, confirmablePatient)
+                          }
                         />
                       ))}
                       {dayEvents.length > 3 && (
@@ -8577,10 +8615,14 @@ function AgendaEventCard({
   event,
   patientName,
   onCancel,
+  onConfirm,
+  canConfirm = false,
 }: {
   event: CalendarEvent;
   patientName: string;
   onCancel?: (event: CalendarEvent) => void;
+  onConfirm?: (event: CalendarEvent) => void;
+  canConfirm?: boolean;
 }) {
   const meta = getCalendarEventMeta(event);
 
@@ -8626,10 +8668,20 @@ function AgendaEventCard({
           <span className="truncate">Abrir videollamada</span>
         </a>
       )}
+      {canConfirm && onConfirm && event.status !== "cancelled" && (
+        <button
+          type="button"
+          className="mt-3 inline-flex h-8 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-2 text-[11px] font-black text-white"
+          onClick={() => onConfirm(event)}
+        >
+          <Check className="size-3.5" />
+          Confirmar cita
+        </button>
+      )}
       {onCancel && event.status !== "cancelled" && (
         <button
           type="button"
-          className="mt-3 inline-flex h-8 w-full items-center justify-center gap-2 rounded-lg border border-[#efc4ba] bg-white px-2 text-[11px] font-black text-[#8a3327]"
+          className="mt-2 inline-flex h-8 w-full items-center justify-center gap-2 rounded-lg border border-[#efc4ba] bg-white px-2 text-[11px] font-black text-[#8a3327]"
           onClick={() => onCancel(event)}
         >
           <Ban className="size-3.5" />
@@ -10367,6 +10419,29 @@ function isPendingCalendarAppointment(event: CalendarEvent) {
     (event.status === "pending" ||
       (event.status === "scheduled" &&
         event.title === LEGACY_PENDING_APPOINTMENT_TITLE))
+  );
+}
+
+function isPendingNutritionistConfirmation(
+  event: CalendarEvent,
+  patients: Patient[],
+) {
+  if (!isPendingCalendarAppointment(event)) return false;
+
+  const patient = patients.find((item) => item.id === event.patient_id);
+  return !event.created_by || event.created_by === patient?.user_id;
+}
+
+function isPendingPatientConfirmation(
+  event: CalendarEvent,
+  patient: Patient | null | undefined,
+) {
+  return (
+    Boolean(patient?.user_id) &&
+    isPendingCalendarAppointment(event) &&
+    event.patient_id === patient?.id &&
+    Boolean(event.created_by) &&
+    event.created_by !== patient?.user_id
   );
 }
 

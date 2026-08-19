@@ -32,6 +32,8 @@ const trackingRoutePath = new URL("../app/api/tracking/logs/route.ts", import.me
 const exerciseRoutePath = new URL("../app/api/tracking/exercises/route.ts", import.meta.url);
 const analyticsRoutePath = new URL("../app/api/analytics/events/route.ts", import.meta.url);
 const chatSendRoutePath = new URL("../app/api/chat/send/route.ts", import.meta.url);
+const calendarEventsRoutePath = new URL("../app/api/calendar/events/route.ts", import.meta.url);
+const notificationServerPath = new URL("../app/lib/notifications/server.ts", import.meta.url);
 const brandPath = new URL("../app/lib/brand.ts", import.meta.url);
 const manifestPath = new URL("../public/manifest.webmanifest", import.meta.url);
 const pushWorkerPath = new URL("../public/push-sw.js", import.meta.url);
@@ -121,6 +123,7 @@ test("chat notifications support push, in-app notices, and email fallback", asyn
   const source = await readFile(componentPath, "utf8");
   const sql = await readFile(chatNotificationsMigrationPath, "utf8");
   const chatRoute = await readFile(chatSendRoutePath, "utf8");
+  const notificationServer = await readFile(notificationServerPath, "utf8");
   const worker = await readFile(pushWorkerPath, "utf8");
 
   assert.match(source, /NotificationSettingsPanel/);
@@ -133,11 +136,31 @@ test("chat notifications support push, in-app notices, and email fallback", asyn
   assert.match(source, /\/api\/chat\/read/);
   assert.match(source, /process-email-fallback/);
   assert.match(chatRoute, /createChatMessageNotification/);
+  assert.match(notificationServer, /processDueAppEmailFallbacks/);
+  assert.match(notificationServer, /\.in\("type", \["chat_message", "appointment"\]\)/);
   assert.match(worker, /showNotification/);
   assert.match(sql, /create table if not exists public\.notification_preferences/i);
   assert.match(sql, /create table if not exists public\.push_subscriptions/i);
   assert.match(sql, /create table if not exists public\.app_notifications/i);
   assert.match(sql, /email_fallback_due_at/i);
+});
+
+test("appointment notifications require customer confirmation and email fallback", async () => {
+  const source = await readFile(componentPath, "utf8");
+  const calendarRoute = await readFile(calendarEventsRoutePath, "utf8");
+  const notificationServer = await readFile(notificationServerPath, "utf8");
+
+  assert.match(source, /Cita enviada al cliente para confirmar/);
+  assert.match(source, /Confirmar cita/);
+  assert.match(source, /isPendingPatientConfirmation/);
+  assert.match(source, /isPendingNutritionistConfirmation/);
+  assert.match(source, /notification\.href === "agenda"/);
+  assert.match(calendarRoute, /createAppointmentNotification/);
+  assert.match(calendarRoute, /canPatientConfirmAppointment/);
+  assert.match(calendarRoute, /Cita pendiente de confirmar/);
+  assert.match(calendarRoute, /Cita confirmada por el cliente/);
+  assert.match(notificationServer, /type: "appointment"/);
+  assert.match(notificationServer, /Abrir agenda en/);
 });
 
 test("visible brand and installed app assets use B-aura Connect", async () => {

@@ -25,6 +25,7 @@ type AppNotificationRow = {
   tenant_id: string;
   user_id: string;
   patient_id: string | null;
+  type: "chat_message" | "appointment";
   title: string;
   body: string;
   href: string | null;
@@ -90,7 +91,62 @@ export async function createChatMessageNotification({
   }
 }
 
-export async function processDueChatEmailFallbacks({
+export async function createAppointmentNotification({
+  supabase,
+  request,
+  tenantId,
+  patientId,
+  recipientUserId,
+  actorUserId,
+  title,
+  body,
+}: {
+  supabase: SupabaseClient;
+  request: Request;
+  tenantId: string;
+  patientId: string | null;
+  recipientUserId: string | null | undefined;
+  actorUserId: string;
+  title: string;
+  body: string;
+}) {
+  if (!recipientUserId || recipientUserId === actorUserId) return;
+
+  const preferences = await getNotificationPreferences(
+    supabase,
+    tenantId,
+    recipientUserId,
+  );
+  const emailFallbackDueAt = preferences.email_enabled
+    ? new Date(Date.now() + fallbackMinutes * 60 * 1000).toISOString()
+    : null;
+
+  const { error } = await supabase.from("app_notifications").insert({
+    tenant_id: tenantId,
+    user_id: recipientUserId,
+    patient_id: patientId,
+    type: "appointment",
+    title,
+    body,
+    href: "agenda",
+    email_fallback_due_at: emailFallbackDueAt,
+  });
+
+  if (error) {
+    console.error("Could not create appointment notification", error.message);
+  }
+
+  if (preferences.push_enabled) {
+    await sendPushNotificationsToUser({
+      supabase,
+      request,
+      tenantId,
+      userId: recipientUserId,
+    });
+  }
+}
+
+export async function processDueAppEmailFallbacks({
   supabase,
   request,
   tenantId,
@@ -101,8 +157,8 @@ export async function processDueChatEmailFallbacks({
 }) {
   let query = supabase
     .from("app_notifications")
-    .select("id,tenant_id,user_id,patient_id,title,body,href,related_message_id,read_at")
-    .eq("type", "chat_message")
+    .select("id,tenant_id,user_id,patient_id,type,title,body,href,related_message_id,read_at")
+    .in("type", ["chat_message", "appointment"])
     .is("email_sent_at", null)
     .not("email_fallback_due_at", "is", null)
     .lte("email_fallback_due_at", new Date().toISOString())
@@ -128,23 +184,43 @@ export async function processDueChatEmailFallbacks({
   return { processed: notifications.length, sent };
 }
 
+export const processDueChatEmailFallbacks = processDueAppEmailFallbacks;
+
 async function processOneEmailFallback(
   supabase: SupabaseClient,
   request: Request,
   notification: AppNotificationRow,
 ) {
-  const { data: message } = await supabase
-    .from("chat_messages")
-    .select("id,read_at")
-    .eq("id", notification.related_message_id)
-    .maybeSingle();
-
-  if (!message || message.read_at || notification.read_at) {
+  if (notification.read_at) {
     await supabase
       .from("app_notifications")
       .update({ email_fallback_due_at: null })
       .eq("id", notification.id);
     return "skipped";
+  }
+
+  if (notification.type === "chat_message") {
+    if (!notification.related_message_id) {
+      await supabase
+        .from("app_notifications")
+        .update({ email_fallback_due_at: null })
+        .eq("id", notification.id);
+      return "skipped";
+    }
+
+    const { data: message } = await supabase
+      .from("chat_messages")
+      .select("id,read_at")
+      .eq("id", notification.related_message_id)
+      .maybeSingle();
+
+    if (!message || message.read_at) {
+      await supabase
+        .from("app_notifications")
+        .update({ email_fallback_due_at: null })
+        .eq("id", notification.id);
+      return "skipped";
+    }
   }
 
   const preferences = await getNotificationPreferences(
@@ -166,7 +242,7 @@ async function processOneEmailFallback(
     return "error";
   }
 
-  const emailResult = await sendUnreadMessageEmail({
+  const emailResult = await sendNotificationEmail({
     request,
     to: email,
     notification,
@@ -272,7 +348,7 @@ async function getVapidConfig(request: Request) {
   return { publicKey, privateKey, subject };
 }
 
-async function sendUnreadMessageEmail({
+async function sendNotificationEmail({
   request,
   to,
   notification,
@@ -292,13 +368,11 @@ async function sendUnreadMessageEmail({
 
   const appOrigin = await getPublicAppOrigin(request);
   const appUrl = `${appOrigin}/`;
-  const text = [
-    `Tienes un nuevo mensaje sin leer en ${APP_NAME}.`,
-    "",
-    "Por privacidad, el contenido del mensaje solo se muestra dentro de la aplicación.",
-    "",
-    `Abrir ${APP_NAME}: ${appUrl}`,
-  ].join("\n");
+  const text = buildNotificationEmailText(notification, appUrl);
+  const subject =
+    notification.type === "chat_message"
+      ? `[${APP_NAME}] Tienes un nuevo mensaje`
+      : `[${APP_NAME}] ${notification.title}`;
 
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -309,7 +383,7 @@ async function sendUnreadMessageEmail({
     body: JSON.stringify({
       from: fromEmail,
       to: [to],
-      subject: `[${APP_NAME}] Tienes un nuevo mensaje`,
+      subject,
       text,
       html: textToHtml(text),
       headers: {
@@ -323,6 +397,29 @@ async function sendUnreadMessageEmail({
   }
 
   return { ok: true, error: "" };
+}
+
+function buildNotificationEmailText(
+  notification: AppNotificationRow,
+  appUrl: string,
+) {
+  if (notification.type === "chat_message") {
+    return [
+      `Tienes un nuevo mensaje sin leer en ${APP_NAME}.`,
+      "",
+      "Por privacidad, el contenido del mensaje solo se muestra dentro de la aplicación.",
+      "",
+      `Abrir ${APP_NAME}: ${appUrl}`,
+    ].join("\n");
+  }
+
+  return [
+    notification.title,
+    "",
+    notification.body,
+    "",
+    `Abrir agenda en ${APP_NAME}: ${appUrl}`,
+  ].join("\n");
 }
 
 async function getUserEmail(supabase: SupabaseClient, userId: string) {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { processDueChatEmailFallbacks } from "../../../lib/notifications/server";
+import { processDueAppEmailFallbacks } from "../../../lib/notifications/server";
 import { getSupabaseAdmin, readRuntimeEnv } from "../../../lib/supabase/server";
 
 type ProcessFallbackBody = {
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const result = await processDueChatEmailFallbacks({
+  const result = await processDueAppEmailFallbacks({
     supabase,
     request,
     tenantId: body.tenantId,

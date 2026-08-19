@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createAppointmentNotification } from "../../../lib/notifications/server";
 import { getSupabaseAdmin } from "../../../lib/supabase/server";
 
 type CalendarEventStatus = "pending" | "confirmed" | "cancelled" | "scheduled";
@@ -19,6 +20,31 @@ type CalendarEventRow = {
   start_at?: string;
   end_at?: string;
   status?: CalendarEventStatus;
+};
+
+type CalendarEventInsertRow = CalendarEventRow & {
+  created_by: string;
+};
+
+type StoredCalendarEvent = {
+  id: string;
+  tenant_id: string;
+  patient_id: string | null;
+  created_by: string | null;
+  title: string;
+  event_type: CalendarEventType;
+  appointment_mode: AppointmentMode | null;
+  start_at: string;
+  end_at: string;
+  status: CalendarEventStatus;
+};
+
+type CalendarNotificationPatient = {
+  id: string;
+  tenant_id: string;
+  user_id: string | null;
+  nutritionist_user_id: string;
+  full_name: string;
 };
 
 type CalendarEventsBody = {
@@ -59,12 +85,13 @@ export async function POST(request: Request) {
   const body = (await request.json()) as CalendarEventsBody;
 
   if (body.action === "create") {
-    return createCalendarEvent(supabase, user.id, body.row);
+    return createCalendarEvent(supabase, request, user.id, body.row);
   }
 
   if (body.action === "update-status") {
     return updateCalendarEventStatus(
       supabase,
+      request,
       user.id,
       body.eventId,
       body.status,
@@ -80,6 +107,7 @@ export async function POST(request: Request) {
 
 async function createCalendarEvent(
   supabase: Awaited<ReturnType<typeof getSupabaseAdmin>>,
+  request: Request,
   userId: string,
   row: CalendarEventRow | undefined,
 ) {
@@ -132,8 +160,9 @@ async function createCalendarEvent(
 
   let insertRow = {
     ...row,
+    created_by: userId,
     ...(normalizedVideoUrl ? { video_url: normalizedVideoUrl } : {}),
-  };
+  } as CalendarEventInsertRow;
   let { data, error } = await supabase
     .from("calendar_events")
     .insert(insertRow)
@@ -158,11 +187,20 @@ async function createCalendarEvent(
     );
   }
 
+  await notifyCalendarEventCreated({
+    supabase,
+    request,
+    userId,
+    event: data as StoredCalendarEvent,
+    isNutritionist,
+  });
+
   return NextResponse.json({ ok: true, event: data });
 }
 
 async function updateCalendarEventStatus(
   supabase: Awaited<ReturnType<typeof getSupabaseAdmin>>,
+  request: Request,
   userId: string,
   eventId: string | undefined,
   status: CalendarEventStatus | undefined,
@@ -184,7 +222,7 @@ async function updateCalendarEventStatus(
 
   const { data: event, error: eventError } = await supabase
     .from("calendar_events")
-    .select("id,tenant_id,title")
+    .select("id,tenant_id,patient_id,created_by,title,event_type,appointment_mode,start_at,end_at,status")
     .eq("id", eventId)
     .maybeSingle();
 
@@ -192,8 +230,17 @@ async function updateCalendarEventStatus(
     return NextResponse.json({ error: "Evento no encontrado." }, { status: 404 });
   }
 
-  const membership = await getMembership(supabase, event.tenant_id, userId);
-  if (!isActiveNutritionist(membership)) {
+  const storedEvent = event as StoredCalendarEvent;
+  const membership = await getMembership(supabase, storedEvent.tenant_id, userId);
+  const isNutritionist = isActiveNutritionist(membership);
+  const patientCanConfirm = await canPatientConfirmAppointment(
+    supabase,
+    storedEvent,
+    userId,
+    status,
+  );
+
+  if (!isNutritionist && !patientCanConfirm) {
     return NextResponse.json(
       { error: "No tienes permisos para modificar esta cita." },
       { status: 403 },
@@ -202,7 +249,7 @@ async function updateCalendarEventStatus(
 
   let updateRow = {
     status,
-    ...(title ? { title } : {}),
+    ...(isNutritionist && title ? { title } : {}),
   };
 
   let { error } = await supabase
@@ -213,7 +260,7 @@ async function updateCalendarEventStatus(
   if (isCalendarStatusConstraintError(error)) {
     updateRow = {
       status: status === "confirmed" ? "scheduled" : status,
-      ...(title ? { title } : {}),
+      ...(isNutritionist && title ? { title } : {}),
     };
     const legacyUpdate = await supabase
       .from("calendar_events")
@@ -229,7 +276,135 @@ async function updateCalendarEventStatus(
     );
   }
 
+  await notifyCalendarEventStatusUpdated({
+    supabase,
+    request,
+    userId,
+    event: storedEvent,
+    status,
+    isNutritionist,
+  });
+
   return NextResponse.json({ ok: true });
+}
+
+async function notifyCalendarEventCreated({
+  supabase,
+  request,
+  userId,
+  event,
+  isNutritionist,
+}: {
+  supabase: NonNullable<Awaited<ReturnType<typeof getSupabaseAdmin>>>;
+  request: Request;
+  userId: string;
+  event: StoredCalendarEvent;
+  isNutritionist: boolean;
+}) {
+  if (!isPendingAppointment(event) || !event.patient_id) return;
+
+  const patient = await getCalendarNotificationPatient(
+    supabase,
+    event.tenant_id,
+    event.patient_id,
+  );
+  if (!patient) return;
+
+  const when = formatAppointmentWhen(event);
+
+  if (isNutritionist) {
+    const tenantName = await getTenantName(supabase, event.tenant_id);
+    await createAppointmentNotification({
+      supabase,
+      request,
+      tenantId: event.tenant_id,
+      patientId: patient.id,
+      recipientUserId: patient.user_id,
+      actorUserId: userId,
+      title: "Cita pendiente de confirmar",
+      body: `${tenantName} te ha propuesto una cita ${when}. Entra en Agenda para confirmarla.`,
+    });
+    return;
+  }
+
+  await createAppointmentNotification({
+    supabase,
+    request,
+    tenantId: event.tenant_id,
+    patientId: patient.id,
+    recipientUserId: patient.nutritionist_user_id,
+    actorUserId: userId,
+    title: "Nueva solicitud de cita",
+    body: `${patient.full_name} ha solicitado una cita ${when}. Entra en Agenda para revisarla.`,
+  });
+}
+
+async function notifyCalendarEventStatusUpdated({
+  supabase,
+  request,
+  userId,
+  event,
+  status,
+  isNutritionist,
+}: {
+  supabase: NonNullable<Awaited<ReturnType<typeof getSupabaseAdmin>>>;
+  request: Request;
+  userId: string;
+  event: StoredCalendarEvent;
+  status: CalendarEventStatus;
+  isNutritionist: boolean;
+}) {
+  if (event.event_type !== "appointment" || !event.patient_id) return;
+
+  const patient = await getCalendarNotificationPatient(
+    supabase,
+    event.tenant_id,
+    event.patient_id,
+  );
+  if (!patient) return;
+
+  const when = formatAppointmentWhen(event);
+
+  if (status === "confirmed" && isNutritionist) {
+    await createAppointmentNotification({
+      supabase,
+      request,
+      tenantId: event.tenant_id,
+      patientId: patient.id,
+      recipientUserId: patient.user_id,
+      actorUserId: userId,
+      title: "Cita confirmada",
+      body: `Tu cita ${when} ha sido confirmada.`,
+    });
+    return;
+  }
+
+  if (status === "confirmed" && !isNutritionist) {
+    await createAppointmentNotification({
+      supabase,
+      request,
+      tenantId: event.tenant_id,
+      patientId: patient.id,
+      recipientUserId: patient.nutritionist_user_id,
+      actorUserId: userId,
+      title: "Cita confirmada por el cliente",
+      body: `${patient.full_name} ha confirmado la cita ${when}.`,
+    });
+    return;
+  }
+
+  if (status === "cancelled") {
+    await createAppointmentNotification({
+      supabase,
+      request,
+      tenantId: event.tenant_id,
+      patientId: patient.id,
+      recipientUserId: isNutritionist ? patient.user_id : patient.nutritionist_user_id,
+      actorUserId: userId,
+      title: "Cita cancelada",
+      body: `La cita ${when} ha sido cancelada.`,
+    });
+  }
 }
 
 function validateCalendarRow(row: CalendarEventRow | undefined) {
@@ -318,7 +493,77 @@ async function getActivePatientForUser(
   return data;
 }
 
-function toLegacyCalendarInsert(row: CalendarEventRow) {
+async function canPatientConfirmAppointment(
+  supabase: Awaited<ReturnType<typeof getSupabaseAdmin>>,
+  event: StoredCalendarEvent,
+  userId: string,
+  nextStatus: CalendarEventStatus | undefined,
+) {
+  if (!supabase) return false;
+  if (nextStatus !== "confirmed") return false;
+  if (!isPendingAppointment(event) || !event.patient_id) return false;
+  if (!event.created_by || event.created_by === userId) return false;
+
+  const patient = await getActivePatientForUser(
+    supabase,
+    event.tenant_id,
+    event.patient_id,
+    userId,
+  );
+
+  return Boolean(patient);
+}
+
+async function getCalendarNotificationPatient(
+  supabase: NonNullable<Awaited<ReturnType<typeof getSupabaseAdmin>>>,
+  tenantId: string,
+  patientId: string,
+): Promise<CalendarNotificationPatient | null> {
+  const { data } = await supabase
+    .from("patients")
+    .select("id,tenant_id,user_id,nutritionist_user_id,full_name")
+    .eq("tenant_id", tenantId)
+    .eq("id", patientId)
+    .eq("status", "active")
+    .maybeSingle();
+
+  return data as CalendarNotificationPatient | null;
+}
+
+async function getTenantName(
+  supabase: NonNullable<Awaited<ReturnType<typeof getSupabaseAdmin>>>,
+  tenantId: string,
+) {
+  const { data } = await supabase
+    .from("tenants")
+    .select("name")
+    .eq("id", tenantId)
+    .maybeSingle();
+
+  return data?.name ?? "Tu profesional";
+}
+
+function isPendingAppointment(event: StoredCalendarEvent) {
+  return (
+    event.event_type === "appointment" &&
+    (event.status === "pending" ||
+      (event.status === "scheduled" &&
+        event.title === LEGACY_PENDING_APPOINTMENT_TITLE))
+  );
+}
+
+function formatAppointmentWhen(event: Pick<StoredCalendarEvent, "start_at">) {
+  return new Intl.DateTimeFormat("es-ES", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Madrid",
+  }).format(new Date(event.start_at));
+}
+
+function toLegacyCalendarInsert(row: CalendarEventInsertRow) {
   if (row.status === "pending") {
     return {
       ...row,
