@@ -8069,6 +8069,28 @@ function NutritionistAgendaPanel({
     await onReload();
   }
 
+  async function saveAppointmentVideoUrl(event: CalendarEvent, videoUrl: string) {
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para guardar enlaces reales.");
+      return false;
+    }
+
+    const { error } = await postCalendarEventMutation(supabase, {
+      action: "update-video-url",
+      eventId: event.id,
+      videoUrl,
+    });
+
+    if (error) {
+      onNotice(error);
+      return false;
+    }
+
+    onNotice("Enlace de videollamada guardado.");
+    await onReload();
+    return true;
+  }
+
   return (
     <div className="grid gap-5">
       <Panel>
@@ -8375,6 +8397,7 @@ function NutritionistAgendaPanel({
           patients={patients}
           onConfirm={confirmAppointment}
           onCancel={cancelEvent}
+          onSaveVideoUrl={saveAppointmentVideoUrl}
         />
       )}
 
@@ -8384,6 +8407,7 @@ function NutritionistAgendaPanel({
           events={visibleEvents}
           patients={patients}
           onCancel={cancelEvent}
+          onSaveVideoUrl={saveAppointmentVideoUrl}
         />
         <Panel>
           <div className="flex items-center justify-between gap-3">
@@ -8420,6 +8444,7 @@ function AgendaCalendar({
   patients,
   onCancel,
   onConfirm,
+  onSaveVideoUrl,
   confirmablePatient,
 }: {
   title: string;
@@ -8427,6 +8452,7 @@ function AgendaCalendar({
   patients: Patient[];
   onCancel?: (event: CalendarEvent) => void;
   onConfirm?: (event: CalendarEvent) => void;
+  onSaveVideoUrl?: (event: CalendarEvent, videoUrl: string) => Promise<boolean>;
   confirmablePatient?: Patient | null;
 }) {
   const weeks = getAgendaWeeks(4);
@@ -8493,6 +8519,7 @@ function AgendaCalendar({
                           patientName={getPatientName(patients, event.patient_id)}
                           onCancel={onCancel}
                           onConfirm={onConfirm}
+                          onSaveVideoUrl={onSaveVideoUrl}
                           canConfirm={
                             Boolean(confirmablePatient) &&
                             isPendingPatientConfirmation(event, confirmablePatient)
@@ -8603,11 +8630,13 @@ function PendingAppointmentsPanel({
   patients,
   onConfirm,
   onCancel,
+  onSaveVideoUrl,
 }: {
   events: CalendarEvent[];
   patients: Patient[];
   onConfirm: (event: CalendarEvent) => void;
   onCancel: (event: CalendarEvent) => void;
+  onSaveVideoUrl?: (event: CalendarEvent, videoUrl: string) => Promise<boolean>;
 }) {
   return (
     <Panel>
@@ -8647,6 +8676,13 @@ function PendingAppointmentsPanel({
                 {formatAppointmentMode(event.appointment_mode)}
               </p>
             )}
+            {event.appointment_mode === "online" && (
+              <AppointmentVideoLinkEditor
+                key={`${event.id}-${event.video_url ?? "no-link"}-pending`}
+                event={event}
+                onSaveVideoUrl={onSaveVideoUrl}
+              />
+            )}
             <div className="mt-4 grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -8677,12 +8713,14 @@ function AgendaEventCard({
   patientName,
   onCancel,
   onConfirm,
+  onSaveVideoUrl,
   canConfirm = false,
 }: {
   event: CalendarEvent;
   patientName: string;
   onCancel?: (event: CalendarEvent) => void;
   onConfirm?: (event: CalendarEvent) => void;
+  onSaveVideoUrl?: (event: CalendarEvent, videoUrl: string) => Promise<boolean>;
   canConfirm?: boolean;
 }) {
   const meta = getCalendarEventMeta(event);
@@ -8718,16 +8756,13 @@ function AgendaEventCard({
           {event.notes}
         </p>
       )}
-      {event.appointment_mode === "online" && event.video_url && (
-        <a
-          href={event.video_url}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-2 inline-flex h-8 max-w-full items-center gap-1.5 rounded-lg bg-white px-2 text-[11px] font-black text-[var(--tenant-color)]"
-        >
-          <Video className="size-3.5 shrink-0" />
-          <span className="truncate">Abrir videollamada</span>
-        </a>
+      {event.appointment_mode === "online" && (
+        <AppointmentVideoLinkEditor
+          key={`${event.id}-${event.video_url ?? "no-link"}-calendar`}
+          event={event}
+          onSaveVideoUrl={onSaveVideoUrl}
+          compact
+        />
       )}
       {canConfirm && onConfirm && event.status !== "cancelled" && (
         <button
@@ -8750,6 +8785,96 @@ function AgendaEventCard({
         </button>
       )}
     </article>
+  );
+}
+
+function AppointmentVideoLinkEditor({
+  event,
+  onSaveVideoUrl,
+  compact = false,
+}: {
+  event: CalendarEvent;
+  onSaveVideoUrl?: (event: CalendarEvent, videoUrl: string) => Promise<boolean>;
+  compact?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(event.video_url ?? "");
+  const [saving, setSaving] = useState(false);
+
+  if (!event.video_url && !onSaveVideoUrl) return null;
+
+  async function saveVideoUrl() {
+    if (!onSaveVideoUrl) return;
+    setSaving(true);
+    const saved = await onSaveVideoUrl(event, draft);
+    setSaving(false);
+    if (saved) setEditing(false);
+  }
+
+  if (editing && onSaveVideoUrl) {
+    return (
+      <div className={`rounded-lg border border-[var(--line)] bg-white p-2 ${compact ? "mt-2" : "mt-3"}`}>
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-black text-[#39433f]">
+            Enlace de videollamada
+          </span>
+          <input
+            className="h-9 w-full rounded-lg border border-[var(--line)] bg-white px-2 text-xs"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="https://meet.google.com/..."
+          />
+        </label>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-[var(--tenant-color)] px-2 text-[11px] font-black text-white disabled:opacity-60"
+            onClick={saveVideoUrl}
+            disabled={saving}
+          >
+            {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+            Guardar
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-[var(--line)] bg-white px-2 text-[11px] font-black text-[#39433f]"
+            onClick={() => {
+              setDraft(event.video_url ?? "");
+              setEditing(false);
+            }}
+            disabled={saving}
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex flex-wrap gap-1.5 ${compact ? "mt-2" : "mt-3"}`}>
+      {event.video_url && (
+        <a
+          href={event.video_url}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-lg bg-white px-2 text-[11px] font-black text-[var(--tenant-color)]"
+        >
+          <Video className="size-3.5 shrink-0" />
+          <span className="truncate">Abrir videollamada</span>
+        </a>
+      )}
+      {onSaveVideoUrl && event.status !== "cancelled" && (
+        <button
+          type="button"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--line)] bg-white px-2 text-[11px] font-black text-[#39433f]"
+          onClick={() => setEditing(true)}
+        >
+          <Video className="size-3.5 text-[var(--tenant-color)]" />
+          {event.video_url ? "Editar enlace" : "Añadir enlace"}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -8814,6 +8939,11 @@ async function postCalendarEventMutation(
         eventId: string;
         status: CalendarEventStatus;
         title?: string;
+      }
+    | {
+        action: "update-video-url";
+        eventId: string;
+        videoUrl: string;
       },
 ) {
   if (!supabase) {

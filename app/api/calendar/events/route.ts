@@ -48,11 +48,12 @@ type CalendarNotificationPatient = {
 };
 
 type CalendarEventsBody = {
-  action?: "create" | "update-status";
+  action?: "create" | "update-status" | "update-video-url";
   eventId?: string;
   row?: CalendarEventRow;
   status?: CalendarEventStatus;
   title?: string;
+  videoUrl?: string | null;
 };
 
 export async function POST(request: Request) {
@@ -96,6 +97,15 @@ export async function POST(request: Request) {
       body.eventId,
       body.status,
       body.title,
+    );
+  }
+
+  if (body.action === "update-video-url") {
+    return updateCalendarEventVideoUrl(
+      supabase,
+      user.id,
+      body.eventId,
+      body.videoUrl,
     );
   }
 
@@ -287,6 +297,74 @@ async function updateCalendarEventStatus(
     status,
     isNutritionist,
   });
+
+  return NextResponse.json({ ok: true });
+}
+
+async function updateCalendarEventVideoUrl(
+  supabase: Awaited<ReturnType<typeof getSupabaseAdmin>>,
+  userId: string,
+  eventId: string | undefined,
+  videoUrl: string | null | undefined,
+) {
+  if (!supabase) {
+    return NextResponse.json(
+      { error: "Supabase no esta configurado en el servidor." },
+      { status: 500 },
+    );
+  }
+
+  if (!eventId) {
+    return NextResponse.json(
+      { error: "Falta la cita para guardar el enlace." },
+      { status: 400 },
+    );
+  }
+
+  const { data: event, error: eventError } = await supabase
+    .from("calendar_events")
+    .select("id,tenant_id,event_type,appointment_mode")
+    .eq("id", eventId)
+    .maybeSingle();
+
+  if (eventError || !event) {
+    return NextResponse.json({ error: "Evento no encontrado." }, { status: 404 });
+  }
+
+  const membership = await getMembership(supabase, event.tenant_id, userId);
+  if (!isActiveNutritionist(membership)) {
+    return NextResponse.json(
+      { error: "No tienes permisos para modificar esta cita." },
+      { status: 403 },
+    );
+  }
+
+  if (event.event_type !== "appointment" || event.appointment_mode !== "online") {
+    return NextResponse.json(
+      { error: "Solo se puede editar el enlace en citas online." },
+      { status: 400 },
+    );
+  }
+
+  const normalizedVideoUrl = normalizeVideoUrl(videoUrl);
+  if (videoUrl?.trim() && !normalizedVideoUrl) {
+    return NextResponse.json(
+      { error: "El enlace de videollamada no es valido." },
+      { status: 400 },
+    );
+  }
+
+  const { error } = await supabase
+    .from("calendar_events")
+    .update({ video_url: normalizedVideoUrl || null })
+    .eq("id", eventId);
+
+  if (error) {
+    return NextResponse.json(
+      { error: formatCalendarDatabaseError(error) },
+      { status: 500 },
+    );
+  }
 
   return NextResponse.json({ ok: true });
 }

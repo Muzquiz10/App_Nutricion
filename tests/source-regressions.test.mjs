@@ -145,7 +145,7 @@ test("chat notifications support push, in-app notices, and email fallback", asyn
   assert.match(sql, /email_fallback_due_at/i);
 });
 
-test("appointment notifications require customer confirmation and email fallback", async () => {
+test("appointment notifications require customer confirmation and immediate email", async () => {
   const source = await readFile(componentPath, "utf8");
   const calendarRoute = await readFile(calendarEventsRoutePath, "utf8");
   const notificationServer = await readFile(notificationServerPath, "utf8");
@@ -163,6 +163,8 @@ test("appointment notifications require customer confirmation and email fallback
   assert.match(calendarRoute, /Cita pendiente de confirmar/);
   assert.match(calendarRoute, /Cita confirmada por el cliente/);
   assert.match(notificationServer, /type: "appointment"/);
+  assert.match(notificationServer, /sendImmediateNotificationEmail/);
+  assert.match(notificationServer, /email_sent_at/);
   assert.match(notificationServer, /Abrir agenda en/);
 });
 
@@ -235,11 +237,17 @@ test("calendar and statistics support video links and sleep charts", async () =>
 
   assert.match(source, /Enlace de videollamada/);
   assert.match(source, /Abrir videollamada/);
+  assert.match(source, /AppointmentVideoLinkEditor/);
+  assert.match(source, /Añadir enlace/);
+  assert.match(source, /Editar enlace/);
+  assert.match(source, /action: "update-video-url"/);
   assert.match(source, /SleepEvolutionChart/);
   assert.match(source, /buildSleepChartData/);
   assert.match(source, /goalLogs=\{patientGoalLogs\}/);
   assert.match(source, /tenant\.logo_url \|\| APP_ICON_SRC/);
   assert.match(calendarRoute, /normalizeVideoUrl/);
+  assert.match(calendarRoute, /updateCalendarEventVideoUrl/);
+  assert.match(calendarRoute, /Solo se puede editar el enlace en citas online/);
   assert.match(calendarRoute, /video_url/);
   assert.match(sql, /add column if not exists video_url/i);
 });

@@ -36,6 +36,10 @@ type AppNotificationRow = {
 const fallbackMinutes = 5;
 const defaultSupportEmail = "ej.egmanalytics@gmail.com";
 
+function buildEmailFallbackDueAt() {
+  return new Date(Date.now() + fallbackMinutes * 60 * 1000).toISOString();
+}
+
 export async function createChatMessageNotification({
   supabase,
   request,
@@ -62,7 +66,7 @@ export async function createChatMessageNotification({
     recipientUserId,
   );
   const emailFallbackDueAt = preferences.email_enabled
-    ? new Date(Date.now() + fallbackMinutes * 60 * 1000).toISOString()
+    ? buildEmailFallbackDueAt()
     : null;
 
   const { error } = await supabase.from("app_notifications").insert({
@@ -117,23 +121,32 @@ export async function createAppointmentNotification({
     tenantId,
     recipientUserId,
   );
-  const emailFallbackDueAt = preferences.email_enabled
-    ? new Date(Date.now() + fallbackMinutes * 60 * 1000).toISOString()
-    : null;
-
-  const { error } = await supabase.from("app_notifications").insert({
-    tenant_id: tenantId,
-    user_id: recipientUserId,
-    patient_id: patientId,
-    type: "appointment",
-    title,
-    body,
-    href: "agenda",
-    email_fallback_due_at: emailFallbackDueAt,
-  });
+  const { data: notification, error } = await supabase
+    .from("app_notifications")
+    .insert({
+      tenant_id: tenantId,
+      user_id: recipientUserId,
+      patient_id: patientId,
+      type: "appointment",
+      title,
+      body,
+      href: "agenda",
+      email_fallback_due_at: null,
+    })
+    .select("id,tenant_id,user_id,patient_id,type,title,body,href,related_message_id,read_at")
+    .single();
 
   if (error) {
     console.error("Could not create appointment notification", error.message);
+    return;
+  }
+
+  if (preferences.email_enabled && notification) {
+    await sendImmediateNotificationEmail({
+      supabase,
+      request,
+      notification: notification as AppNotificationRow,
+    });
   }
 
   if (preferences.push_enabled) {
@@ -144,6 +157,50 @@ export async function createAppointmentNotification({
       userId: recipientUserId,
     });
   }
+}
+
+async function sendImmediateNotificationEmail({
+  supabase,
+  request,
+  notification,
+}: {
+  supabase: SupabaseClient;
+  request: Request;
+  notification: AppNotificationRow;
+}) {
+  const email = await getUserEmail(supabase, notification.user_id);
+  if (!email) {
+    await supabase
+      .from("app_notifications")
+      .update({
+        email_error: "Usuario sin email.",
+        email_fallback_due_at: buildEmailFallbackDueAt(),
+      })
+      .eq("id", notification.id);
+    return;
+  }
+
+  const emailResult = await sendNotificationEmail({
+    request,
+    to: email,
+    notification,
+  });
+
+  await supabase
+    .from("app_notifications")
+    .update(
+      emailResult.ok
+        ? {
+            email_sent_at: new Date().toISOString(),
+            email_error: null,
+            email_fallback_due_at: null,
+          }
+        : {
+            email_error: emailResult.error,
+            email_fallback_due_at: buildEmailFallbackDueAt(),
+          },
+    )
+    .eq("id", notification.id);
 }
 
 export async function processDueAppEmailFallbacks({
