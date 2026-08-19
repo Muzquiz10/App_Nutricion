@@ -151,12 +151,15 @@ test("appointment notifications require customer confirmation and email fallback
   const notificationServer = await readFile(notificationServerPath, "utf8");
 
   assert.match(source, /Cita enviada al cliente para confirmar/);
+  assert.match(source, /Citas pendientes de confirmar/);
   assert.match(source, /Confirmar cita/);
+  assert.match(source, /selectedDraftPatientIsValid/);
   assert.match(source, /isPendingPatientConfirmation/);
   assert.match(source, /isPendingNutritionistConfirmation/);
   assert.match(source, /notification\.href === "agenda"/);
   assert.match(calendarRoute, /createAppointmentNotification/);
   assert.match(calendarRoute, /canPatientConfirmAppointment/);
+  assert.match(calendarRoute, /insertRow\.event_type === "appointment" && insertRow\.status === "pending"/);
   assert.match(calendarRoute, /Cita pendiente de confirmar/);
   assert.match(calendarRoute, /Cita confirmada por el cliente/);
   assert.match(notificationServer, /type: "appointment"/);

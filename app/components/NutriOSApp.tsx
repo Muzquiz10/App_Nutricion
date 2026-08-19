@@ -7629,6 +7629,9 @@ function PatientAgendaPanel({
   const patientEvents = calendarEvents
     .filter((event) => event.patient_id === selectedPatient?.id)
     .sort(compareCalendarEvents);
+  const pendingPatientAppointments = patientEvents.filter((event) =>
+    isPendingPatientConfirmation(event, selectedPatient),
+  );
   const availableSlots = useMemo(
     () => buildAvailableAppointmentSlots(availabilitySlots, calendarBusySlots, 28),
     [availabilitySlots, calendarBusySlots],
@@ -7768,6 +7771,59 @@ function PatientAgendaPanel({
         )}
       </Panel>
 
+      {pendingPatientAppointments.length > 0 && (
+        <Panel>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-lg font-black">Citas pendientes de confirmar</h2>
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                Tu nutricionista ha propuesto estas citas. Confirma la que te encaje.
+              </p>
+            </div>
+            <span className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#fff8df] px-3 text-sm font-black text-[#8a6a20]">
+              <Bell className="size-4" />
+              {pendingPatientAppointments.length}
+            </span>
+          </div>
+          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {pendingPatientAppointments.map((event) => (
+              <article
+                key={event.id}
+                className="rounded-lg border border-[#ead39b] bg-[#fff8df] p-4 text-sm"
+              >
+                <p className="font-black text-[#24342f]">{formatDate(event.start_at)}</p>
+                <p className="mt-1 text-xs font-semibold text-[#6b5420]">
+                  {formatAgendaTimeRange(event.start_at, event.end_at)}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {event.appointment_mode && (
+                    <span className="rounded-md bg-white px-2 py-1 text-xs font-black text-[#39433f]">
+                      {formatAppointmentMode(event.appointment_mode)}
+                    </span>
+                  )}
+                  <span className="rounded-md bg-white px-2 py-1 text-xs font-black text-[#8a5c18]">
+                    Pendiente
+                  </span>
+                </div>
+                {event.notes && (
+                  <p className="mt-3 line-clamp-2 text-xs leading-5 text-[#4a554f]">
+                    {event.notes}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-3 text-sm font-black text-white"
+                  onClick={() => confirmProposedAppointment(event)}
+                >
+                  <Check className="size-4" />
+                  Confirmar cita
+                </button>
+              </article>
+            ))}
+          </div>
+        </Panel>
+      )}
+
       <AgendaCalendar
         title="Calendario"
         events={patientEvents}
@@ -7831,7 +7887,12 @@ function NutritionistAgendaPanel({
   const pendingAppointments = visibleEvents.filter(
     (event) => isPendingNutritionistConfirmation(event, patients),
   );
-  const appointmentPatientId = appointmentDraft.patientId || patients[0]?.id || "";
+  const selectedDraftPatientIsValid = patients.some(
+    (patient) => patient.id === appointmentDraft.patientId,
+  );
+  const appointmentPatientId = selectedDraftPatientIsValid
+    ? appointmentDraft.patientId
+    : patients[0]?.id || "";
   const availableSlots = useMemo(
     () => buildAvailableAppointmentSlots(availabilitySlots, calendarBusySlots, 28),
     [availabilitySlots, calendarBusySlots],

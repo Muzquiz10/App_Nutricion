@@ -169,7 +169,10 @@ async function createCalendarEvent(
     .select("*")
     .single();
 
-  if (isCalendarStatusConstraintError(error)) {
+  if (
+    isCalendarStatusConstraintError(error) &&
+    !(insertRow.event_type === "appointment" && insertRow.status === "pending")
+  ) {
     insertRow = toLegacyCalendarInsert(insertRow);
     const legacyInsert = await supabase
       .from("calendar_events")
