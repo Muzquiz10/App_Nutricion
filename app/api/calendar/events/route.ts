@@ -48,12 +48,14 @@ type CalendarNotificationPatient = {
 };
 
 type CalendarEventsBody = {
-  action?: "create" | "update-status" | "update-video-url";
+  action?: "create" | "update-status" | "update-video-url" | "reschedule";
   eventId?: string;
   row?: CalendarEventRow;
   status?: CalendarEventStatus;
   title?: string;
   videoUrl?: string | null;
+  startAt?: string;
+  endAt?: string;
 };
 
 export async function POST(request: Request) {
@@ -106,6 +108,17 @@ export async function POST(request: Request) {
       user.id,
       body.eventId,
       body.videoUrl,
+    );
+  }
+
+  if (body.action === "reschedule") {
+    return rescheduleCalendarEvent(
+      supabase,
+      request,
+      user.id,
+      body.eventId,
+      body.startAt,
+      body.endAt,
     );
   }
 
@@ -252,8 +265,14 @@ async function updateCalendarEventStatus(
     userId,
     status,
   );
+  const patientCanCancel = await canPatientCancelAppointment(
+    supabase,
+    storedEvent,
+    userId,
+    status,
+  );
 
-  if (!isNutritionist && !patientCanConfirm) {
+  if (!isNutritionist && !patientCanConfirm && !patientCanCancel) {
     return NextResponse.json(
       { error: "No tienes permisos para modificar esta cita." },
       { status: 403 },
@@ -365,6 +384,130 @@ async function updateCalendarEventVideoUrl(
       { status: 500 },
     );
   }
+
+  return NextResponse.json({ ok: true });
+}
+
+async function rescheduleCalendarEvent(
+  supabase: Awaited<ReturnType<typeof getSupabaseAdmin>>,
+  request: Request,
+  userId: string,
+  eventId: string | undefined,
+  startAt: string | undefined,
+  endAt: string | undefined,
+) {
+  if (!supabase) {
+    return NextResponse.json(
+      { error: "Supabase no esta configurado en el servidor." },
+      { status: 500 },
+    );
+  }
+
+  if (!eventId || !startAt || !endAt) {
+    return NextResponse.json(
+      { error: "Faltan cita, fecha u hora para cambiar la cita." },
+      { status: 400 },
+    );
+  }
+
+  if (new Date(endAt).getTime() <= new Date(startAt).getTime()) {
+    return NextResponse.json(
+      { error: "La hora de fin debe ser posterior a la hora de inicio." },
+      { status: 400 },
+    );
+  }
+
+  const { data: event, error: eventError } = await supabase
+    .from("calendar_events")
+    .select("id,tenant_id,patient_id,created_by,title,event_type,appointment_mode,start_at,end_at,status")
+    .eq("id", eventId)
+    .maybeSingle();
+
+  if (eventError || !event) {
+    return NextResponse.json({ error: "Evento no encontrado." }, { status: 404 });
+  }
+
+  const storedEvent = event as StoredCalendarEvent;
+  if (storedEvent.event_type !== "appointment" || !storedEvent.patient_id) {
+    return NextResponse.json(
+      { error: "Solo se puede cambiar fecha u hora de una cita." },
+      { status: 400 },
+    );
+  }
+
+  if (storedEvent.status === "cancelled") {
+    return NextResponse.json(
+      { error: "No se puede cambiar una cita cancelada." },
+      { status: 400 },
+    );
+  }
+
+  const membership = await getMembership(supabase, storedEvent.tenant_id, userId);
+  const isNutritionist = isActiveNutritionist(membership);
+  const isPatientOwner = await getActivePatientForUser(
+    supabase,
+    storedEvent.tenant_id,
+    storedEvent.patient_id,
+    userId,
+  );
+
+  if (!isNutritionist && !isPatientOwner) {
+    return NextResponse.json(
+      { error: "No tienes permisos para cambiar esta cita." },
+      { status: 403 },
+    );
+  }
+
+  const pendingTitle = isNutritionist
+    ? storedEvent.title
+    : LEGACY_PENDING_APPOINTMENT_TITLE;
+  let updateRow = {
+    start_at: startAt,
+    end_at: endAt,
+    status: "pending" as CalendarEventStatus,
+    created_by: userId,
+    blocks_availability: true,
+    ...(pendingTitle ? { title: pendingTitle } : {}),
+  };
+
+  let { error } = await supabase
+    .from("calendar_events")
+    .update(updateRow)
+    .eq("id", eventId);
+
+  if (isCalendarStatusConstraintError(error)) {
+    updateRow = {
+      ...updateRow,
+      status: "scheduled" as CalendarEventStatus,
+      title: LEGACY_PENDING_APPOINTMENT_TITLE,
+    };
+    const legacyUpdate = await supabase
+      .from("calendar_events")
+      .update(updateRow)
+      .eq("id", eventId);
+    error = legacyUpdate.error;
+  }
+
+  if (error) {
+    return NextResponse.json(
+      { error: formatCalendarDatabaseError(error) },
+      { status: 500 },
+    );
+  }
+
+  await notifyCalendarEventRescheduled({
+    supabase,
+    request,
+    userId,
+    event: {
+      ...storedEvent,
+      start_at: startAt,
+      end_at: endAt,
+      status: "pending",
+      created_by: userId,
+    },
+    isNutritionist,
+  });
 
   return NextResponse.json({ ok: true });
 }
@@ -488,6 +631,57 @@ async function notifyCalendarEventStatusUpdated({
   }
 }
 
+async function notifyCalendarEventRescheduled({
+  supabase,
+  request,
+  userId,
+  event,
+  isNutritionist,
+}: {
+  supabase: NonNullable<Awaited<ReturnType<typeof getSupabaseAdmin>>>;
+  request: Request;
+  userId: string;
+  event: StoredCalendarEvent;
+  isNutritionist: boolean;
+}) {
+  if (event.event_type !== "appointment" || !event.patient_id) return;
+
+  const patient = await getCalendarNotificationPatient(
+    supabase,
+    event.tenant_id,
+    event.patient_id,
+  );
+  if (!patient) return;
+
+  const when = formatAppointmentWhen(event);
+
+  if (isNutritionist) {
+    const tenantName = await getTenantName(supabase, event.tenant_id);
+    await createAppointmentNotification({
+      supabase,
+      request,
+      tenantId: event.tenant_id,
+      patientId: patient.id,
+      recipientUserId: patient.user_id,
+      actorUserId: userId,
+      title: "Nueva propuesta de cita",
+      body: `${tenantName} te ha propuesto cambiar la cita a ${when}. Entra en Agenda para confirmarla.`,
+    });
+    return;
+  }
+
+  await createAppointmentNotification({
+    supabase,
+    request,
+    tenantId: event.tenant_id,
+    patientId: patient.id,
+    recipientUserId: patient.nutritionist_user_id,
+    actorUserId: userId,
+    title: "Nueva propuesta de cambio",
+    body: `${patient.full_name} ha propuesto cambiar la cita a ${when}. Entra en Agenda para revisarla.`,
+  });
+}
+
 function validateCalendarRow(row: CalendarEventRow | undefined) {
   if (!row?.tenant_id || !row.title || !row.event_type || !row.start_at || !row.end_at) {
     return "Faltan datos para guardar la agenda.";
@@ -584,6 +778,26 @@ async function canPatientConfirmAppointment(
   if (nextStatus !== "confirmed") return false;
   if (!isPendingAppointment(event) || !event.patient_id) return false;
   if (!event.created_by || event.created_by === userId) return false;
+
+  const patient = await getActivePatientForUser(
+    supabase,
+    event.tenant_id,
+    event.patient_id,
+    userId,
+  );
+
+  return Boolean(patient);
+}
+
+async function canPatientCancelAppointment(
+  supabase: Awaited<ReturnType<typeof getSupabaseAdmin>>,
+  event: StoredCalendarEvent,
+  userId: string,
+  nextStatus: CalendarEventStatus | undefined,
+) {
+  if (!supabase) return false;
+  if (nextStatus !== "cancelled") return false;
+  if (event.event_type !== "appointment" || !event.patient_id) return false;
 
   const patient = await getActivePatientForUser(
     supabase,

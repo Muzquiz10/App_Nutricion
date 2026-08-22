@@ -8146,7 +8146,7 @@ function ActivitiesPanel({
       durationSeconds != null &&
       (!Number.isInteger(durationSeconds) || durationSeconds < 0 || durationSeconds > 86400)
     ) {
-      onNotice("Duracion de actividad no valida.");
+      onNotice("Duración de actividad no válida.");
       return;
     }
 
@@ -9170,6 +9170,8 @@ function PatientAgendaPanel({
   const [selectedBookingDate, setSelectedBookingDate] = useState(getLocalDateString());
   const [appointmentMode, setAppointmentMode] = useState<AppointmentMode>("online");
   const [bookingSlotId, setBookingSlotId] = useState("");
+  const [rescheduleEvent, setRescheduleEvent] = useState<CalendarEvent | null>(null);
+  const [rescheduling, setRescheduling] = useState(false);
   const patientEvents = calendarEvents
     .filter((event) => event.patient_id === selectedPatient?.id)
     .sort(compareCalendarEvents);
@@ -9245,6 +9247,52 @@ function PatientAgendaPanel({
     await onReload();
   }
 
+  async function cancelAppointment(event: CalendarEvent) {
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para cancelar citas reales.");
+      return;
+    }
+
+    const { error } = await postCalendarEventMutation(supabase, {
+      action: "update-status",
+      eventId: event.id,
+      status: "cancelled",
+    });
+
+    if (error) {
+      onNotice(error);
+      return;
+    }
+
+    onNotice("Cita cancelada. Tu nutricionista recibirá la notificación.");
+    await onReload();
+  }
+
+  async function rescheduleAppointment(event: CalendarEvent, startAt: string, endAt: string) {
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para cambiar citas reales.");
+      return;
+    }
+
+    setRescheduling(true);
+    const { error } = await postCalendarEventMutation(supabase, {
+      action: "reschedule",
+      eventId: event.id,
+      startAt,
+      endAt,
+    });
+    setRescheduling(false);
+
+    if (error) {
+      onNotice(error);
+      return;
+    }
+
+    setRescheduleEvent(null);
+    onNotice("Propuesta de cambio enviada. Queda pendiente de confirmar.");
+    await onReload();
+  }
+
   return (
     <div className="grid gap-5">
       <Panel>
@@ -9305,7 +9353,7 @@ function PatientAgendaPanel({
                       </button>
                     ))}
                     {selectedDaySlots.length === 0 && (
-                      <EmptyState text="No hay horas disponibles en este dia." />
+                      <EmptyState text="No hay horas disponibles en este día." />
                     )}
                   </div>
                 </div>
@@ -9362,6 +9410,14 @@ function PatientAgendaPanel({
                   <Check className="size-4" />
                   Confirmar cita
                 </button>
+                <button
+                  type="button"
+                  className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-black text-[#39433f]"
+                  onClick={() => setRescheduleEvent(event)}
+                >
+                  <CalendarDays className="size-4 text-[var(--tenant-color)]" />
+                  Proponer otra fecha/hora
+                </button>
               </article>
             ))}
           </div>
@@ -9374,7 +9430,23 @@ function PatientAgendaPanel({
         patients={selectedPatient ? [selectedPatient] : []}
         confirmablePatient={selectedPatient}
         onConfirm={confirmProposedAppointment}
+        onCancel={cancelAppointment}
+        onReschedule={setRescheduleEvent}
       />
+      {rescheduleEvent && (
+        <AppointmentRescheduleDialog
+          event={rescheduleEvent}
+          mode="slots"
+          availableSlots={availableSlots}
+          saving={rescheduling}
+          title="Proponer otra fecha/hora"
+          submitLabel="Enviar propuesta"
+          onSubmit={(startAt, endAt) =>
+            rescheduleAppointment(rescheduleEvent, startAt, endAt)
+          }
+          onClose={() => setRescheduleEvent(null)}
+        />
+      )}
     </div>
   );
 }
@@ -9427,6 +9499,8 @@ function NutritionistAgendaPanel({
   const [activeAgendaTool, setActiveAgendaTool] =
     useState<"" | "availability" | "appointment" | "event">("");
   const [savingAgenda, setSavingAgenda] = useState(false);
+  const [rescheduleEvent, setRescheduleEvent] = useState<CalendarEvent | null>(null);
+  const [rescheduling, setRescheduling] = useState(false);
   const visibleEvents = [...calendarEvents].sort(compareCalendarEvents);
   const pendingAppointments = visibleEvents.filter(
     (event) => isPendingNutritionistConfirmation(event, patients),
@@ -9633,6 +9707,31 @@ function NutritionistAgendaPanel({
     onNotice("Enlace de videollamada guardado.");
     await onReload();
     return true;
+  }
+
+  async function rescheduleAppointment(event: CalendarEvent, startAt: string, endAt: string) {
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para cambiar citas reales.");
+      return;
+    }
+
+    setRescheduling(true);
+    const { error } = await postCalendarEventMutation(supabase, {
+      action: "reschedule",
+      eventId: event.id,
+      startAt,
+      endAt,
+    });
+    setRescheduling(false);
+
+    if (error) {
+      onNotice(error);
+      return;
+    }
+
+    setRescheduleEvent(null);
+    onNotice("Cambio de cita enviado al cliente para confirmar.");
+    await onReload();
   }
 
   return (
@@ -9941,6 +10040,7 @@ function NutritionistAgendaPanel({
           patients={patients}
           onConfirm={confirmAppointment}
           onCancel={cancelEvent}
+          onReschedule={setRescheduleEvent}
           onSaveVideoUrl={saveAppointmentVideoUrl}
         />
       )}
@@ -9951,6 +10051,7 @@ function NutritionistAgendaPanel({
           events={visibleEvents}
           patients={patients}
           onCancel={cancelEvent}
+          onReschedule={setRescheduleEvent}
           onSaveVideoUrl={saveAppointmentVideoUrl}
         />
         <Panel>
@@ -9978,6 +10079,19 @@ function NutritionistAgendaPanel({
           </div>
         </Panel>
       </div>
+      {rescheduleEvent && (
+        <AppointmentRescheduleDialog
+          event={rescheduleEvent}
+          mode="manual"
+          saving={rescheduling}
+          title="Cambiar fecha/hora"
+          submitLabel="Enviar cambio"
+          onSubmit={(startAt, endAt) =>
+            rescheduleAppointment(rescheduleEvent, startAt, endAt)
+          }
+          onClose={() => setRescheduleEvent(null)}
+        />
+      )}
     </div>
   );
 }
@@ -9988,6 +10102,7 @@ function AgendaCalendar({
   patients,
   onCancel,
   onConfirm,
+  onReschedule,
   onSaveVideoUrl,
   confirmablePatient,
 }: {
@@ -9996,9 +10111,14 @@ function AgendaCalendar({
   patients: Patient[];
   onCancel?: (event: CalendarEvent) => void;
   onConfirm?: (event: CalendarEvent) => void;
+  onReschedule?: (event: CalendarEvent) => void;
   onSaveVideoUrl?: (event: CalendarEvent, videoUrl: string) => Promise<boolean>;
   confirmablePatient?: Patient | null;
 }) {
+  const [expandedDay, setExpandedDay] = useState<{
+    dateKey: string;
+    events: CalendarEvent[];
+  } | null>(null);
   const weeks = getAgendaWeeks(4);
   const eventsByDay = groupCalendarEventsByDay(events);
 
@@ -10063,6 +10183,7 @@ function AgendaCalendar({
                           patientName={getPatientName(patients, event.patient_id)}
                           onCancel={onCancel}
                           onConfirm={onConfirm}
+                          onReschedule={onReschedule}
                           onSaveVideoUrl={onSaveVideoUrl}
                           canConfirm={
                             Boolean(confirmablePatient) &&
@@ -10071,9 +10192,18 @@ function AgendaCalendar({
                         />
                       ))}
                       {dayEvents.length > 3 && (
-                        <p className="rounded-md bg-white px-2 py-1 text-xs font-black text-[var(--muted)]">
-                          +{dayEvents.length - 3} mas
-                        </p>
+                        <button
+                          type="button"
+                          className="rounded-md bg-white px-2 py-1 text-left text-xs font-black text-[var(--tenant-color)] ring-1 ring-[var(--line)] transition hover:ring-[var(--tenant-color)]"
+                          onClick={() =>
+                            setExpandedDay({
+                              dateKey: day.dateKey,
+                              events: dayEvents,
+                            })
+                          }
+                        >
+                          +{dayEvents.length - 3} más
+                        </button>
                       )}
                       {dayEvents.length === 0 && (
                         <p className="rounded-lg border border-dashed border-[var(--line)] bg-white/70 px-2 py-4 text-center text-xs font-semibold text-[var(--muted)]">
@@ -10088,7 +10218,238 @@ function AgendaCalendar({
           ))}
         </div>
       </div>
+      {expandedDay && (
+        <AgendaDayEventsDialog
+          dateKey={expandedDay.dateKey}
+          events={expandedDay.events}
+          patients={patients}
+          confirmablePatient={confirmablePatient}
+          onCancel={onCancel}
+          onConfirm={onConfirm}
+          onReschedule={onReschedule}
+          onSaveVideoUrl={onSaveVideoUrl}
+          onClose={() => setExpandedDay(null)}
+        />
+      )}
     </Panel>
+  );
+}
+
+function AgendaDayEventsDialog({
+  dateKey,
+  events,
+  patients,
+  confirmablePatient,
+  onCancel,
+  onConfirm,
+  onReschedule,
+  onSaveVideoUrl,
+  onClose,
+}: {
+  dateKey: string;
+  events: CalendarEvent[];
+  patients: Patient[];
+  confirmablePatient?: Patient | null;
+  onCancel?: (event: CalendarEvent) => void;
+  onConfirm?: (event: CalendarEvent) => void;
+  onReschedule?: (event: CalendarEvent) => void;
+  onSaveVideoUrl?: (event: CalendarEvent, videoUrl: string) => Promise<boolean>;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#121715]/45 px-4 py-6">
+      <div className="max-h-[86vh] w-full max-w-2xl overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-[0_22px_70px_rgba(24,32,29,0.28)]">
+        <div className="flex items-start justify-between gap-3 border-b border-[var(--line)] p-4">
+          <div>
+            <p className="text-xs font-black uppercase text-[var(--tenant-color)]">
+              Agenda del día
+            </p>
+            <h2 className="mt-1 text-lg font-black">
+              {formatBookingDateLabel(dateKey)}
+            </h2>
+          </div>
+          <button
+            type="button"
+            className="grid size-9 shrink-0 place-items-center rounded-lg border border-[var(--line)] bg-white text-[#39433f]"
+            onClick={onClose}
+            title="Cerrar"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="grid max-h-[68vh] gap-3 overflow-y-auto p-4 scrollbar-thin">
+          {events.map((event) => (
+            <AgendaEventCard
+              key={event.id}
+              event={event}
+              patientName={getPatientName(patients, event.patient_id)}
+              onCancel={onCancel}
+              onConfirm={onConfirm}
+              onReschedule={
+                onReschedule
+                  ? (event) => {
+                      onReschedule(event);
+                      onClose();
+                    }
+                  : undefined
+              }
+              onSaveVideoUrl={onSaveVideoUrl}
+              canConfirm={
+                Boolean(confirmablePatient) &&
+                isPendingPatientConfirmation(event, confirmablePatient)
+              }
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AppointmentRescheduleDialog({
+  event,
+  mode,
+  availableSlots = [],
+  saving,
+  title,
+  submitLabel,
+  onSubmit,
+  onClose,
+}: {
+  event: CalendarEvent;
+  mode: "slots" | "manual";
+  availableSlots?: AvailableAppointmentSlot[];
+  saving: boolean;
+  title: string;
+  submitLabel: string;
+  onSubmit: (startAt: string, endAt: string) => void;
+  onClose: () => void;
+}) {
+  const initialDate = getLocalDateString(new Date(event.start_at));
+  const [selectedDate, setSelectedDate] = useState(
+    availableSlots[0]?.dateKey ?? initialDate,
+  );
+  const [manualDate, setManualDate] = useState(initialDate);
+  const [manualStartTime, setManualStartTime] = useState(formatTimeOnly(event.start_at));
+  const [manualDuration, setManualDuration] = useState(
+    String(
+      Math.max(
+        15,
+        Math.round(
+          (new Date(event.end_at).getTime() - new Date(event.start_at).getTime()) /
+            60000,
+        ),
+      ),
+    ),
+  );
+  const selectedDaySlots = availableSlots.filter(
+    (slot) => slot.dateKey === selectedDate,
+  );
+
+  function submitManual(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const startAt = buildLocalDateTimeIso(manualDate, manualStartTime);
+    const endAt = addMinutesIso(startAt, Number(manualDuration) || 60);
+    onSubmit(startAt, endAt);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#121715]/45 px-4 py-6">
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-[0_22px_70px_rgba(24,32,29,0.28)]">
+        <div className="flex items-start justify-between gap-3 border-b border-[var(--line)] p-4">
+          <div>
+            <p className="text-xs font-black uppercase text-[var(--tenant-color)]">
+              Cita
+            </p>
+            <h2 className="mt-1 text-lg font-black">{title}</h2>
+            <p className="mt-1 text-sm font-semibold text-[var(--muted)]">
+              Actual: {formatDate(event.start_at)} - {formatAgendaTimeRange(event.start_at, event.end_at)}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="grid size-9 shrink-0 place-items-center rounded-lg border border-[var(--line)] bg-white text-[#39433f]"
+            onClick={onClose}
+            title="Cerrar"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="max-h-[76vh] overflow-y-auto p-4 scrollbar-thin">
+          {mode === "slots" ? (
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+              <BookingCalendar
+                availableSlots={availableSlots}
+                selectedDate={selectedDate}
+                onSelectDate={setSelectedDate}
+              />
+              <div className="rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3">
+                <p className="text-sm font-black text-[#24342f]">
+                  {formatBookingDateLabel(selectedDate)}
+                </p>
+                <div className="mt-3 grid gap-2">
+                  {selectedDaySlots.map((slot) => (
+                    <button
+                      key={slot.id}
+                      type="button"
+                      className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-left text-sm transition hover:border-[var(--tenant-color)] disabled:opacity-60"
+                      onClick={() => onSubmit(slot.startAt, slot.endAt)}
+                      disabled={saving}
+                    >
+                      <span className="font-black text-[#24342f]">
+                        {formatAgendaTimeRange(slot.startAt, slot.endAt)}
+                      </span>
+                      {saving ? (
+                        <Loader2 className="size-4 shrink-0 animate-spin text-[var(--tenant-color)]" />
+                      ) : (
+                        <ChevronRight className="size-4 shrink-0 text-[var(--tenant-color)]" />
+                      )}
+                    </button>
+                  ))}
+                  {selectedDaySlots.length === 0 && (
+                    <EmptyState text="No hay horas disponibles en este día." />
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <form className="grid gap-4 sm:grid-cols-3" onSubmit={submitManual}>
+              <Field
+                label="Fecha"
+                type="date"
+                value={manualDate}
+                onChange={setManualDate}
+                required
+              />
+              <Field
+                label="Hora"
+                type="time"
+                value={manualStartTime}
+                onChange={setManualStartTime}
+                required
+              />
+              <Field
+                label="Duración (min)"
+                type="number"
+                value={manualDuration}
+                onChange={setManualDuration}
+                required
+              />
+              <div className="sm:col-span-3">
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
+                  disabled={saving}
+                >
+                  {saving ? <Loader2 className="size-4 animate-spin" /> : <CalendarDays className="size-4" />}
+                  {submitLabel}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -10174,12 +10535,14 @@ function PendingAppointmentsPanel({
   patients,
   onConfirm,
   onCancel,
+  onReschedule,
   onSaveVideoUrl,
 }: {
   events: CalendarEvent[];
   patients: Patient[];
   onConfirm: (event: CalendarEvent) => void;
   onCancel: (event: CalendarEvent) => void;
+  onReschedule: (event: CalendarEvent) => void;
   onSaveVideoUrl?: (event: CalendarEvent, videoUrl: string) => Promise<boolean>;
 }) {
   return (
@@ -10227,7 +10590,7 @@ function PendingAppointmentsPanel({
                 onSaveVideoUrl={onSaveVideoUrl}
               />
             )}
-            <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
               <button
                 type="button"
                 className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-3 text-xs font-black text-white"
@@ -10235,6 +10598,14 @@ function PendingAppointmentsPanel({
               >
                 <Check className="size-4" />
                 Confirmar
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-xs font-black text-[#39433f]"
+                onClick={() => onReschedule(event)}
+              >
+                <CalendarDays className="size-4 text-[var(--tenant-color)]" />
+                Proponer
               </button>
               <button
                 type="button"
@@ -10257,6 +10628,7 @@ function AgendaEventCard({
   patientName,
   onCancel,
   onConfirm,
+  onReschedule,
   onSaveVideoUrl,
   canConfirm = false,
 }: {
@@ -10264,10 +10636,15 @@ function AgendaEventCard({
   patientName: string;
   onCancel?: (event: CalendarEvent) => void;
   onConfirm?: (event: CalendarEvent) => void;
+  onReschedule?: (event: CalendarEvent) => void;
   onSaveVideoUrl?: (event: CalendarEvent, videoUrl: string) => Promise<boolean>;
   canConfirm?: boolean;
 }) {
   const meta = getCalendarEventMeta(event);
+  const canChangeAppointment =
+    Boolean(onReschedule) &&
+    event.event_type === "appointment" &&
+    event.status !== "cancelled";
 
   return (
     <article className={`min-w-0 overflow-hidden rounded-lg border p-2 text-xs ${meta.className}`}>
@@ -10316,6 +10693,16 @@ function AgendaEventCard({
         >
           <Check className="size-3.5" />
           Confirmar cita
+        </button>
+      )}
+      {canChangeAppointment && (
+        <button
+          type="button"
+          className="mt-2 inline-flex h-8 w-full items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-2 text-[11px] font-black text-[#39433f]"
+          onClick={() => onReschedule?.(event)}
+        >
+          <CalendarDays className="size-3.5 text-[var(--tenant-color)]" />
+          Cambiar fecha/hora
         </button>
       )}
       {onCancel && event.status !== "cancelled" && (
@@ -10488,6 +10875,12 @@ async function postCalendarEventMutation(
         action: "update-video-url";
         eventId: string;
         videoUrl: string;
+      }
+    | {
+        action: "reschedule";
+        eventId: string;
+        startAt: string;
+        endAt: string;
       },
 ) {
   if (!supabase) {
