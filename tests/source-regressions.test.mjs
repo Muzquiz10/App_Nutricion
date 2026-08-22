@@ -100,6 +100,9 @@ test("diet builder keeps serving fields and weekly calendar", async () => {
   assert.match(source, /Duplicar dieta/);
   assert.match(source, /Activar dieta/);
   assert.match(source, /Desactivar dieta/);
+  assert.match(source, /normalizeMealType/);
+  assert.match(source, /Media tarde"\) return "Merienda"/);
+  assert.match(source, /normalizeMealType\(item\.meal_type\) === normalizeMealType\(mealType\)/);
   assert.match(source, /printing-diet-calendar/);
   assert.match(source, /diet-print-header/);
   assert.match(sql, /add column if not exists quantity/i);

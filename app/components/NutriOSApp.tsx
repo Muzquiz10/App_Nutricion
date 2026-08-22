@@ -553,7 +553,7 @@ const calendarEventTypeOptions: Array<{ value: CalendarEventType; label: string 
 const mealTypeOrder = new Map<string, number>([
   ...mealTypes.map((mealType, index) => [mealType, index] as const),
   ["Media mañana", 1],
-  ["Merienda", 3],
+  ["Media tarde", 3],
 ]);
 const mealPhotoTypeOrder = new Map(
   mealPhotoTypes.map((mealType, index) => [mealType, index]),
@@ -5395,7 +5395,7 @@ function getMealItemsForDay(plan: MealPlan, dayIndex: number) {
 
 function getMealItemsForCell(plan: MealPlan, dayIndex: number, mealType: string) {
   return getMealItemsForDay(plan, dayIndex).filter(
-    (item) => formatMealTypeLabel(item.meal_type) === mealType,
+    (item) => normalizeMealType(item.meal_type) === normalizeMealType(mealType),
   );
 }
 
@@ -5785,11 +5785,16 @@ function parseMealQuantity(value: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function formatMealTypeLabel(mealType: string) {
-  if (mealType === "Media mañana") return "Almuerzo";
-  if (mealType === "Merienda") return "Media tarde";
+function normalizeMealType(mealType: string) {
+  const normalizedMealType = mealType.trim();
+  if (normalizedMealType === "Media mañana") return "Almuerzo";
+  if (normalizedMealType === "Media tarde") return "Merienda";
 
-  return mealType;
+  return normalizedMealType;
+}
+
+function formatMealTypeLabel(mealType: string) {
+  return normalizeMealType(mealType);
 }
 
 function formatMealUnit(unit: string) {
@@ -10747,7 +10752,7 @@ function getLogDateKey(value: string) {
 }
 
 function getMealTypePosition(mealType: string) {
-  return mealTypeOrder.get(mealType) ?? mealTypes.length;
+  return mealTypeOrder.get(normalizeMealType(mealType)) ?? mealTypes.length;
 }
 
 function getMealPhotoTypePosition(mealType: string | null) {
