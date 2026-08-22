@@ -40,6 +40,7 @@ import {
   Target,
   Trash2,
   Upload,
+  User,
   UserPlus,
   Video,
   Users,
@@ -93,6 +94,8 @@ type Patient = {
   exercise_routine: string | null;
   exercise_hours_per_week: number | null;
   exercise_type: string | null;
+  profile_photo_path?: string | null;
+  profile_photo_url?: string | null;
   questionnaire_version?: number;
   questionnaire_completed_at?: string | null;
   status?: "active" | "inactive" | "archived";
@@ -465,6 +468,12 @@ type PatientConsultationsResponse = {
   consultation?: PatientConsultation;
 };
 
+type PatientProfilePhotoResponse = {
+  error?: string;
+  ok?: boolean;
+  profilePhotoPath?: string | null;
+};
+
 type DeleteMealPhotoResponse = {
   error?: string;
   ok?: boolean;
@@ -592,6 +601,7 @@ const activityOptions = [
   label: label || "Tipo de Actividad",
 }));
 const maxLogoFileSizeBytes = 2 * 1024 * 1024;
+const maxProfilePhotoSizeBytes = 2 * 1024 * 1024;
 const maxMealPhotoDimension = 1600;
 const mealPhotoQuality = 0.82;
 const weekdayOptions = [
@@ -1255,6 +1265,23 @@ export function NutriOSApp({
     [supabase],
   );
 
+  const withPatientPhotoUrls = useCallback(
+    async (rows: Patient[]) => {
+      if (!supabase) return rows;
+      return Promise.all(
+        rows.map(async (row) => {
+          if (!row.profile_photo_path) return row;
+          const { data } = await supabase.storage
+            .from("nutrios-private")
+            .createSignedUrl(row.profile_photo_path, 60 * 60);
+
+          return { ...row, profile_photo_url: data?.signedUrl };
+        }),
+      );
+    },
+    [supabase],
+  );
+
   const sendAnalyticsEvent = useCallback(
     async (eventPayload: AnalyticsEventPayload, keepalive = false) => {
       if (!supabase || !role || !sessionUserId || !tenant.id || tenant.id === "common-login") {
@@ -1458,7 +1485,7 @@ export function NutriOSApp({
             .order("registered_at", { ascending: false });
 
     const { data: patientRows } = await patientQuery;
-    const loadedPatients = (patientRows ?? []) as Patient[];
+    const loadedPatients = await withPatientPhotoUrls((patientRows ?? []) as Patient[]);
     setPatients(loadedPatients);
     setSelectedPatientId((currentPatientId) =>
       loadedPatients.some((patient) => patient.id === currentPatientId)
@@ -1592,6 +1619,7 @@ export function NutriOSApp({
     setSelectedPatientId,
     supabase,
     tenantSlug,
+    withPatientPhotoUrls,
     withSignedUrls,
   ]);
 
@@ -2106,6 +2134,8 @@ export function NutriOSApp({
                 const tabLabel =
                   role === "patient" && tab.id === "patients"
                     ? "Mi Ficha Personal"
+                    : role !== "patient" && tab.id === "patients"
+                      ? "Página de Inicio"
                     : role === "patient" && tab.id === "agenda"
                       ? "Citas"
                       : tab.label;
@@ -2205,6 +2235,9 @@ export function NutriOSApp({
                 pendingInvitations={pendingInvitations}
                 selectedPatient={selectedPatient}
                 weights={weights}
+                calendarEvents={calendarEvents}
+                messages={messages}
+                currentUserId={sessionUserId}
                 onSelectPatient={setSelectedPatientId}
                 onNotice={setNotice}
                 onReload={loadWorkspace}
@@ -3350,16 +3383,19 @@ function PatientSwitcher({
         {patients.map((patient) => (
           <button
             key={patient.id}
-            className={`rounded-lg border px-2.5 py-2 text-left text-xs transition ${
+            className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs transition ${
               patient.id === selectedPatientId
                 ? "border-[var(--tenant-color)] bg-white text-[#17201d]"
                 : "border-transparent text-[#59645f] hover:bg-white"
             }`}
             onClick={() => onSelect(patient.id)}
           >
-            <span className="block truncate font-black leading-4">{patient.full_name}</span>
-            <span className="block truncate text-[11px] font-semibold text-[var(--muted)]">
-              {patient.patient_code}
+            <PatientAvatar patient={patient} size="sm" />
+            <span className="min-w-0">
+              <span className="block truncate font-black leading-4">{patient.full_name}</span>
+              <span className="block truncate text-[11px] font-semibold text-[var(--muted)]">
+                {patient.patient_code}
+              </span>
             </span>
           </button>
         ))}
@@ -3379,6 +3415,9 @@ function PatientsPanel({
   pendingInvitations,
   selectedPatient,
   weights,
+  calendarEvents,
+  messages,
+  currentUserId,
   onSelectPatient,
   onNotice,
   onReload,
@@ -3389,6 +3428,9 @@ function PatientsPanel({
   pendingInvitations: PendingInvitation[];
   selectedPatient: Patient | null;
   weights: WeightLog[];
+  calendarEvents: CalendarEvent[];
+  messages: ChatMessage[];
+  currentUserId: string;
   onSelectPatient: (id: string) => void;
   onNotice: (message: string) => void;
   onReload: () => Promise<void>;
@@ -3409,6 +3451,9 @@ function PatientsPanel({
   const currentBmi = selectedPatient
     ? calculateBmi(currentWeight, selectedPatient.height_cm)
     : null;
+  const appointmentEvents = calendarEvents.filter(
+    (event) => event.event_type === "appointment" && event.patient_id,
+  );
 
   async function updatePatientStatus(patient: Patient, status: "active" | "inactive") {
     if (!supabase) {
@@ -3481,14 +3526,26 @@ function PatientsPanel({
 
   return (
     <div className="grid gap-5">
+      <NutritionistHomeDashboard
+        patients={patients}
+        appointmentEvents={appointmentEvents}
+        messages={messages}
+        currentUserId={currentUserId}
+        onSelectPatient={selectPatient}
+      />
       <Panel>
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-lg font-black">
-            {patientView === "active" && "Clientes"}
-            {patientView === "pending" && "Pendientes de aceptar"}
-            {patientView === "inactive" && "Clientes antiguos"}
-          </h2>
-          <span className="rounded-lg bg-[#eef3f0] px-3 py-1 text-sm font-semibold text-[#53605a]">
+        <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase text-[var(--tenant-color)]">
+              Página de Inicio
+            </p>
+            <h2 className="text-lg font-black">
+              {patientView === "active" && "Clientes"}
+              {patientView === "pending" && "Pendientes de aceptar"}
+              {patientView === "inactive" && "Clientes antiguos"}
+            </h2>
+          </div>
+          <span className="w-fit rounded-lg bg-[#eef3f0] px-3 py-1 text-sm font-semibold text-[#53605a]">
             {patientView === "active" && activePatients.length}
             {patientView === "pending" && pendingInvitations.length}
             {patientView === "inactive" && inactivePatients.length}
@@ -3560,6 +3617,385 @@ function PatientsPanel({
         onNotice={onNotice}
       />
     </div>
+  );
+}
+
+function NutritionistHomeDashboard({
+  patients,
+  appointmentEvents,
+  messages,
+  currentUserId,
+  onSelectPatient,
+}: {
+  patients: Patient[];
+  appointmentEvents: CalendarEvent[];
+  messages: ChatMessage[];
+  currentUserId: string;
+  onSelectPatient: (id: string) => void;
+}) {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const patientsById = new Map(patients.map((patient) => [patient.id, patient]));
+  const upcomingAppointments = appointmentEvents
+    .filter((event) => new Date(event.start_at).getTime() >= now.getTime())
+    .filter((event) => event.status !== "cancelled")
+    .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+  const nextAppointment = upcomingAppointments[0] ?? null;
+  const completedThisMonth = appointmentEvents.filter((event) => {
+    const start = new Date(event.start_at);
+    return (
+      event.status === "confirmed" &&
+      start >= monthStart &&
+      start < monthEnd &&
+      start.getTime() < now.getTime()
+    );
+  });
+  const newPatientsThisMonth = patients.filter((patient) => {
+    const registeredAt = new Date(patient.registered_at);
+    return registeredAt >= monthStart && registeredAt < monthEnd;
+  });
+  const patientAppointmentCounts = new Map<string, number>();
+  appointmentEvents
+    .filter((event) => event.status === "confirmed")
+    .forEach((event) => {
+      if (!event.patient_id) return;
+      patientAppointmentCounts.set(
+        event.patient_id,
+        (patientAppointmentCounts.get(event.patient_id) ?? 0) + 1,
+      );
+    });
+  const repeatedAppointmentPatients = Array.from(patientAppointmentCounts.values()).filter(
+    (count) => count > 1,
+  ).length;
+  const sentMessagesThisMonth = messages.filter((message) => {
+    const createdAt = new Date(message.created_at);
+    return (
+      message.sender_id === currentUserId &&
+      createdAt >= monthStart &&
+      createdAt < monthEnd
+    );
+  });
+  const cancelledAppointments = appointmentEvents
+    .filter((event) => event.status === "cancelled")
+    .sort((a, b) => new Date(b.start_at).getTime() - new Date(a.start_at).getTime())
+    .slice(0, 3);
+  const latestMessages = messages
+    .slice()
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 3);
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
+      <Panel>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-black">Página de Inicio</h2>
+          <span className="rounded-lg bg-[#eef3f0] px-3 py-1 text-xs font-black text-[#53605a]">
+            Hoy
+          </span>
+        </div>
+
+        <div className="mt-5">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="text-sm font-black">Próxima consulta</p>
+            {nextAppointment && (
+              <span className="rounded-md bg-[#eaf4ef] px-2 py-1 text-xs font-bold text-[#255d50]">
+                {formatRelativeAppointmentTime(nextAppointment.start_at)}
+              </span>
+            )}
+          </div>
+          {nextAppointment ? (
+            <AppointmentHighlightCard
+              event={nextAppointment}
+              patient={patientsById.get(nextAppointment.patient_id ?? "") ?? null}
+              onSelectPatient={onSelectPatient}
+            />
+          ) : (
+            <EmptyState text="No hay consultas próximas." />
+          )}
+        </div>
+
+        <div className="mt-6">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="text-sm font-black">Próximas consultas</p>
+            <span className="text-xs font-bold text-[var(--muted)]">
+              {upcomingAppointments.length} programada{upcomingAppointments.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="grid gap-2">
+            {upcomingAppointments.slice(1, 4).map((event) => (
+              <AppointmentListRow
+                key={event.id}
+                event={event}
+                patient={patientsById.get(event.patient_id ?? "") ?? null}
+                onSelectPatient={onSelectPatient}
+              />
+            ))}
+            {upcomingAppointments.slice(1, 4).length === 0 && (
+              <p className="rounded-lg border border-dashed border-[#d8d1c4] bg-[#fbfaf6] px-4 py-4 text-sm font-semibold text-[var(--muted)]">
+                Sin más consultas próximas.
+              </p>
+            )}
+          </div>
+        </div>
+      </Panel>
+
+      <div className="grid gap-4">
+        <Panel>
+          <h2 className="text-lg font-black">Mis estadísticas mensuales</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <DashboardMetricCard
+              icon={Users}
+              label="Nuevos clientes"
+              value={String(newPatientsThisMonth.length)}
+              tone="pink"
+            />
+            <DashboardMetricCard
+              icon={CalendarDays}
+              label="Citas completadas"
+              value={String(completedThisMonth.length)}
+              tone="blue"
+            />
+            <DashboardMetricCard
+              icon={ShieldCheck}
+              label="Clientes con > 1 cita"
+              value={`${repeatedAppointmentPatients}`}
+              tone="green"
+            />
+            <DashboardMetricCard
+              icon={MessageCircle}
+              label="Mensajes enviados"
+              value={String(sentMessagesThisMonth.length)}
+              tone="yellow"
+            />
+          </div>
+        </Panel>
+
+        <Panel>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-black">Actividad reciente</h2>
+            <span className="text-xs font-bold text-[var(--muted)]">
+              Citas canceladas y últimos mensajes
+            </span>
+          </div>
+          <div className="mt-4 grid gap-4">
+            <RecentActivityBlock
+              title="Citas canceladas"
+              emptyText="No hay citas canceladas recientes."
+              items={cancelledAppointments.map((event) => ({
+                id: event.id,
+                patient: patientsById.get(event.patient_id ?? "") ?? null,
+                label: formatDateTime(event.start_at),
+                detail: event.title,
+              }))}
+              onSelectPatient={onSelectPatient}
+            />
+            <RecentActivityBlock
+              title="Últimos mensajes"
+              emptyText="No hay mensajes recientes."
+              items={latestMessages.map((message) => ({
+                id: message.id,
+                patient: patientsById.get(message.patient_id) ?? null,
+                label: formatDateTime(message.created_at),
+                detail: message.body,
+              }))}
+              onSelectPatient={onSelectPatient}
+            />
+          </div>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function AppointmentHighlightCard({
+  event,
+  patient,
+  onSelectPatient,
+}: {
+  event: CalendarEvent;
+  patient: Patient | null;
+  onSelectPatient: (id: string) => void;
+}) {
+  return (
+    <article className="rounded-lg border border-[#c7e7dd] bg-[#effaf5] p-4">
+      <div className="flex items-start gap-3">
+        <PatientAvatar patient={patient} size="md" />
+        <div className="min-w-0 flex-1">
+          <p className="font-black">{patient?.full_name ?? event.title}</p>
+          <p className="mt-1 text-sm font-semibold text-[var(--muted)]">
+            {formatDateTime(event.start_at)} - {formatTimeOnly(event.end_at)}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold">
+            <span className="rounded-md bg-white px-2 py-1 text-[#255d50]">
+              {formatAppointmentMode(event.appointment_mode)}
+            </span>
+            <span className="rounded-md bg-white px-2 py-1 text-[#53605a]">
+              {formatDurationBetween(event.start_at, event.end_at)}
+            </span>
+          </div>
+        </div>
+      </div>
+      {patient && (
+        <button
+          type="button"
+          className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white"
+          onClick={() => onSelectPatient(patient.id)}
+        >
+          Iniciar consulta
+          <ChevronRight className="size-4" />
+        </button>
+      )}
+    </article>
+  );
+}
+
+function AppointmentListRow({
+  event,
+  patient,
+  onSelectPatient,
+}: {
+  event: CalendarEvent;
+  patient: Patient | null;
+  onSelectPatient: (id: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-white p-3 text-left transition hover:border-[var(--tenant-color)]"
+      onClick={() => patient && onSelectPatient(patient.id)}
+      disabled={!patient}
+    >
+      <PatientAvatar patient={patient} size="sm" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-black">{patient?.full_name ?? event.title}</span>
+        <span className="mt-1 block text-xs font-semibold text-[var(--muted)]">
+          {formatDateTime(event.start_at)} - {formatAppointmentMode(event.appointment_mode)}
+        </span>
+      </span>
+      <ChevronRight className="size-4 text-[var(--muted)]" />
+    </button>
+  );
+}
+
+function DashboardMetricCard({
+  icon: Icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: typeof Users;
+  label: string;
+  value: string;
+  tone: "pink" | "blue" | "green" | "yellow";
+}) {
+  const toneClass = {
+    pink: "bg-[#fff0f2] text-[#b84f59]",
+    blue: "bg-[#eef7fb] text-[#305d8a]",
+    green: "bg-[#effaf5] text-[#255d50]",
+    yellow: "bg-[#fff8df] text-[#8a6a20]",
+  }[tone];
+
+  return (
+    <div className="rounded-lg border border-[var(--line)] bg-white p-3">
+      <div className="flex items-center gap-3">
+        <span className={`grid size-10 place-items-center rounded-lg ${toneClass}`}>
+          <Icon className="size-5" />
+        </span>
+        <div>
+          <p className="text-xl font-black">{value}</p>
+          <p className="text-xs font-semibold text-[var(--muted)]">{label}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RecentActivityBlock({
+  title,
+  emptyText,
+  items,
+  onSelectPatient,
+}: {
+  title: string;
+  emptyText: string;
+  items: Array<{
+    id: string;
+    patient: Patient | null;
+    label: string;
+    detail: string;
+  }>;
+  onSelectPatient: (id: string) => void;
+}) {
+  return (
+    <div>
+      <p className="mb-2 text-sm font-black">{title}</p>
+      <div className="grid gap-2">
+        {items.map((item) => (
+          <button
+            type="button"
+            key={item.id}
+            className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-white p-3 text-left transition hover:border-[var(--tenant-color)]"
+            onClick={() => item.patient && onSelectPatient(item.patient.id)}
+            disabled={!item.patient}
+          >
+            <PatientAvatar patient={item.patient} size="sm" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-black">
+                {item.patient?.full_name ?? "Sin cliente"}
+              </span>
+              <span className="mt-1 block truncate text-xs font-semibold text-[var(--muted)]">
+                {item.label} - {item.detail}
+              </span>
+            </span>
+          </button>
+        ))}
+        {items.length === 0 && (
+          <p className="rounded-lg border border-dashed border-[#d8d1c4] bg-[#fbfaf6] px-3 py-3 text-sm font-semibold text-[var(--muted)]">
+            {emptyText}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PatientAvatar({
+  patient,
+  size = "md",
+}: {
+  patient: Patient | null;
+  size?: "sm" | "md" | "lg" | "xl";
+}) {
+  const sizeClass = {
+    sm: "size-9",
+    md: "size-11",
+    lg: "size-14",
+    xl: "size-20",
+  }[size];
+  const iconClass = {
+    sm: "size-4",
+    md: "size-5",
+    lg: "size-6",
+    xl: "size-9",
+  }[size];
+
+  return (
+    <span
+      className={`grid ${sizeClass} shrink-0 place-items-center overflow-hidden rounded-full border border-[#d6ecdf] bg-[#effaf5] text-[var(--tenant-color)] shadow-sm`}
+      aria-label={patient ? `Foto de ${patient.full_name}` : "Avatar de cliente"}
+    >
+      {patient?.profile_photo_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={patient.profile_photo_url}
+          alt=""
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <User className={iconClass} />
+      )}
+    </span>
   );
 }
 
@@ -4276,25 +4712,30 @@ function PatientCards({
               className="block w-full text-left"
             >
               <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="font-black">{patient.full_name}</p>
-                  <p className="mt-1 text-xs font-semibold text-[var(--muted)]">
-                    {patient.patient_code}
-                  </p>
-                  <span
-                    className={`mt-2 inline-flex rounded-md px-2 py-1 text-xs font-bold ${
-                      inactive
-                        ? "bg-[#f5eee3] text-[#795548]"
-                        : "bg-[#effaf5] text-[#255d50]"
-                    }`}
-                  >
-                    {inactive ? "Antiguo/inactivo" : "Activo"}
-                  </span>
-                  {needsQuestionnaireUpdate(patient) && (
-                    <span className="mt-2 inline-flex rounded-md bg-[#fff8df] px-2 py-1 text-xs font-bold text-[#6b5420]">
-                      Ficha pendiente
-                    </span>
-                  )}
+                <div className="flex min-w-0 items-start gap-3">
+                  <PatientAvatar patient={patient} size="md" />
+                  <div className="min-w-0">
+                    <p className="truncate font-black">{patient.full_name}</p>
+                    <p className="mt-1 text-xs font-semibold text-[var(--muted)]">
+                      {patient.patient_code}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <span
+                        className={`inline-flex rounded-md px-2 py-1 text-xs font-bold ${
+                          inactive
+                            ? "bg-[#f5eee3] text-[#795548]"
+                            : "bg-[#effaf5] text-[#255d50]"
+                        }`}
+                      >
+                        {inactive ? "Antiguo/inactivo" : "Activo"}
+                      </span>
+                      {needsQuestionnaireUpdate(patient) && (
+                        <span className="inline-flex rounded-md bg-[#fff8df] px-2 py-1 text-xs font-bold text-[#6b5420]">
+                          Ficha pendiente
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
                 <ChevronRight className="size-4 text-[var(--muted)]" />
               </div>
@@ -4428,6 +4869,8 @@ function PatientQuestionnairePanel({
       emptyQuestionnaireDraft,
   );
   const [saving, setSaving] = useState(false);
+  const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
+  const [savingProfilePhoto, setSavingProfilePhoto] = useState(false);
 
   if (!patient) {
     return (
@@ -4489,6 +4932,73 @@ function PatientQuestionnairePanel({
     await onReload();
   }
 
+  async function saveProfilePhoto() {
+    if (!supabase || !patient) {
+      onNotice("Modo demo: conecta Supabase para actualizar fotos reales.");
+      return;
+    }
+
+    if (!profilePhotoFile) {
+      onNotice("Selecciona una foto antes de guardar.");
+      return;
+    }
+
+    if (!profilePhotoFile.type.startsWith("image/")) {
+      onNotice("Selecciona un archivo de imagen.");
+      return;
+    }
+
+    if (profilePhotoFile.size > maxProfilePhotoSizeBytes) {
+      onNotice(`La foto no puede superar ${formatFileSize(maxProfilePhotoSizeBytes)}.`);
+      return;
+    }
+
+    setSavingProfilePhoto(true);
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) {
+      setSavingProfilePhoto(false);
+      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+      return;
+    }
+
+    const path = `${patient.tenant_id}/${patient.id}/profile-photos/${Date.now()}-${safeFileName(profilePhotoFile.name)}`;
+    const { error: uploadError } = await supabase.storage
+      .from("nutrios-private")
+      .upload(path, profilePhotoFile, {
+        contentType: profilePhotoFile.type || "image/jpeg",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      setSavingProfilePhoto(false);
+      onNotice(uploadError.message);
+      return;
+    }
+
+    const response = await fetch("/api/patients/profile-photo", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        patientId: patient.id,
+        profilePhotoPath: path,
+      }),
+    });
+    const payload = (await response.json()) as PatientProfilePhotoResponse;
+    setSavingProfilePhoto(false);
+
+    if (!response.ok) {
+      onNotice(payload.error ?? "No se pudo guardar la foto de perfil.");
+      return;
+    }
+
+    setProfilePhotoFile(null);
+    onNotice("Foto de perfil actualizada.");
+    await onReload();
+  }
+
   function updateQuestionnaireDraft(
     key: keyof typeof emptyQuestionnaireDraft,
     value: string,
@@ -4519,6 +5029,43 @@ function PatientQuestionnairePanel({
         >
           {needsUpdate ? "Pendiente" : "Actualizada"}
         </span>
+      </div>
+      <div className="mt-5 grid gap-4 rounded-lg border border-[var(--line)] bg-white p-4 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
+        <PatientAvatar patient={patient} size="xl" />
+        <div className="min-w-0">
+          <p className="font-black">Foto de perfil</p>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Visible para ti y para tu profesional. Máximo {formatFileSize(maxProfilePhotoSizeBytes)}.
+          </p>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <label className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-[#fbfaf6] px-4 text-sm font-black text-[#39433f] hover:border-[var(--tenant-color)]">
+              <ImagePlus className="size-4 text-[var(--tenant-color)]" />
+              Elegir foto
+              <input
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                onChange={(event) => {
+                  setProfilePhotoFile(event.target.files?.[0] ?? null);
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
+              onClick={saveProfilePhoto}
+              disabled={!profilePhotoFile || savingProfilePhoto}
+            >
+              <Upload className="size-4" />
+              {savingProfilePhoto ? "Subiendo..." : "Guardar foto"}
+            </button>
+          </div>
+          <p className="mt-2 truncate text-xs font-semibold text-[var(--muted)]">
+            {profilePhotoFile
+              ? `${profilePhotoFile.name} (${formatFileSize(profilePhotoFile.size)})`
+              : "Sin archivo nuevo seleccionado."}
+          </p>
+        </div>
       </div>
       <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={saveQuestionnaire}>
         <Field
@@ -4621,13 +5168,16 @@ function PatientRecord({
   return (
     <Panel className={className}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h2 className="text-lg font-black">
-            {role === "patient" ? "Mi ficha personal" : "Ficha del cliente"}
-          </h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Alta: {formatDate(patient.registered_at)} - ID: {patient.patient_code}
-          </p>
+        <div className="flex min-w-0 items-center gap-3">
+          <PatientAvatar patient={patient} size="lg" />
+          <div className="min-w-0">
+            <h2 className="text-lg font-black">
+              {role === "patient" ? "Mi ficha personal" : "Ficha del cliente"}
+            </h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Alta: {formatDate(patient.registered_at)} - ID: {patient.patient_code}
+            </p>
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           {needsQuestionnaireUpdate(patient) && (
@@ -11325,12 +11875,41 @@ function buildConfirmedAppointmentTitle(event: CalendarEvent, patients: Patient[
   return patientName ? `Cita con ${patientName}` : "Cita con nutricionista";
 }
 
-function formatAppointmentMode(mode: AppointmentMode) {
+function formatAppointmentMode(mode: AppointmentMode | null) {
+  if (!mode) return "Sin modalidad";
   return mode === "online" ? "Online" : "Presencial";
 }
 
 function formatAgendaTimeRange(startAt: string, endAt: string) {
   return `${formatPhotoTime(startAt)} - ${formatPhotoTime(endAt)}`;
+}
+
+function formatTimeOnly(value: string) {
+  return new Intl.DateTimeFormat("es-ES", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function formatDurationBetween(startAt: string, endAt: string) {
+  const minutes = Math.max(
+    0,
+    Math.round((new Date(endAt).getTime() - new Date(startAt).getTime()) / 60000),
+  );
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours} h ${remainingMinutes} min` : `${hours} h`;
+}
+
+function formatRelativeAppointmentTime(startAt: string) {
+  const diffMinutes = Math.round((new Date(startAt).getTime() - Date.now()) / 60000);
+  if (diffMinutes <= 0) return "Ahora";
+  if (diffMinutes < 60) return `En ${diffMinutes} min`;
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return `En ${diffHours} h`;
+  const diffDays = Math.round(diffHours / 24);
+  return `En ${diffDays} d`;
 }
 
 function buildLocalDateTimeIso(dateKey: string, time: string) {
@@ -11954,6 +12533,7 @@ function getAnalyticsDeviceType() {
 
 function getAnalyticsTabLabel(tabId: TabId, role: UserRole) {
   if (role === "patient" && tabId === "patients") return "Mi Ficha Personal";
+  if (role !== "patient" && tabId === "patients") return "Página de Inicio";
   if (role === "patient" && tabId === "agenda") return "Citas";
   return tabs.find((tab) => tab.id === tabId)?.label ?? tabId;
 }

@@ -32,6 +32,10 @@ const patientConsultationsMigrationPath = new URL(
   "../supabase/migrations/202608220001_patient_consultations.sql",
   import.meta.url,
 );
+const patientProfilePhotoMigrationPath = new URL(
+  "../supabase/migrations/202608220002_patient_profile_photo.sql",
+  import.meta.url,
+);
 const trackingRoutePath = new URL("../app/api/tracking/logs/route.ts", import.meta.url);
 const exerciseRoutePath = new URL("../app/api/tracking/exercises/route.ts", import.meta.url);
 const analyticsRoutePath = new URL("../app/api/analytics/events/route.ts", import.meta.url);
@@ -39,6 +43,10 @@ const chatSendRoutePath = new URL("../app/api/chat/send/route.ts", import.meta.u
 const calendarEventsRoutePath = new URL("../app/api/calendar/events/route.ts", import.meta.url);
 const patientConsultationsRoutePath = new URL(
   "../app/api/patients/consultations/route.ts",
+  import.meta.url,
+);
+const patientProfilePhotoRoutePath = new URL(
+  "../app/api/patients/profile-photo/route.ts",
   import.meta.url,
 );
 const notificationServerPath = new URL("../app/lib/notifications/server.ts", import.meta.url);
@@ -88,6 +96,27 @@ test("goals tab is first and goals panel stays only there", async () => {
   );
   assert.match(source, /activeTab === "goals" && \(\s*<GoalsPanel/);
   assert.doesNotMatch(source, /goals-panel-open/);
+});
+
+test("nutritionist home dashboard replaces visible clients tab and profile photos are private", async () => {
+  const source = await readFile(componentPath, "utf8");
+  const route = await readFile(patientProfilePhotoRoutePath, "utf8");
+  const sql = await readFile(patientProfilePhotoMigrationPath, "utf8");
+
+  assert.match(source, /role !== "patient" && tab\.id === "patients"/);
+  assert.match(source, /Página de Inicio/);
+  assert.match(source, /NutritionistHomeDashboard/);
+  assert.match(source, /Próxima consulta/);
+  assert.match(source, /Mis estadísticas mensuales/);
+  assert.match(source, /Actividad reciente/);
+  assert.match(source, /PatientAvatar/);
+  assert.match(source, /profile_photo_url/);
+  assert.match(source, /\/api\/patients\/profile-photo/);
+  assert.match(source, /profile-photos/);
+  assert.match(route, /eq\("user_id", user\.id\)/);
+  assert.match(route, /profile_photo_path/);
+  assert.match(route, /nutrios-private/);
+  assert.match(sql, /add column if not exists profile_photo_path/i);
 });
 
 test("diet builder keeps serving fields and weekly calendar", async () => {
