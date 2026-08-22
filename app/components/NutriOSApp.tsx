@@ -540,6 +540,19 @@ const tabs: Array<{
   { id: "settings", label: "Configuración", icon: SettingsIcon },
 ];
 
+const professionalTabOrder: TabId[] = [
+  "patients",
+  "goals",
+  "plans",
+  "activities",
+  "stats",
+  "chat",
+  "documents",
+  "agenda",
+  "notifications",
+  "settings",
+];
+
 const dayLabels = [
   "Lunes",
   "Martes",
@@ -1177,6 +1190,7 @@ export function NutriOSApp({
   const [authPassword, setAuthPassword] = useState("");
   const [sendingRecovery, setSendingRecovery] = useState(false);
   const hasResolvedWorkspace = useRef(!supabase);
+  const initialRoleTabAligned = useRef(false);
 
   useEffect(() => {
     if (activeTab === "tracking") {
@@ -1188,6 +1202,15 @@ export function NutriOSApp({
       setActiveTab("stats");
     }
 
+  }, [activeTab, role, setActiveTab]);
+
+  useEffect(() => {
+    if (!role || initialRoleTabAligned.current) return;
+    initialRoleTabAligned.current = true;
+
+    if (role !== "patient" && activeTab === "goals") {
+      setActiveTab("patients");
+    }
   }, [activeTab, role, setActiveTab]);
 
   const selectedPatient = patients.find((patient) => patient.id === selectedPatientId) ?? null;
@@ -1228,6 +1251,7 @@ export function NutriOSApp({
     activeStartedAt: 0,
   });
   const accessTokenRef = useRef("");
+  const visibleTabs = useMemo(() => getVisibleTabsForRole(role), [role]);
 
   function handleSidebarEnter() {
     if (!sidebarCollapsedAfterClick) {
@@ -1697,6 +1721,39 @@ export function NutriOSApp({
   }, [sessionUserId, supabase]);
 
   useEffect(() => {
+    if (!supabase || !tenant.id || tenant.id === "common-login") return;
+
+    const channel = supabase
+      .channel(`dietdesk-patients-${tenant.id}-${sessionUserId || "anonymous"}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "patients",
+          filter: `tenant_id=eq.${tenant.id}`,
+        },
+        (payload) => {
+          void (async () => {
+            const [updatedPatient] = await withPatientPhotoUrls([payload.new as Patient]);
+            setPatients((current) =>
+              current.map((patient) =>
+                patient.id === updatedPatient.id
+                  ? { ...patient, ...updatedPatient }
+                  : patient,
+              ),
+            );
+          })();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [sessionUserId, supabase, tenant.id, withPatientPhotoUrls]);
+
+  useEffect(() => {
     if (!supabase || !role || !tenant.id) return;
 
     async function processEmailFallbacks() {
@@ -2125,10 +2182,7 @@ export function NutriOSApp({
           </div>
 
           <nav className="mt-5 flex gap-2 overflow-x-auto pb-1 lg:mt-4 lg:grid lg:min-h-0 lg:flex-1 lg:content-start lg:gap-1.5 lg:overflow-y-auto lg:overflow-x-hidden lg:pb-2 lg:pr-1 scrollbar-thin">
-            {tabs
-              .filter((tab) => !tab.patientOnly || role === "patient")
-              .filter((tab) => !tab.nutritionistOnly || role !== "patient")
-              .map((tab) => {
+            {visibleTabs.map((tab) => {
                 const Icon = tab.icon;
                 const active = activeTab === tab.id;
                 const tabLabel =
@@ -3438,6 +3492,8 @@ function PatientsPanel({
 }) {
   const [patientView, setPatientView] = useState<PatientListView>("active");
   const [patientDetailTab, setPatientDetailTab] = useState<PatientDetailTab>("record");
+  const [onlineConsultationEvent, setOnlineConsultationEvent] =
+    useState<CalendarEvent | null>(null);
   const activePatients = patients.filter(isActivePatient);
   const inactivePatients = patients.filter(isInactivePatient);
   const selectedPatientWeights = useMemo(
@@ -3500,6 +3556,42 @@ function PatientsPanel({
     onSelectPatient(patientId);
   }
 
+  function openPatientConsultation(patientId: string) {
+    onSelectPatient(patientId);
+    setPatientDetailTab("consultations");
+  }
+
+  function startAppointmentConsultation(event: CalendarEvent) {
+    const patientId = event.patient_id;
+    if (!patientId) {
+      onNotice("Esta cita no tiene cliente vinculado.");
+      return;
+    }
+
+    if (event.appointment_mode === "online") {
+      setOnlineConsultationEvent(event);
+      return;
+    }
+
+    openPatientConsultation(patientId);
+  }
+
+  function openOnlineConsultation() {
+    if (!onlineConsultationEvent?.video_url) {
+      onNotice("Esta cita online no tiene enlace de videollamada.");
+      return;
+    }
+
+    window.open(onlineConsultationEvent.video_url, "_blank", "noopener,noreferrer");
+    setOnlineConsultationEvent(null);
+  }
+
+  function goToOnlineConsultationRecord() {
+    if (!onlineConsultationEvent?.patient_id) return;
+    openPatientConsultation(onlineConsultationEvent.patient_id);
+    setOnlineConsultationEvent(null);
+  }
+
   if (role === "patient") {
     return (
       <div className="grid gap-4 lg:grid-cols-4">
@@ -3532,6 +3624,7 @@ function PatientsPanel({
         messages={messages}
         currentUserId={currentUserId}
         onSelectPatient={selectPatient}
+        onStartAppointment={startAppointmentConsultation}
       />
       <Panel>
         <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
@@ -3616,6 +3709,18 @@ function PatientsPanel({
         supabase={supabase}
         onNotice={onNotice}
       />
+      {onlineConsultationEvent && (
+        <OnlineConsultationChoiceDialog
+          event={onlineConsultationEvent}
+          patientName={
+            patients.find((patient) => patient.id === onlineConsultationEvent.patient_id)
+              ?.full_name ?? "Cliente"
+          }
+          onOpenOnline={openOnlineConsultation}
+          onGoToConsultation={goToOnlineConsultationRecord}
+          onClose={() => setOnlineConsultationEvent(null)}
+        />
+      )}
     </div>
   );
 }
@@ -3626,12 +3731,14 @@ function NutritionistHomeDashboard({
   messages,
   currentUserId,
   onSelectPatient,
+  onStartAppointment,
 }: {
   patients: Patient[];
   appointmentEvents: CalendarEvent[];
   messages: ChatMessage[];
   currentUserId: string;
   onSelectPatient: (id: string) => void;
+  onStartAppointment: (event: CalendarEvent) => void;
 }) {
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -3708,7 +3815,7 @@ function NutritionistHomeDashboard({
             <AppointmentHighlightCard
               event={nextAppointment}
               patient={patientsById.get(nextAppointment.patient_id ?? "") ?? null}
-              onSelectPatient={onSelectPatient}
+              onStartAppointment={onStartAppointment}
             />
           ) : (
             <EmptyState text="No hay consultas próximas." />
@@ -3811,11 +3918,11 @@ function NutritionistHomeDashboard({
 function AppointmentHighlightCard({
   event,
   patient,
-  onSelectPatient,
+  onStartAppointment,
 }: {
   event: CalendarEvent;
   patient: Patient | null;
-  onSelectPatient: (id: string) => void;
+  onStartAppointment: (event: CalendarEvent) => void;
 }) {
   return (
     <article className="rounded-lg border border-[#c7e7dd] bg-[#effaf5] p-4">
@@ -3840,13 +3947,77 @@ function AppointmentHighlightCard({
         <button
           type="button"
           className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white"
-          onClick={() => onSelectPatient(patient.id)}
+          onClick={() => onStartAppointment(event)}
         >
           Iniciar consulta
           <ChevronRight className="size-4" />
         </button>
       )}
     </article>
+  );
+}
+
+function OnlineConsultationChoiceDialog({
+  event,
+  patientName,
+  onOpenOnline,
+  onGoToConsultation,
+  onClose,
+}: {
+  event: CalendarEvent;
+  patientName: string;
+  onOpenOnline: () => void;
+  onGoToConsultation: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#121715]/45 px-4 py-6">
+      <div className="w-full max-w-md rounded-lg border border-[var(--line)] bg-[var(--panel)] p-5 shadow-[0_22px_70px_rgba(24,32,29,0.28)]">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-black uppercase text-[var(--tenant-color)]">
+              Consulta online
+            </p>
+            <h2 className="mt-1 text-lg font-black">{patientName}</h2>
+            <p className="mt-1 text-sm font-semibold text-[var(--muted)]">
+              {formatDateTime(event.start_at)} - {formatTimeOnly(event.end_at)}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="grid size-9 shrink-0 place-items-center rounded-lg border border-[var(--line)] bg-white text-[#39433f]"
+            onClick={onClose}
+            title="Cerrar"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="mt-5 grid gap-3">
+          <button
+            type="button"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-50"
+            onClick={onOpenOnline}
+            disabled={!event.video_url}
+          >
+            <Video className="size-4" />
+            Abrir Consulta Online
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-black text-[#39433f]"
+            onClick={onGoToConsultation}
+          >
+            <FileText className="size-4 text-[var(--tenant-color)]" />
+            Ir a Consulta
+          </button>
+        </div>
+        {!event.video_url && (
+          <p className="mt-3 rounded-lg border border-[#e8d9aa] bg-[#fff8df] px-3 py-2 text-sm font-semibold text-[#6b5420]">
+            Esta cita online no tiene enlace de videollamada guardado.
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -4871,6 +5042,7 @@ function PatientQuestionnairePanel({
   const [saving, setSaving] = useState(false);
   const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
   const [savingProfilePhoto, setSavingProfilePhoto] = useState(false);
+  const [profileCameraOpen, setProfileCameraOpen] = useState(false);
 
   if (!patient) {
     return (
@@ -5052,6 +5224,14 @@ function PatientQuestionnairePanel({
             </label>
             <button
               type="button"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-[#fbfaf6] px-4 text-sm font-black text-[#39433f] hover:border-[var(--tenant-color)]"
+              onClick={() => setProfileCameraOpen(true)}
+            >
+              <Camera className="size-4 text-[var(--tenant-color)]" />
+              Abrir cámara
+            </button>
+            <button
+              type="button"
               className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
               onClick={saveProfilePhoto}
               disabled={!profilePhotoFile || savingProfilePhoto}
@@ -5067,6 +5247,12 @@ function PatientQuestionnairePanel({
           </p>
         </div>
       </div>
+      {profileCameraOpen && (
+        <ProfilePhotoCameraDialog
+          onCapture={(file) => setProfilePhotoFile(file)}
+          onClose={() => setProfileCameraOpen(false)}
+        />
+      )}
       <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={saveQuestionnaire}>
         <Field
           label="Nombre y apellidos"
@@ -5144,6 +5330,142 @@ function PatientQuestionnairePanel({
         </div>
       </form>
     </Panel>
+  );
+}
+
+function ProfilePhotoCameraDialog({
+  onCapture,
+  onClose,
+}: {
+  onCapture: (file: File) => void;
+  onClose: () => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [cameraError, setCameraError] = useState("");
+  const [cameraReady, setCameraReady] = useState(false);
+
+  useEffect(() => {
+    let stream: MediaStream | null = null;
+    let cancelled = false;
+
+    async function openCamera() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError("Este navegador no permite abrir la cámara desde la web.");
+        return;
+      }
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: false,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          setCameraReady(true);
+        }
+      } catch {
+        setCameraError("No se pudo abrir la cámara. Revisa los permisos del navegador.");
+      }
+    }
+
+    void openCamera();
+
+    return () => {
+      cancelled = true;
+      stream?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  function capturePhoto() {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    const width = video.videoWidth || 900;
+    const height = video.videoHeight || 900;
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    context.drawImage(video, 0, 0, width, height);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        onCapture(
+          new File([blob], `foto-perfil-${Date.now()}.jpg`, {
+            type: "image/jpeg",
+          }),
+        );
+        onClose();
+      },
+      "image/jpeg",
+      0.9,
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#121715]/45 px-4 py-6">
+      <div className="w-full max-w-lg rounded-lg border border-[var(--line)] bg-[var(--panel)] p-5 shadow-[0_22px_70px_rgba(24,32,29,0.28)]">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-black uppercase text-[var(--tenant-color)]">
+              Foto de perfil
+            </p>
+            <h2 className="mt-1 text-lg font-black">Abrir cámara</h2>
+          </div>
+          <button
+            type="button"
+            className="grid size-9 shrink-0 place-items-center rounded-lg border border-[var(--line)] bg-white text-[#39433f]"
+            onClick={onClose}
+            title="Cerrar"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="mt-4 overflow-hidden rounded-lg border border-[var(--line)] bg-[#111815]">
+          <video
+            ref={videoRef}
+            className="aspect-video w-full object-cover"
+            autoPlay
+            muted
+            playsInline
+          />
+          <canvas ref={canvasRef} className="hidden" />
+        </div>
+
+        {cameraError && (
+          <p className="mt-3 rounded-lg border border-[#e8d9aa] bg-[#fff8df] px-3 py-2 text-sm font-semibold text-[#6b5420]">
+            {cameraError}
+          </p>
+        )}
+
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-50"
+            onClick={capturePhoto}
+            disabled={!cameraReady || Boolean(cameraError)}
+          >
+            <Camera className="size-4" />
+            Usar foto
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-black text-[#39433f]"
+            onClick={onClose}
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -12536,6 +12858,25 @@ function getAnalyticsTabLabel(tabId: TabId, role: UserRole) {
   if (role !== "patient" && tabId === "patients") return "Página de Inicio";
   if (role === "patient" && tabId === "agenda") return "Citas";
   return tabs.find((tab) => tab.id === tabId)?.label ?? tabId;
+}
+
+function getVisibleTabsForRole(role: UserRole | null) {
+  const filteredTabs = tabs.filter((tab) => {
+    if (tab.patientOnly && role !== "patient") return false;
+    if (tab.nutritionistOnly && role === "patient") return false;
+    return true;
+  });
+
+  if (role === "patient") return filteredTabs;
+
+  const order = new Map(professionalTabOrder.map((tabId, index) => [tabId, index]));
+  return filteredTabs
+    .slice()
+    .sort(
+      (a, b) =>
+        (order.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+        (order.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+    );
 }
 
 async function getCurrentAccessToken(

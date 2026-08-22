@@ -105,12 +105,28 @@ test("nutritionist home dashboard replaces visible clients tab and profile photo
 
   assert.match(source, /role !== "patient" && tab\.id === "patients"/);
   assert.match(source, /Página de Inicio/);
+  assert.match(source, /professionalTabOrder/);
+  const professionalOrderStart = source.indexOf("const professionalTabOrder");
+  assert.ok(
+    source.indexOf('"patients",', professionalOrderStart) <
+      source.indexOf('"goals",', professionalOrderStart),
+  );
+  assert.match(source, /getVisibleTabsForRole/);
   assert.match(source, /NutritionistHomeDashboard/);
   assert.match(source, /Próxima consulta/);
   assert.match(source, /Mis estadísticas mensuales/);
   assert.match(source, /Actividad reciente/);
+  assert.match(source, /OnlineConsultationChoiceDialog/);
+  assert.match(source, /Abrir Consulta Online/);
+  assert.match(source, /Ir a Consulta/);
+  assert.match(source, /openPatientConsultation/);
+  assert.match(source, /window\.open\(onlineConsultationEvent\.video_url/);
   assert.match(source, /PatientAvatar/);
   assert.match(source, /profile_photo_url/);
+  assert.match(source, /ProfilePhotoCameraDialog/);
+  assert.match(source, /Abrir cámara/);
+  assert.match(source, /navigator\.mediaDevices\?\.getUserMedia/);
+  assert.match(source, /dietdesk-patients-/);
   assert.match(source, /\/api\/patients\/profile-photo/);
   assert.match(source, /profile-photos/);
   assert.match(route, /eq\("user_id", user\.id\)/);
