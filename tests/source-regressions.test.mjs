@@ -125,6 +125,10 @@ test("nutritionist home dashboard replaces visible clients tab and profile photo
   assert.match(source, /profile_photo_url/);
   assert.match(source, /ProfilePhotoCameraDialog/);
   assert.match(source, /Abrir cámara/);
+  assert.match(source, /useFilePreviewUrl/);
+  assert.match(source, /Vista previa/);
+  assert.match(source, /Usar esta foto/);
+  assert.match(source, /Repetir foto/);
   assert.match(source, /navigator\.mediaDevices\?\.getUserMedia/);
   assert.match(source, /dietdesk-patients-/);
   assert.match(source, /\/api\/patients\/profile-photo/);
@@ -259,6 +263,9 @@ test("activity tracking has structured sport, duration and weekly summaries", as
   assert.match(source, /activityOptions/);
   assert.match(source, /DurationPickerDialog/);
   assert.match(source, /DistancePickerDialog/);
+  assert.match(source, /Vista previa de la comida fotografiada/);
+  assert.match(source, /Hacer otra foto/);
+  assert.match(source, /Quitar foto/);
   assert.match(source, /Modificar/);
   assert.match(source, /postExerciseMutation/);
   assert.match(source, /formatDistanceForInput/);

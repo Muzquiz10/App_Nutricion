@@ -5004,6 +5004,22 @@ function PendingInvitationList({
   );
 }
 
+function useFilePreviewUrl(file: File | null) {
+  const previewUrl = useMemo(() => {
+    if (!file) return "";
+
+    return URL.createObjectURL(file);
+  }, [file]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  return previewUrl;
+}
+
 function PatientQuestionnairePanel({
   patient,
   supabase,
@@ -5041,8 +5057,10 @@ function PatientQuestionnairePanel({
   );
   const [saving, setSaving] = useState(false);
   const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
+  const profilePhotoPreviewUrl = useFilePreviewUrl(profilePhotoFile);
   const [savingProfilePhoto, setSavingProfilePhoto] = useState(false);
   const [profileCameraOpen, setProfileCameraOpen] = useState(false);
+  const profilePhotoInputRef = useRef<HTMLInputElement | null>(null);
 
   if (!patient) {
     return (
@@ -5166,7 +5184,7 @@ function PatientQuestionnairePanel({
       return;
     }
 
-    setProfilePhotoFile(null);
+    clearProfilePhotoSelection();
     onNotice("Foto de perfil actualizada.");
     await onReload();
   }
@@ -5179,6 +5197,11 @@ function PatientQuestionnairePanel({
       ...current,
       [key]: value,
     }));
+  }
+
+  function clearProfilePhotoSelection() {
+    setProfilePhotoFile(null);
+    if (profilePhotoInputRef.current) profilePhotoInputRef.current.value = "";
   }
 
   return (
@@ -5214,6 +5237,7 @@ function PatientQuestionnairePanel({
               <ImagePlus className="size-4 text-[var(--tenant-color)]" />
               Elegir foto
               <input
+                ref={profilePhotoInputRef}
                 type="file"
                 accept="image/*"
                 className="sr-only"
@@ -5245,6 +5269,41 @@ function PatientQuestionnairePanel({
               ? `${profilePhotoFile.name} (${formatFileSize(profilePhotoFile.size)})`
               : "Sin archivo nuevo seleccionado."}
           </p>
+          {profilePhotoPreviewUrl && (
+            <div className="mt-3 rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3">
+              <p className="mb-2 text-xs font-black uppercase text-[var(--tenant-color)]">
+                Vista previa
+              </p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={profilePhotoPreviewUrl}
+                  alt="Vista previa de la foto de perfil"
+                  className="size-28 rounded-full border border-[var(--line)] bg-white object-cover shadow-sm"
+                />
+                <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-black text-[#39433f]"
+                    onClick={() => setProfileCameraOpen(true)}
+                    disabled={savingProfilePhoto}
+                  >
+                    <Camera className="size-4 text-[var(--tenant-color)]" />
+                    Hacer otra foto
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[#efc4ba] bg-white px-3 text-sm font-black text-[#8a3327]"
+                    onClick={clearProfilePhotoSelection}
+                    disabled={savingProfilePhoto}
+                  >
+                    <Trash2 className="size-4" />
+                    Quitar foto
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
       {profileCameraOpen && (
@@ -5344,6 +5403,16 @@ function ProfilePhotoCameraDialog({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [cameraError, setCameraError] = useState("");
   const [cameraReady, setCameraReady] = useState(false);
+  const [capturedFile, setCapturedFile] = useState<File | null>(null);
+  const capturedPreviewUrl = useFilePreviewUrl(capturedFile);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [cameraRequestId, setCameraRequestId] = useState(0);
+
+  function stopCamera() {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    setCameraReady(false);
+  }
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -5360,6 +5429,7 @@ function ProfilePhotoCameraDialog({
           video: { facingMode: "user" },
           audio: false,
         });
+        streamRef.current = stream;
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop());
           return;
@@ -5378,8 +5448,9 @@ function ProfilePhotoCameraDialog({
     return () => {
       cancelled = true;
       stream?.getTracks().forEach((track) => track.stop());
+      if (streamRef.current === stream) streamRef.current = null;
     };
-  }, []);
+  }, [cameraRequestId]);
 
   function capturePhoto() {
     const video = videoRef.current;
@@ -5397,16 +5468,28 @@ function ProfilePhotoCameraDialog({
     canvas.toBlob(
       (blob) => {
         if (!blob) return;
-        onCapture(
+        setCapturedFile(
           new File([blob], `foto-perfil-${Date.now()}.jpg`, {
             type: "image/jpeg",
           }),
         );
-        onClose();
+        stopCamera();
       },
       "image/jpeg",
       0.9,
     );
+  }
+
+  function retakePhoto() {
+    setCapturedFile(null);
+    setCameraError("");
+    setCameraRequestId((current) => current + 1);
+  }
+
+  function useCapturedPhoto() {
+    if (!capturedFile) return;
+    onCapture(capturedFile);
+    onClose();
   }
 
   return (
@@ -5417,7 +5500,9 @@ function ProfilePhotoCameraDialog({
             <p className="text-xs font-black uppercase text-[var(--tenant-color)]">
               Foto de perfil
             </p>
-            <h2 className="mt-1 text-lg font-black">Abrir cámara</h2>
+            <h2 className="mt-1 text-lg font-black">
+              {capturedFile ? "Revisar foto" : "Abrir cámara"}
+            </h2>
           </div>
           <button
             type="button"
@@ -5430,15 +5515,30 @@ function ProfilePhotoCameraDialog({
         </div>
 
         <div className="mt-4 overflow-hidden rounded-lg border border-[var(--line)] bg-[#111815]">
-          <video
-            ref={videoRef}
-            className="aspect-video w-full object-cover"
-            autoPlay
-            muted
-            playsInline
-          />
+          {capturedPreviewUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={capturedPreviewUrl}
+              alt="Vista previa de la foto capturada"
+              className="aspect-video w-full object-cover"
+            />
+          ) : (
+            <video
+              ref={videoRef}
+              className="aspect-video w-full object-cover"
+              autoPlay
+              muted
+              playsInline
+            />
+          )}
           <canvas ref={canvasRef} className="hidden" />
         </div>
+
+        {capturedPreviewUrl && (
+          <p className="mt-3 rounded-lg border border-[var(--line)] bg-[#fbfaf6] px-3 py-2 text-sm font-semibold text-[#39433f]">
+            Revisa la imagen antes de guardarla. Si no te convence, puedes repetir la foto.
+          </p>
+        )}
 
         {cameraError && (
           <p className="mt-3 rounded-lg border border-[#e8d9aa] bg-[#fff8df] px-3 py-2 text-sm font-semibold text-[#6b5420]">
@@ -5447,15 +5547,36 @@ function ProfilePhotoCameraDialog({
         )}
 
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          <button
-            type="button"
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-50"
-            onClick={capturePhoto}
-            disabled={!cameraReady || Boolean(cameraError)}
-          >
-            <Camera className="size-4" />
-            Usar foto
-          </button>
+          {capturedFile ? (
+            <>
+              <button
+                type="button"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white"
+                onClick={useCapturedPhoto}
+              >
+                <Check className="size-4" />
+                Usar esta foto
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-black text-[#39433f]"
+                onClick={retakePhoto}
+              >
+                <Camera className="size-4 text-[var(--tenant-color)]" />
+                Repetir foto
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-50"
+              onClick={capturePhoto}
+              disabled={!cameraReady || Boolean(cameraError)}
+            >
+              <Camera className="size-4" />
+              Hacer foto
+            </button>
+          )}
           <button
             type="button"
             className="inline-flex h-10 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-black text-[#39433f]"
@@ -7372,6 +7493,7 @@ function DataEntryPanel({
       {},
   );
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const photoPreviewUrl = useFilePreviewUrl(photoFile);
   const [savingTracking, setSavingTracking] = useState(false);
   const [durationPickerOpen, setDurationPickerOpen] = useState(false);
   const [distancePickerOpen, setDistancePickerOpen] = useState(false);
@@ -7544,9 +7666,7 @@ function DataEntryPanel({
 
       clearTrackingDraft();
       clearCustomGoalDrafts();
-      setPhotoFile(null);
-      if (galleryInputRef.current) galleryInputRef.current.value = "";
-      if (cameraInputRef.current) cameraInputRef.current.value = "";
+      clearMealPhotoSelection();
       onNotice("Registro actualizado.");
       await onReload();
     } finally {
@@ -7566,6 +7686,12 @@ function DataEntryPanel({
       ...current,
       [goalId]: value,
     }));
+  }
+
+  function clearMealPhotoSelection() {
+    setPhotoFile(null);
+    if (galleryInputRef.current) galleryInputRef.current.value = "";
+    if (cameraInputRef.current) cameraInputRef.current.value = "";
   }
 
   return (
@@ -7738,7 +7864,7 @@ function DataEntryPanel({
                 disabled={savingTracking}
               >
                 <Camera className="size-4 text-[var(--tenant-color)]" />
-                Abrir camara
+                Abrir cámara
               </button>
             </div>
             <input
@@ -7761,6 +7887,39 @@ function DataEntryPanel({
                 ? `${photoFile.name} (${formatFileSize(photoFile.size)}). Se optimizará antes de subirla.`
                 : "Sin foto seleccionada."}
             </p>
+            {photoPreviewUrl && (
+              <div className="mt-3 overflow-hidden rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3">
+                <p className="mb-2 text-xs font-black uppercase text-[var(--tenant-color)]">
+                  Vista previa
+                </p>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={photoPreviewUrl}
+                  alt="Vista previa de la comida fotografiada"
+                  className="max-h-80 w-full rounded-lg border border-[var(--line)] bg-white object-cover"
+                />
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-black text-[#39433f]"
+                    onClick={() => cameraInputRef.current?.click()}
+                    disabled={savingTracking}
+                  >
+                    <Camera className="size-4 text-[var(--tenant-color)]" />
+                    Hacer otra foto
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[#efc4ba] bg-white px-3 text-sm font-black text-[#8a3327]"
+                    onClick={clearMealPhotoSelection}
+                    disabled={savingTracking}
+                  >
+                    <Trash2 className="size-4" />
+                    Quitar foto
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
           <button
             className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
