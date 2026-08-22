@@ -354,6 +354,61 @@ type MealPlanDraft = {
   draftItems: DraftMealItem[];
 };
 
+type StressLevel = "none" | "low" | "medium" | "high" | "very_high";
+type ConsultationGender = "male" | "female" | "non_binary" | "prefer_not_to_say" | "";
+type ConsultationActivityLevel =
+  | "sedentary"
+  | "light_moderate"
+  | "intense"
+  | "very_intense"
+  | "";
+
+type PatientConsultation = {
+  id: string;
+  tenant_id: string;
+  patient_id: string;
+  created_by: string;
+  consultation_at: string;
+  weight_kg: number | null;
+  height_cm: number | null;
+  stress_level: StressLevel | null;
+  body_fat_percentage: number | null;
+  fat_mass_percentage: number | null;
+  birth_date: string | null;
+  age: number | null;
+  gender: ConsultationGender | null;
+  is_menstruating: boolean | null;
+  menstruation_start_date: string | null;
+  is_pregnant: boolean | null;
+  physical_activity_level: ConsultationActivityLevel | null;
+  diagnosis_problem: string | null;
+  diagnosis_cause: string | null;
+  diagnosis_symptoms: string | null;
+  comments: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ConsultationDraft = {
+  consultationAt: string;
+  weightKg: string;
+  heightCm: string;
+  stressLevel: StressLevel;
+  bodyFatPercentage: string;
+  fatMassPercentage: string;
+  birthDate: string;
+  age: string;
+  gender: ConsultationGender;
+  isMenstruating: "yes" | "no";
+  menstruationStartDate: string;
+  isPregnant: "yes" | "no";
+  physicalActivityLevel: ConsultationActivityLevel;
+  diagnosisProblem: string;
+  diagnosisCause: string;
+  diagnosisSymptoms: string;
+  comments: string;
+};
+
 type TabId =
   | "patients"
   | "plans"
@@ -368,6 +423,7 @@ type TabId =
   | "notifications"
   | "settings";
 type PatientListView = "active" | "pending" | "inactive";
+type PatientDetailTab = "record" | "consultations";
 
 type CreateInvitationResponse = {
   error?: string;
@@ -400,6 +456,13 @@ type NotificationPreferencesResponse = {
 type QuestionnaireResponse = {
   error?: string;
   ok?: boolean;
+};
+
+type PatientConsultationsResponse = {
+  error?: string;
+  ok?: boolean;
+  consultations?: PatientConsultation[];
+  consultation?: PatientConsultation;
 };
 
 type DeleteMealPhotoResponse = {
@@ -630,6 +693,37 @@ const goalOptions = [
 const sexOptions = [
   { value: "male", label: "Hombre" },
   { value: "female", label: "Mujer" },
+];
+const consultationStressOptions: Array<{ value: StressLevel; label: string }> = [
+  { value: "none", label: "Sin estrés" },
+  { value: "low", label: "Bajo" },
+  { value: "medium", label: "Medio" },
+  { value: "high", label: "Alto" },
+  { value: "very_high", label: "Muy Alto" },
+];
+const consultationGenderOptions: Array<{ value: ConsultationGender; label: string }> = [
+  { value: "", label: "Seleccionar" },
+  { value: "male", label: "Hombre" },
+  { value: "female", label: "Mujer" },
+  { value: "non_binary", label: "No binario" },
+  { value: "prefer_not_to_say", label: "Prefiere no indicar" },
+];
+const consultationActivityLevelOptions: Array<{
+  value: ConsultationActivityLevel;
+  label: string;
+}> = [
+  { value: "", label: "Seleccionar" },
+  { value: "sedentary", label: "Sedentario" },
+  { value: "light_moderate", label: "Ligero o Moderado" },
+  { value: "intense", label: "Intenso" },
+  {
+    value: "very_intense",
+    label: "Muy Intenso (Compite tanto a nivel amateur como profesional)",
+  },
+];
+const yesNoOptions = [
+  { value: "no", label: "No" },
+  { value: "yes", label: "Sí" },
 ];
 
 const demoTenant = (slug: string): Tenant => ({
@@ -3301,11 +3395,16 @@ function PatientsPanel({
   supabase: ReturnType<typeof createSupabaseBrowser>;
 }) {
   const [patientView, setPatientView] = useState<PatientListView>("active");
+  const [patientDetailTab, setPatientDetailTab] = useState<PatientDetailTab>("record");
   const activePatients = patients.filter(isActivePatient);
   const inactivePatients = patients.filter(isInactivePatient);
-  const selectedPatientWeights = selectedPatient
-    ? weights.filter((item) => item.patient_id === selectedPatient.id)
-    : [];
+  const selectedPatientWeights = useMemo(
+    () =>
+      selectedPatient
+        ? weights.filter((item) => item.patient_id === selectedPatient.id)
+        : [],
+    [selectedPatient, weights],
+  );
   const currentWeight = getCurrentWeightKg(selectedPatient, selectedPatientWeights);
   const currentBmi = selectedPatient
     ? calculateBmi(currentWeight, selectedPatient.height_cm)
@@ -3349,6 +3448,11 @@ function PatientsPanel({
         : `${patientName} vuelve a estar activo.`,
     );
     await onReload();
+  }
+
+  function selectPatient(patientId: string) {
+    setPatientDetailTab("record");
+    onSelectPatient(patientId);
   }
 
   if (role === "patient") {
@@ -3425,7 +3529,7 @@ function PatientsPanel({
           <PatientCards
             patients={activePatients}
             selectedPatient={selectedPatient}
-            onSelectPatient={onSelectPatient}
+            onSelectPatient={selectPatient}
             onChangeStatus={updatePatientStatus}
             nextStatus="inactive"
           />
@@ -3440,18 +3544,547 @@ function PatientsPanel({
           <PatientCards
             patients={inactivePatients}
             selectedPatient={selectedPatient}
-            onSelectPatient={onSelectPatient}
+            onSelectPatient={selectPatient}
             onChangeStatus={updatePatientStatus}
             nextStatus="active"
           />
         )}
       </Panel>
 
-      <PatientRecord
+      <ProfessionalPatientDetail
         patient={selectedPatient}
-        role={role}
         weights={selectedPatientWeights}
+        activeTab={patientDetailTab}
+        onTabChange={setPatientDetailTab}
+        supabase={supabase}
+        onNotice={onNotice}
       />
+    </div>
+  );
+}
+
+function ProfessionalPatientDetail({
+  patient,
+  weights,
+  activeTab,
+  onTabChange,
+  supabase,
+  onNotice,
+}: {
+  patient: Patient | null;
+  weights: WeightLog[];
+  activeTab: PatientDetailTab;
+  onTabChange: (tab: PatientDetailTab) => void;
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+}) {
+  return (
+    <div className="grid gap-3">
+      <div className="flex flex-wrap gap-2">
+        {[
+          { id: "record", label: "Ficha del cliente", icon: ClipboardList },
+          { id: "consultations", label: "Consultas", icon: FileText },
+        ].map((tab) => {
+          const active = activeTab === tab.id;
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              className={`inline-flex h-11 items-center gap-2 rounded-lg border px-4 text-sm font-black transition ${
+                active
+                  ? "border-[var(--tenant-color)] bg-[var(--tenant-color)] text-white shadow-sm"
+                  : "border-[var(--line)] bg-white text-[#4a554f] hover:border-[#bfb7aa]"
+              }`}
+              onClick={() => onTabChange(tab.id as PatientDetailTab)}
+            >
+              <Icon className="size-4" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeTab === "record" && (
+        <PatientRecord
+          patient={patient}
+          role="nutritionist"
+          weights={weights}
+        />
+      )}
+      {activeTab === "consultations" && (
+        <PatientConsultationsPanel
+          patient={patient}
+          weights={weights}
+          supabase={supabase}
+          onNotice={onNotice}
+        />
+      )}
+    </div>
+  );
+}
+
+function PatientConsultationsPanel({
+  patient,
+  weights,
+  supabase,
+  onNotice,
+}: {
+  patient: Patient | null;
+  weights: WeightLog[];
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+}) {
+  const [consultations, setConsultations] = useState<PatientConsultation[]>([]);
+  const [draft, setDraft] = useState<ConsultationDraft>(() =>
+    buildConsultationDraft(patient, null, weights),
+  );
+  const [loadingConsultations, setLoadingConsultations] = useState(false);
+  const [savingConsultation, setSavingConsultation] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadConsultations() {
+      const baseDraft = buildConsultationDraft(patient, null, weights);
+      setDraft(baseDraft);
+      setConsultations([]);
+
+      if (!patient) return;
+      if (!supabase) return;
+
+      setLoadingConsultations(true);
+      const accessToken = await getCurrentAccessToken(supabase);
+      if (!accessToken) {
+        if (!cancelled) {
+          setLoadingConsultations(false);
+          onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/patients/consultations?patientId=${encodeURIComponent(patient.id)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          },
+        );
+        const payload = (await response.json()) as PatientConsultationsResponse;
+
+        if (cancelled) return;
+
+        if (!response.ok) {
+          onNotice(payload.error ?? "No se pudieron cargar las consultas.");
+          return;
+        }
+
+        const rows = payload.consultations ?? [];
+        setConsultations(rows);
+        setDraft(buildConsultationDraft(patient, rows[0] ?? null, weights));
+      } finally {
+        if (!cancelled) {
+          setLoadingConsultations(false);
+        }
+      }
+    }
+
+    void loadConsultations();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [patient, supabase, weights, onNotice]);
+
+  function updateDraft(key: keyof ConsultationDraft, value: string) {
+    setDraft((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  function updateBirthDate(value: string) {
+    setDraft((current) => ({
+      ...current,
+      birthDate: value,
+      age: value ? String(calculateAgeFromBirthDate(value)) : current.age,
+    }));
+  }
+
+  async function saveConsultation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!patient) {
+      onNotice("Selecciona un cliente.");
+      return;
+    }
+
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para guardar consultas reales.");
+      return;
+    }
+
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) {
+      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+      return;
+    }
+
+    setSavingConsultation(true);
+    try {
+      const response = await fetch("/api/patients/consultations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          patientId: patient.id,
+          consultationAt: draft.consultationAt,
+          weightKg: parseOptionalNumberInput(draft.weightKg),
+          heightCm: parseOptionalNumberInput(draft.heightCm),
+          stressLevel: draft.stressLevel,
+          bodyFatPercentage: parseOptionalNumberInput(draft.bodyFatPercentage),
+          fatMassPercentage: parseOptionalNumberInput(draft.fatMassPercentage),
+          birthDate: draft.birthDate || null,
+          age: parseOptionalIntegerInput(draft.age),
+          gender: draft.gender || null,
+          isMenstruating: draft.isMenstruating === "yes",
+          menstruationStartDate:
+            draft.isMenstruating === "yes" ? draft.menstruationStartDate || null : null,
+          isPregnant: draft.isPregnant === "yes",
+          physicalActivityLevel: draft.physicalActivityLevel || null,
+          diagnosisProblem: draft.diagnosisProblem,
+          diagnosisCause: draft.diagnosisCause,
+          diagnosisSymptoms: draft.diagnosisSymptoms,
+          comments: draft.comments,
+        }),
+      });
+      const payload = (await response.json()) as PatientConsultationsResponse;
+
+      if (!response.ok || !payload.consultation) {
+        onNotice(payload.error ?? "No se pudo guardar la consulta.");
+        return;
+      }
+
+      const nextRows = [
+        payload.consultation,
+        ...consultations.filter((item) => item.id !== payload.consultation?.id),
+      ];
+      setConsultations(nextRows);
+      setDraft(buildConsultationDraft(patient, payload.consultation, weights));
+      onNotice("Consulta guardada. Estos datos quedarán precargados en la próxima consulta.");
+    } finally {
+      setSavingConsultation(false);
+    }
+  }
+
+  if (!patient) {
+    return <Panel><EmptyState text="Selecciona un cliente para registrar consultas." /></Panel>;
+  }
+
+  const latestConsultation = consultations[0] ?? null;
+
+  return (
+    <div className="grid gap-4">
+      <Panel>
+        <form className="grid gap-4" onSubmit={saveConsultation}>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-lg font-black">Consultas</h2>
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                Registra los datos tomados durante la atención del cliente.
+              </p>
+            </div>
+            <span className="rounded-lg bg-[#eef3f0] px-3 py-1 text-sm font-semibold text-[#53605a]">
+              {loadingConsultations
+                ? "Cargando..."
+                : latestConsultation
+                  ? `Última: ${formatDate(`${latestConsultation.consultation_at}T12:00:00`)}`
+                  : "Sin consultas previas"}
+            </span>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field
+              label="Fecha de consulta"
+              type="date"
+              value={draft.consultationAt}
+              onChange={(value) => updateDraft("consultationAt", value)}
+              required
+            />
+          </div>
+
+          <ConsultationSection title="Medidas básicas" defaultOpen>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field
+                label="Peso kg"
+                type="number"
+                step="0.1"
+                value={draft.weightKg}
+                onChange={(value) => updateDraft("weightKg", value)}
+              />
+              <Field
+                label="Altura cm"
+                type="number"
+                step="0.1"
+                value={draft.heightCm}
+                onChange={(value) => updateDraft("heightCm", value)}
+              />
+              <SelectField
+                label="Estrés"
+                value={draft.stressLevel}
+                onChange={(value) => updateDraft("stressLevel", value)}
+                options={consultationStressOptions}
+              />
+              <Field
+                label="Grasa %"
+                type="number"
+                step="0.1"
+                value={draft.bodyFatPercentage}
+                onChange={(value) => updateDraft("bodyFatPercentage", value)}
+              />
+              <Field
+                label="Masa Grasa %"
+                type="number"
+                step="0.1"
+                value={draft.fatMassPercentage}
+                onChange={(value) => updateDraft("fatMassPercentage", value)}
+              />
+            </div>
+          </ConsultationSection>
+
+          <ConsultationSection title="Datos personales" defaultOpen>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field
+                label="Fecha de nacimiento"
+                type="date"
+                value={draft.birthDate}
+                onChange={updateBirthDate}
+              />
+              <Field
+                label="Edad"
+                type="number"
+                value={draft.age}
+                onChange={(value) => updateDraft("age", value)}
+              />
+              <SelectField
+                label="Género"
+                value={draft.gender}
+                onChange={(value) => updateDraft("gender", value)}
+                options={consultationGenderOptions}
+              />
+            </div>
+          </ConsultationSection>
+
+          <ConsultationSection title="Menstruación y embarazo">
+            <div className="grid gap-4 md:grid-cols-2">
+              <BinaryChoice
+                label="¿Estás menstruando?"
+                value={draft.isMenstruating}
+                onChange={(value) => updateDraft("isMenstruating", value)}
+              />
+              {draft.isMenstruating === "yes" && (
+                <Field
+                  label="Fecha de inicio"
+                  type="date"
+                  value={draft.menstruationStartDate}
+                  onChange={(value) => updateDraft("menstruationStartDate", value)}
+                />
+              )}
+              <BinaryChoice
+                label="¿Estás embarazada?"
+                value={draft.isPregnant}
+                onChange={(value) => updateDraft("isPregnant", value)}
+              />
+            </div>
+          </ConsultationSection>
+
+          <ConsultationSection title="Nivel Actividad Física">
+            <ChoiceButtonGroup
+              value={draft.physicalActivityLevel}
+              onChange={(value) => updateDraft("physicalActivityLevel", value)}
+              options={consultationActivityLevelOptions.filter((option) => option.value)}
+            />
+          </ConsultationSection>
+
+          <ConsultationSection title="Diagnóstico">
+            <div className="grid gap-4 lg:grid-cols-3">
+              <TextArea
+                label="Problema"
+                value={draft.diagnosisProblem}
+                onChange={(value) => updateDraft("diagnosisProblem", value)}
+              />
+              <TextArea
+                label="Origen/Causa"
+                value={draft.diagnosisCause}
+                onChange={(value) => updateDraft("diagnosisCause", value)}
+              />
+              <TextArea
+                label="Síntomas"
+                value={draft.diagnosisSymptoms}
+                onChange={(value) => updateDraft("diagnosisSymptoms", value)}
+              />
+            </div>
+          </ConsultationSection>
+
+          <ConsultationSection title="Comentarios">
+            <TextArea
+              label="Comentarios"
+              value={draft.comments}
+              onChange={(value) => updateDraft("comments", value)}
+            />
+          </ConsultationSection>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              className="inline-flex h-11 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
+              disabled={savingConsultation}
+            >
+              {savingConsultation ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Check className="size-4" />
+              )}
+              {savingConsultation ? "Guardando..." : "Guardar consulta"}
+            </button>
+          </div>
+        </form>
+      </Panel>
+
+      <Panel>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-base font-black">Historial de consultas</h3>
+          <span className="rounded-lg bg-[#eef3f0] px-3 py-1 text-xs font-bold text-[#53605a]">
+            {consultations.length}
+          </span>
+        </div>
+        <div className="mt-4 grid gap-3">
+          {consultations.slice(0, 6).map((consultation) => (
+            <article
+              key={consultation.id}
+              className="rounded-lg border border-[var(--line)] bg-white p-3"
+            >
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="font-black">
+                    {formatDate(`${consultation.consultation_at}T12:00:00`)}
+                  </p>
+                  <p className="mt-1 text-sm text-[var(--muted)]">
+                    {consultation.diagnosis_problem || consultation.comments || "Sin diagnóstico indicado"}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs font-bold text-[#53605a]">
+                  <span className="rounded-md bg-[#f6f3eb] px-2 py-1">
+                    Peso {formatConsultationNumber(consultation.weight_kg, "kg")}
+                  </span>
+                  <span className="rounded-md bg-[#f6f3eb] px-2 py-1">
+                    Estrés {getOptionLabel(consultationStressOptions, consultation.stress_level)}
+                  </span>
+                </div>
+              </div>
+            </article>
+          ))}
+          {!loadingConsultations && consultations.length === 0 && (
+            <EmptyState text="Aún no hay consultas registradas para este cliente." />
+          )}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function ConsultationSection({
+  title,
+  children,
+  defaultOpen = false,
+}: {
+  title: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  return (
+    <details
+      className="group rounded-lg border border-[var(--line)] bg-[#fbfaf6]"
+      open={defaultOpen}
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-black [&::-webkit-details-marker]:hidden">
+        <span>{title}</span>
+        <ChevronRight className="size-4 transition group-open:rotate-90" />
+      </summary>
+      <div className="border-t border-[var(--line)] p-4">
+        {children}
+      </div>
+    </details>
+  );
+}
+
+function BinaryChoice({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: "yes" | "no";
+  onChange: (value: "yes" | "no") => void;
+}) {
+  return (
+    <div>
+      <span className="mb-1 block text-sm font-semibold text-[#39433f]">{label}</span>
+      <div className="grid grid-cols-2 gap-2">
+        {yesNoOptions.map((option) => {
+          const active = value === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={`h-11 rounded-lg border px-3 text-sm font-bold transition ${
+                active
+                  ? "border-[var(--tenant-color)] bg-[var(--tenant-color)] text-white"
+                  : "border-[var(--line)] bg-white text-[#4a554f]"
+              }`}
+              onClick={() => onChange(option.value as "yes" | "no")}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ChoiceButtonGroup<TValue extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: TValue;
+  onChange: (value: TValue) => void;
+  options: Array<{ value: TValue; label: string }>;
+}) {
+  return (
+    <div className="grid gap-2 md:grid-cols-2">
+      {options.map((option) => {
+        const active = value === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            className={`min-h-11 rounded-lg border px-3 py-2 text-left text-sm font-bold transition ${
+              active
+                ? "border-[var(--tenant-color)] bg-[var(--tenant-color)] text-white"
+                : "border-[var(--line)] bg-white text-[#4a554f] hover:border-[#bfb7aa]"
+            }`}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -11172,6 +11805,85 @@ function formatOptionalNumber(value: number | null, digits: number) {
 
 function formatInteger(value: number | string) {
   return Number(value).toLocaleString("es-ES", { maximumFractionDigits: 0 });
+}
+
+function buildConsultationDraft(
+  patient: Patient | null,
+  consultation: PatientConsultation | null,
+  weights: WeightLog[],
+): ConsultationDraft {
+  const currentWeight = getCurrentWeightKg(patient, weights);
+  const gender = consultation?.gender || patient?.sex || "";
+
+  return {
+    consultationAt: getLocalDateString(),
+    weightKg: formatNumberForInput(consultation?.weight_kg ?? currentWeight),
+    heightCm: formatNumberForInput(consultation?.height_cm ?? patient?.height_cm ?? null),
+    stressLevel: consultation?.stress_level ?? "none",
+    bodyFatPercentage: formatNumberForInput(consultation?.body_fat_percentage ?? null),
+    fatMassPercentage: formatNumberForInput(consultation?.fat_mass_percentage ?? null),
+    birthDate: consultation?.birth_date ?? "",
+    age: formatNumberForInput(consultation?.age ?? patient?.age ?? null),
+    gender,
+    isMenstruating: consultation?.is_menstruating ? "yes" : "no",
+    menstruationStartDate: consultation?.menstruation_start_date ?? "",
+    isPregnant: consultation?.is_pregnant ? "yes" : "no",
+    physicalActivityLevel: consultation?.physical_activity_level ?? "",
+    diagnosisProblem: consultation?.diagnosis_problem ?? "",
+    diagnosisCause: consultation?.diagnosis_cause ?? "",
+    diagnosisSymptoms: consultation?.diagnosis_symptoms ?? "",
+    comments: consultation?.comments ?? "",
+  };
+}
+
+function formatNumberForInput(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") return "";
+  return String(value).replace(",", ".");
+}
+
+function parseOptionalNumberInput(value: string) {
+  const normalized = value.replace(",", ".").trim();
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseOptionalIntegerInput(value: string) {
+  const parsed = parseOptionalNumberInput(value);
+  return parsed === null ? null : Math.trunc(parsed);
+}
+
+function calculateAgeFromBirthDate(value: string) {
+  const birthDate = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(birthDate.getTime())) return 0;
+
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDelta = today.getMonth() - birthDate.getMonth();
+  const birthdayPending =
+    monthDelta < 0 ||
+    (monthDelta === 0 && today.getDate() < birthDate.getDate());
+
+  if (birthdayPending) age -= 1;
+  return Math.max(0, age);
+}
+
+function formatConsultationNumber(value: number | string | null, unit = "") {
+  if (value === null || value === undefined || value === "") return "-";
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return "-";
+  const formatted = numericValue.toLocaleString("es-ES", {
+    maximumFractionDigits: 1,
+  });
+  return unit ? `${formatted} ${unit}` : formatted;
+}
+
+function getOptionLabel<TValue extends string>(
+  options: Array<{ value: TValue; label: string }>,
+  value: TValue | null,
+) {
+  if (!value) return "-";
+  return options.find((option) => option.value === value)?.label ?? value;
 }
 
 function formatFileSize(bytes: number) {

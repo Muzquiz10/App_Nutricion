@@ -28,11 +28,19 @@ const calendarVideoLinksMigrationPath = new URL(
   "../supabase/migrations/202608190001_calendar_video_links.sql",
   import.meta.url,
 );
+const patientConsultationsMigrationPath = new URL(
+  "../supabase/migrations/202608220001_patient_consultations.sql",
+  import.meta.url,
+);
 const trackingRoutePath = new URL("../app/api/tracking/logs/route.ts", import.meta.url);
 const exerciseRoutePath = new URL("../app/api/tracking/exercises/route.ts", import.meta.url);
 const analyticsRoutePath = new URL("../app/api/analytics/events/route.ts", import.meta.url);
 const chatSendRoutePath = new URL("../app/api/chat/send/route.ts", import.meta.url);
 const calendarEventsRoutePath = new URL("../app/api/calendar/events/route.ts", import.meta.url);
+const patientConsultationsRoutePath = new URL(
+  "../app/api/patients/consultations/route.ts",
+  import.meta.url,
+);
 const notificationServerPath = new URL("../app/lib/notifications/server.ts", import.meta.url);
 const brandPath = new URL("../app/lib/brand.ts", import.meta.url);
 const manifestPath = new URL("../public/manifest.webmanifest", import.meta.url);
@@ -253,4 +261,27 @@ test("calendar and statistics support video links and sleep charts", async () =>
   assert.match(calendarRoute, /Solo se puede editar el enlace en citas online/);
   assert.match(calendarRoute, /video_url/);
   assert.match(sql, /add column if not exists video_url/i);
+});
+
+test("nutritionist patient detail has consultation records", async () => {
+  const source = await readFile(componentPath, "utf8");
+  const route = await readFile(patientConsultationsRoutePath, "utf8");
+  const sql = await readFile(patientConsultationsMigrationPath, "utf8");
+
+  assert.match(source, /PatientDetailTab = "record" \| "consultations"/);
+  assert.match(source, /Ficha del cliente/);
+  assert.match(source, /Consultas/);
+  assert.match(source, /Medidas básicas/);
+  assert.match(source, /Datos personales/);
+  assert.match(source, /Menstruación y embarazo/);
+  assert.match(source, /Nivel Actividad Física/);
+  assert.match(source, /Diagnóstico/);
+  assert.match(source, /Guardar consulta/);
+  assert.match(source, /\/api\/patients\/consultations/);
+  assert.match(route, /verifyNutritionistPatientAccess/);
+  assert.match(route, /patient_consultations/);
+  assert.match(route, /validActivityLevels/);
+  assert.match(sql, /create table if not exists public\.patient_consultations/i);
+  assert.match(sql, /enable row level security/i);
+  assert.match(sql, /Nutritionists can insert patient consultations/i);
 });
