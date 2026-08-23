@@ -221,9 +221,16 @@ test("appointment notifications require customer confirmation and immediate emai
   assert.match(source, /Confirmar cita/);
   assert.match(source, /CalendarSlotActionDialog/);
   assert.match(source, /onAvailableDayClick/);
+  assert.match(source, /getAgendaMonthWeeks/);
+  assert.match(source, /formatAgendaMonthLabel/);
+  assert.match(source, /Vista mensual completa/);
   assert.match(source, /appointmentDurationOptions/);
+  assert.match(source, /bulkAppointmentCountOptions/);
   assert.match(source, /allowDurationSelect/);
-  assert.match(source, /buildLocalDateTimeIso\(dateKey, appointmentStartTime\)/);
+  assert.match(source, /buildLocalDateTimeIso\(\s*occurrenceDateKey,\s*appointmentStartTime/);
+  assert.match(source, /Repetir semanalmente esta cita/);
+  assert.match(source, /occurrences/);
+  assert.match(source, /timeRangesOverlap/);
   assert.match(source, /Bloquear todo el día/);
   assert.match(source, /getAllDayBlockStartAt/);
   assert.match(source, /mode="manual"/);

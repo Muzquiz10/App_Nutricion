@@ -258,6 +258,11 @@ type AgendaDaySelection = {
   dateKey: string;
 };
 
+type CalendarActionOccurrence = {
+  startAt: string;
+  endAt: string;
+};
+
 type CalendarBusySlot = {
   id: string;
   start_at: string;
@@ -649,6 +654,7 @@ const appointmentModeOptions: Array<{ value: AppointmentMode; label: string }> =
   { value: "presential", label: "Presencial" },
 ];
 const appointmentDurationOptions = [10, 20, 30, 40, 50, 60];
+const bulkAppointmentCountOptions = Array.from({ length: 11 }, (_, index) => index + 2);
 
 const mealTypeOrder = new Map<string, number>([
   ...mealTypes.map((mealType, index) => [mealType, index] as const),
@@ -9879,6 +9885,7 @@ function NutritionistAgendaPanel({
     notes,
     startAt,
     endAt,
+    occurrences,
   }: {
     actionType: "appointment" | "block";
     patientId: string;
@@ -9888,6 +9895,7 @@ function NutritionistAgendaPanel({
     notes: string;
     startAt: string;
     endAt: string;
+    occurrences?: CalendarActionOccurrence[];
   }) {
     if (actionType === "appointment") {
       const patient = patients.find((item) => item.id === patientId);
@@ -9896,31 +9904,85 @@ function NutritionistAgendaPanel({
         return;
       }
 
-      await insertCalendarEvent({
-        tenant,
-        supabase,
-        onNotice,
-        onReload,
-        setSavingAgenda,
-        row: {
-          tenant_id: tenant.id,
-          patient_id: patient.id,
-          title: `Cita con ${patient.full_name}`,
-          notes: notes || null,
-          event_type: "appointment",
-          appointment_mode: appointmentMode,
-          video_url:
-            appointmentMode === "online" && videoUrl.trim()
-              ? videoUrl.trim()
-              : undefined,
-          blocks_availability: true,
-          start_at: startAt,
-          end_at: endAt,
-          status: "pending",
-        },
-        successMessage: "Cita enviada al cliente para confirmar.",
-        afterSuccess: () => setSelectedAgendaDay(null),
-      });
+      if (!supabase) {
+        onNotice("Modo demo: conecta Supabase para agendar citas reales.");
+        return;
+      }
+
+      const appointmentOccurrences =
+        occurrences && occurrences.length > 0 ? occurrences : [{ startAt, endAt }];
+      const blockingEvents = visibleEvents.filter(isCalendarEventBlocking);
+      const conflictingOccurrence = appointmentOccurrences.find((occurrence) =>
+        blockingEvents.some((event) =>
+          timeRangesOverlap(
+            occurrence.startAt,
+            occurrence.endAt,
+            event.start_at,
+            event.end_at,
+          ),
+        ),
+      );
+
+      if (conflictingOccurrence) {
+        onNotice(
+          `Ya hay una cita o bloqueo el ${formatDate(conflictingOccurrence.startAt)} a las ${formatTimeOnly(conflictingOccurrence.startAt)}.`,
+        );
+        return;
+      }
+
+      setSavingAgenda(true);
+      let createdCount = 0;
+      let firstError = "";
+
+      for (const occurrence of appointmentOccurrences) {
+        const { error } = await postCalendarEventMutation(supabase, {
+          action: "create",
+          row: {
+            tenant_id: tenant.id,
+            patient_id: patient.id,
+            title: `Cita con ${patient.full_name}`,
+            notes: notes || null,
+            event_type: "appointment",
+            appointment_mode: appointmentMode,
+            video_url:
+              appointmentMode === "online" && videoUrl.trim()
+                ? videoUrl.trim()
+                : undefined,
+            blocks_availability: true,
+            start_at: occurrence.startAt,
+            end_at: occurrence.endAt,
+            status: "pending",
+          },
+        });
+
+        if (error) {
+          firstError = error;
+          break;
+        }
+
+        createdCount += 1;
+      }
+
+      setSavingAgenda(false);
+
+      if (firstError) {
+        if (createdCount > 0) {
+          onNotice(`Se crearon ${createdCount} citas, pero una falló: ${firstError}`);
+          await onReload();
+          return;
+        }
+
+        onNotice(firstError);
+        return;
+      }
+
+      setSelectedAgendaDay(null);
+      onNotice(
+        createdCount > 1
+          ? `${createdCount} citas enviadas al cliente para confirmar.`
+          : "Cita enviada al cliente para confirmar.",
+      );
+      await onReload();
       return;
     }
 
@@ -10225,8 +10287,15 @@ function AgendaCalendar({
     dateKey: string;
     events: CalendarEvent[];
   } | null>(null);
-  const weeks = getAgendaWeeks(4);
+  const [visibleMonth, setVisibleMonth] = useState(() => getMonthStart(new Date()));
+  const weeks = getAgendaMonthWeeks(visibleMonth);
   const eventsByDay = groupCalendarEventsByDay(events);
+  const visibleMonthLabel = formatAgendaMonthLabel(visibleMonth);
+
+  function changeVisibleMonth(offset: number) {
+    setVisibleMonth((current) => addMonths(current, offset));
+    setExpandedDay(null);
+  }
 
   return (
     <Panel>
@@ -10234,13 +10303,42 @@ function AgendaCalendar({
         <div>
           <h2 className="text-lg font-black">{title}</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Vista semanal de lunes a domingo.
+            Vista mensual completa. Puedes revisar meses pasados y futuros.
           </p>
         </div>
-        <span className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-black text-[#39433f]">
-          <CalendarDays className="size-4 text-[var(--tenant-color)]" />
-          Desde {formatBookingDateLabel(weeks[0][0].dateKey)}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="grid size-10 place-items-center rounded-lg border border-[var(--line)] bg-white text-[#39433f] transition hover:border-[var(--tenant-color)]"
+            onClick={() => changeVisibleMonth(-1)}
+            title="Mes anterior"
+          >
+            <ChevronLeft className="size-4" />
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-black text-[#39433f] transition hover:border-[var(--tenant-color)]"
+            onClick={() => setVisibleMonth(getMonthStart(new Date()))}
+          >
+            <CalendarDays className="size-4 text-[var(--tenant-color)]" />
+            {visibleMonthLabel}
+          </button>
+          <button
+            type="button"
+            className="grid size-10 place-items-center rounded-lg border border-[var(--line)] bg-white text-[#39433f] transition hover:border-[var(--tenant-color)]"
+            onClick={() => changeVisibleMonth(1)}
+            title="Mes siguiente"
+          >
+            <ChevronRight className="size-4" />
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-black text-[#39433f] transition hover:border-[var(--tenant-color)]"
+            onClick={() => setVisibleMonth(getMonthStart(new Date()))}
+          >
+            Hoy
+          </button>
+        </div>
       </div>
       <div className="mt-5 overflow-x-auto pb-2 scrollbar-thin">
         <div className="min-w-[1180px] rounded-lg border border-[var(--line)] bg-white shadow-sm">
@@ -10269,7 +10367,9 @@ function AgendaCalendar({
                 return (
                   <div
                     key={day.dateKey}
-                    className={`min-h-48 border-r border-[var(--line)] bg-[#fbfaf6] p-2 last:border-r-0 ${
+                    className={`min-h-48 border-r border-[var(--line)] p-2 last:border-r-0 ${
+                      day.isOutsideMonth ? "bg-[#f4f1e9] opacity-70" : "bg-[#fbfaf6]"
+                    } ${
                       day.isToday ? "bg-[#effaf5]" : ""
                     }`}
                   >
@@ -10454,6 +10554,7 @@ function CalendarSlotActionDialog({
     notes: string;
     startAt: string;
     endAt: string;
+    occurrences?: CalendarActionOccurrence[];
   }) => Promise<void>;
   onClose: () => void;
 }) {
@@ -10463,6 +10564,8 @@ function CalendarSlotActionDialog({
   const defaultStartTime = getDefaultAgendaStartTime(dateKey);
   const [appointmentStartTime, setAppointmentStartTime] = useState(defaultStartTime);
   const [appointmentDurationMinutes, setAppointmentDurationMinutes] = useState("60");
+  const [repeatWeekly, setRepeatWeekly] = useState(false);
+  const [repeatCount, setRepeatCount] = useState("4");
   const [blockAllDay, setBlockAllDay] = useState(false);
   const [blockStartTime, setBlockStartTime] = useState(defaultStartTime);
   const [blockEndTime, setBlockEndTime] = useState(
@@ -10474,15 +10577,37 @@ function CalendarSlotActionDialog({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const appointmentDuration = clampAppointmentDuration(
+      Number(appointmentDurationMinutes) || 60,
+    );
+    const appointmentOccurrenceCount =
+      actionType === "appointment" && repeatWeekly
+        ? Number(repeatCount) || 1
+        : 1;
+    const appointmentOccurrences = Array.from(
+      { length: appointmentOccurrenceCount },
+      (_, index) => {
+        const occurrenceDateKey = addDaysDateKey(dateKey, index * 7);
+        const occurrenceStartAt = buildLocalDateTimeIso(
+          occurrenceDateKey,
+          appointmentStartTime,
+        );
+
+        return {
+          startAt: occurrenceStartAt,
+          endAt: addMinutesIso(occurrenceStartAt, appointmentDuration),
+        };
+      },
+    );
     const startAt =
       actionType === "appointment"
-        ? buildLocalDateTimeIso(dateKey, appointmentStartTime)
+        ? appointmentOccurrences[0].startAt
         : blockAllDay
           ? getAllDayBlockStartAt(dateKey)
           : buildLocalDateTimeIso(dateKey, blockStartTime);
     const endAt =
       actionType === "appointment"
-        ? addMinutesIso(startAt, Number(appointmentDurationMinutes) || 60)
+        ? appointmentOccurrences[0].endAt
         : blockAllDay
           ? buildLocalDateTimeIso(addDaysDateKey(dateKey, 1), "00:00")
           : buildLocalDateTimeIso(dateKey, blockEndTime);
@@ -10496,6 +10621,7 @@ function CalendarSlotActionDialog({
       notes,
       startAt,
       endAt,
+      occurrences: actionType === "appointment" ? appointmentOccurrences : undefined,
     });
   }
 
@@ -10565,6 +10691,31 @@ function CalendarSlotActionDialog({
                 onChange={(value) => setAppointmentMode(value as AppointmentMode)}
                 options={appointmentModeOptions}
               />
+              <label className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-white px-3 py-3 text-sm font-bold text-[#39433f]">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-[var(--tenant-color)]"
+                  checked={repeatWeekly}
+                  onChange={(event) => setRepeatWeekly(event.target.checked)}
+                />
+                Repetir semanalmente esta cita
+              </label>
+              {repeatWeekly && (
+                <div className="rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3">
+                  <SelectField
+                    label="Número de citas"
+                    value={repeatCount}
+                    onChange={setRepeatCount}
+                    options={bulkAppointmentCountOptions.map((count) => ({
+                      value: String(count),
+                      label: `${count} citas`,
+                    }))}
+                  />
+                  <p className="mt-2 text-xs font-semibold leading-5 text-[var(--muted)]">
+                    Se crearán cada 7 días, siempre a la misma hora y con la misma duración.
+                  </p>
+                </div>
+              )}
               {appointmentMode === "online" && (
                 <Field
                   label="Enlace de videollamada"
@@ -10617,7 +10768,11 @@ function CalendarSlotActionDialog({
             disabled={saving || (actionType === "appointment" && !patientId)}
           >
             {saving ? <Loader2 className="size-4 animate-spin" /> : <CalendarDays className="size-4" />}
-            {actionType === "appointment" ? "Enviar cita" : "Guardar bloqueo"}
+            {actionType === "appointment" && repeatWeekly
+              ? "Enviar citas"
+              : actionType === "appointment"
+                ? "Enviar cita"
+                : "Guardar bloqueo"}
           </button>
         </form>
       </div>
@@ -12899,6 +13054,70 @@ function getAgendaWeeks(weekCount: number) {
       };
     }),
   );
+}
+
+function getAgendaMonthWeeks(month: Date) {
+  const monthStart = getMonthStart(month);
+  const firstMonday = getMondayStart(monthStart);
+  const monthEnd = new Date(monthStart);
+  monthEnd.setMonth(monthEnd.getMonth() + 1);
+  monthEnd.setDate(0);
+  monthEnd.setHours(0, 0, 0, 0);
+
+  const weeks: Array<
+    Array<{
+      dateKey: string;
+      dayNumber: string;
+      monthLabel: string;
+      isToday: boolean;
+      isOutsideMonth: boolean;
+    }>
+  > = [];
+  const cursor = new Date(firstMonday);
+
+  while (cursor <= monthEnd || weeks.length === 0) {
+    const weekStart = new Date(cursor);
+    weeks.push(
+      Array.from({ length: 7 }, (_, dayIndex) => {
+        const date = new Date(weekStart);
+        date.setDate(weekStart.getDate() + dayIndex);
+        const dateKey = getLocalDateString(date);
+
+        return {
+          dateKey,
+          dayNumber: new Intl.DateTimeFormat("es-ES", { day: "2-digit" }).format(date),
+          monthLabel: new Intl.DateTimeFormat("es-ES", { month: "short" }).format(date),
+          isToday: dateKey === getLocalDateString(),
+          isOutsideMonth: date.getMonth() !== monthStart.getMonth(),
+        };
+      }),
+    );
+    cursor.setDate(cursor.getDate() + 7);
+  }
+
+  return weeks;
+}
+
+function getMonthStart(value: Date) {
+  const date = new Date(value);
+  date.setDate(1);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function addMonths(value: Date, months: number) {
+  const date = getMonthStart(value);
+  date.setMonth(date.getMonth() + months);
+  return getMonthStart(date);
+}
+
+function formatAgendaMonthLabel(value: Date) {
+  const label = new Intl.DateTimeFormat("es-ES", {
+    month: "long",
+    year: "numeric",
+  }).format(value);
+
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function isPastAgendaDate(dateKey: string) {
