@@ -458,6 +458,13 @@ async function rescheduleCalendarEvent(
     );
   }
 
+  if (!isValidAppointmentDuration(startAt, endAt)) {
+    return NextResponse.json(
+      { error: "La cita debe durar entre 10 y 60 minutos." },
+      { status: 400 },
+    );
+  }
+
   const { data: event, error: eventError } = await supabase
     .from("calendar_events")
     .select("id,tenant_id,patient_id,created_by,title,event_type,appointment_mode,start_at,end_at,status")
@@ -750,6 +757,14 @@ function isPastCalendarStart(startAt: string | undefined) {
   return new Date(startAt).getTime() <= Date.now();
 }
 
+function isValidAppointmentDuration(startAt: string | undefined, endAt: string | undefined) {
+  if (!startAt || !endAt) return false;
+  const durationMinutes =
+    (new Date(endAt).getTime() - new Date(startAt).getTime()) / 60000;
+
+  return durationMinutes >= 10 && durationMinutes <= 60;
+}
+
 async function hasOverlappingCalendarBlock(
   supabase: Awaited<ReturnType<typeof getSupabaseAdmin>>,
   tenantId: string | undefined,
@@ -793,6 +808,13 @@ function validateCalendarRow(row: CalendarEventRow | undefined) {
 
   if (new Date(row.end_at).getTime() <= new Date(row.start_at).getTime()) {
     return "La hora de fin debe ser posterior a la hora de inicio.";
+  }
+
+  if (
+    row.event_type === "appointment" &&
+    !isValidAppointmentDuration(row.start_at, row.end_at)
+  ) {
+    return "La cita debe durar entre 10 y 60 minutos.";
   }
 
   if (

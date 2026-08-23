@@ -220,8 +220,12 @@ test("appointment notifications require customer confirmation and immediate emai
   assert.match(source, /Citas pendientes de confirmar/);
   assert.match(source, /Confirmar cita/);
   assert.match(source, /CalendarSlotActionDialog/);
-  assert.match(source, /onAvailableSlotClick/);
+  assert.match(source, /onAvailableDayClick/);
   assert.match(source, /availableSlots=\{availableSlots\}/);
+  assert.match(source, /appointmentDurationOptions/);
+  assert.match(source, /getAvailableAppointmentDurationOptions/);
+  assert.match(source, /allowDurationSelect/);
+  assert.match(source, /addMinutesIso\(slot\.startAt, 60\)/);
   assert.match(source, /isPendingPatientConfirmation/);
   assert.match(source, /isPendingNutritionistConfirmation/);
   assert.match(source, /AgendaDayEventsDialog/);
@@ -237,6 +241,8 @@ test("appointment notifications require customer confirmation and immediate emai
   assert.match(calendarRoute, /canPatientCancelAppointment/);
   assert.match(calendarRoute, /rescheduleCalendarEvent/);
   assert.match(calendarRoute, /isPastCalendarStart/);
+  assert.match(calendarRoute, /isValidAppointmentDuration/);
+  assert.match(calendarRoute, /La cita debe durar entre 10 y 60 minutos/);
   assert.match(calendarRoute, /hasOverlappingCalendarBlock/);
   assert.match(calendarRoute, /Ese hueco ya esta ocupado en la agenda/);
   assert.match(calendarRoute, /notifyCalendarEventRescheduled/);

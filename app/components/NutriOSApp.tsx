@@ -254,6 +254,11 @@ type AvailableAppointmentSlot = {
   label: string;
 };
 
+type AgendaDaySelection = {
+  dateKey: string;
+  slots: AvailableAppointmentSlot[];
+};
+
 type CalendarBusySlot = {
   id: string;
   start_at: string;
@@ -644,6 +649,7 @@ const appointmentModeOptions: Array<{ value: AppointmentMode; label: string }> =
   { value: "online", label: "Online" },
   { value: "presential", label: "Presencial" },
 ];
+const appointmentDurationOptions = [10, 20, 30, 40, 50, 60];
 
 const mealTypeOrder = new Map<string, number>([
   ...mealTypes.map((mealType, index) => [mealType, index] as const),
@@ -9502,7 +9508,11 @@ function PatientAgendaPanel({
     isPendingPatientConfirmation(event, selectedPatient),
   );
   const availableSlots = useMemo(
-    () => buildAvailableAppointmentSlots(availabilitySlots, calendarBusySlots, 28),
+    () =>
+      buildAvailableAppointmentSlots(availabilitySlots, calendarBusySlots, 28, {
+        minimumDurationMinutes: 60,
+        maxDurationMinutes: 60,
+      }),
     [availabilitySlots, calendarBusySlots],
   );
   const selectedDaySlots = availableSlots.filter(
@@ -9529,7 +9539,7 @@ function PatientAgendaPanel({
       appointment_mode: appointmentMode,
       blocks_availability: true,
       start_at: slot.startAt,
-      end_at: slot.endAt,
+      end_at: addMinutesIso(slot.startAt, 60),
       status: "pending",
     } satisfies Omit<CalendarEvent, "id" | "created_by" | "created_at" | "updated_at">;
     const { error } = await postCalendarEventMutation(supabase, {
@@ -9802,8 +9812,8 @@ function NutritionistAgendaPanel({
     slotMinutes: "60",
   });
   const [activeAgendaTool, setActiveAgendaTool] = useState<"" | "availability">("");
-  const [selectedAgendaSlot, setSelectedAgendaSlot] =
-    useState<AvailableAppointmentSlot | null>(null);
+  const [selectedAgendaDay, setSelectedAgendaDay] =
+    useState<AgendaDaySelection | null>(null);
   const [savingAgenda, setSavingAgenda] = useState(false);
   const [rescheduleEvent, setRescheduleEvent] = useState<CalendarEvent | null>(null);
   const [rescheduling, setRescheduling] = useState(false);
@@ -9812,7 +9822,12 @@ function NutritionistAgendaPanel({
     (event) => isPendingNutritionistConfirmation(event, patients),
   );
   const availableSlots = useMemo(
-    () => buildAvailableAppointmentSlots(availabilitySlots, calendarBusySlots, 28),
+    () =>
+      buildAvailableAppointmentSlots(availabilitySlots, calendarBusySlots, 28, {
+        minimumDurationMinutes: 10,
+        maxDurationMinutes: 60,
+        stepMinutes: 10,
+      }),
     [availabilitySlots, calendarBusySlots],
   );
 
@@ -9824,8 +9839,8 @@ function NutritionistAgendaPanel({
     }
 
     const slotMinutes = Number(availabilityDraft.slotMinutes);
-    if (!slotMinutes || slotMinutes < 15) {
-      onNotice("La duracion minima del hueco debe ser de 15 minutos.");
+    if (!slotMinutes || slotMinutes < 10) {
+      onNotice("El intervalo minimo debe ser de 10 minutos.");
       return;
     }
 
@@ -9877,6 +9892,7 @@ function NutritionistAgendaPanel({
     videoUrl,
     title,
     notes,
+    durationMinutes,
   }: {
     slot: AvailableAppointmentSlot;
     actionType: "appointment" | "block";
@@ -9885,7 +9901,10 @@ function NutritionistAgendaPanel({
     videoUrl: string;
     title: string;
     notes: string;
+    durationMinutes: number;
   }) {
+    const endAt = addMinutesIso(slot.startAt, clampAppointmentDuration(durationMinutes));
+
     if (actionType === "appointment") {
       const patient = patients.find((item) => item.id === patientId);
       if (!patient) {
@@ -9912,11 +9931,11 @@ function NutritionistAgendaPanel({
               : undefined,
           blocks_availability: true,
           start_at: slot.startAt,
-          end_at: slot.endAt,
+          end_at: endAt,
           status: "pending",
         },
         successMessage: "Cita enviada al cliente para confirmar.",
-        afterSuccess: () => setSelectedAgendaSlot(null),
+        afterSuccess: () => setSelectedAgendaDay(null),
       });
       return;
     }
@@ -9936,11 +9955,11 @@ function NutritionistAgendaPanel({
         appointment_mode: null,
         blocks_availability: true,
         start_at: slot.startAt,
-        end_at: slot.endAt,
+        end_at: endAt,
         status: "confirmed",
       },
       successMessage: "Bloqueo guardado.",
-      afterSuccess: () => setSelectedAgendaSlot(null),
+      afterSuccess: () => setSelectedAgendaDay(null),
     });
   }
 
@@ -10164,20 +10183,21 @@ function NutritionistAgendaPanel({
           events={visibleEvents}
           patients={patients}
           availableSlots={availableSlots}
-          onAvailableSlotClick={setSelectedAgendaSlot}
+          onAvailableDayClick={setSelectedAgendaDay}
           onCancel={cancelEvent}
           onReschedule={setRescheduleEvent}
           onSaveVideoUrl={saveAppointmentVideoUrl}
         />
       </div>
-      {selectedAgendaSlot && (
+      {selectedAgendaDay && (
         <CalendarSlotActionDialog
-          slot={selectedAgendaSlot}
+          dateKey={selectedAgendaDay.dateKey}
+          slots={selectedAgendaDay.slots}
           patients={patients}
           defaultPatientId={selectedPatient?.id ?? patients[0]?.id ?? ""}
           saving={savingAgenda}
           onSubmit={saveCalendarSlotAction}
-          onClose={() => setSelectedAgendaSlot(null)}
+          onClose={() => setSelectedAgendaDay(null)}
         />
       )}
       {rescheduleEvent && (
@@ -10185,6 +10205,7 @@ function NutritionistAgendaPanel({
           event={rescheduleEvent}
           mode="slots"
           availableSlots={availableSlots}
+          allowDurationSelect
           saving={rescheduling}
           title="Cambiar fecha/hora"
           submitLabel="Enviar cambio"
@@ -10203,7 +10224,7 @@ function AgendaCalendar({
   events,
   patients,
   availableSlots = [],
-  onAvailableSlotClick,
+  onAvailableDayClick,
   onCancel,
   onConfirm,
   onReschedule,
@@ -10214,7 +10235,7 @@ function AgendaCalendar({
   events: CalendarEvent[];
   patients: Patient[];
   availableSlots?: AvailableAppointmentSlot[];
-  onAvailableSlotClick?: (slot: AvailableAppointmentSlot) => void;
+  onAvailableDayClick?: (selection: AgendaDaySelection) => void;
   onCancel?: (event: CalendarEvent) => void;
   onConfirm?: (event: CalendarEvent) => void;
   onReschedule?: (event: CalendarEvent) => void;
@@ -10224,7 +10245,6 @@ function AgendaCalendar({
   const [expandedDay, setExpandedDay] = useState<{
     dateKey: string;
     events: CalendarEvent[];
-    slots: AvailableAppointmentSlot[];
   } | null>(null);
   const weeks = getAgendaWeeks(4);
   const eventsByDay = groupCalendarEventsByDay(events);
@@ -10264,8 +10284,8 @@ function AgendaCalendar({
               {week.map((day) => {
                 const dayEvents = eventsByDay.get(day.dateKey) ?? [];
                 const daySlots = slotsByDay.get(day.dateKey) ?? [];
-                const visibleDaySlots = daySlots.slice(0, 5);
-                const hasCalendarItems = dayEvents.length > 0 || daySlots.length > 0;
+                const canCreateOnDay = Boolean(onAvailableDayClick && daySlots.length > 0);
+                const hasCalendarItems = dayEvents.length > 0;
 
                 return (
                   <div
@@ -10281,33 +10301,30 @@ function AgendaCalendar({
                           {day.monthLabel}
                         </p>
                       </div>
-                      {hasCalendarItems && (
-                        <span className="grid min-w-7 place-items-center rounded-md bg-white px-2 py-1 text-xs font-black text-[var(--tenant-color)]">
-                          {dayEvents.length + daySlots.length}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {canCreateOnDay && (
+                          <button
+                            type="button"
+                            className="grid size-7 place-items-center rounded-md bg-white text-[var(--tenant-color)] ring-1 ring-[var(--line)] transition hover:ring-[var(--tenant-color)]"
+                            onClick={() =>
+                              onAvailableDayClick?.({
+                                dateKey: day.dateKey,
+                                slots: daySlots,
+                              })
+                            }
+                            title="Crear cita o bloqueo"
+                          >
+                            <Plus className="size-3.5" />
+                          </button>
+                        )}
+                        {hasCalendarItems && (
+                          <span className="grid min-w-7 place-items-center rounded-md bg-white px-2 py-1 text-xs font-black text-[var(--tenant-color)]">
+                            {dayEvents.length}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div className="mt-3 grid gap-2">
-                      {onAvailableSlotClick && visibleDaySlots.length > 0 && (
-                        <div className="rounded-lg border border-[#b8dccd] bg-[#effaf5] p-2">
-                          <p className="mb-2 text-[11px] font-black uppercase text-[#255d50]">
-                            Disponible
-                          </p>
-                          <div className="grid gap-1.5">
-                            {visibleDaySlots.map((slot) => (
-                              <button
-                                key={slot.id}
-                                type="button"
-                                className="inline-flex min-h-8 items-center justify-between gap-2 rounded-md bg-white px-2 py-1 text-left text-[11px] font-black text-[#255d50] ring-1 ring-[#cfe8dd] transition hover:ring-[var(--tenant-color)]"
-                                onClick={() => onAvailableSlotClick(slot)}
-                              >
-                                <span>{formatAgendaTimeRange(slot.startAt, slot.endAt)}</span>
-                                <Plus className="size-3.5 shrink-0" />
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
                       {dayEvents.slice(0, 3).map((event) => (
                         <AgendaEventCard
                           key={event.id}
@@ -10331,26 +10348,10 @@ function AgendaCalendar({
                             setExpandedDay({
                               dateKey: day.dateKey,
                               events: dayEvents,
-                              slots: daySlots,
                             })
                           }
                         >
                           +{dayEvents.length - 3} más
-                        </button>
-                      )}
-                      {onAvailableSlotClick && daySlots.length > 5 && (
-                        <button
-                          type="button"
-                          className="rounded-md bg-white px-2 py-1 text-left text-xs font-black text-[#255d50] ring-1 ring-[var(--line)] transition hover:ring-[var(--tenant-color)]"
-                          onClick={() =>
-                            setExpandedDay({
-                              dateKey: day.dateKey,
-                              events: dayEvents,
-                              slots: daySlots,
-                            })
-                          }
-                        >
-                          +{daySlots.length - 5} huecos
                         </button>
                       )}
                       {!hasCalendarItems && (
@@ -10370,9 +10371,7 @@ function AgendaCalendar({
         <AgendaDayEventsDialog
           dateKey={expandedDay.dateKey}
           events={expandedDay.events}
-          slots={expandedDay.slots}
           patients={patients}
-          onAvailableSlotClick={onAvailableSlotClick}
           confirmablePatient={confirmablePatient}
           onCancel={onCancel}
           onConfirm={onConfirm}
@@ -10388,9 +10387,7 @@ function AgendaCalendar({
 function AgendaDayEventsDialog({
   dateKey,
   events,
-  slots,
   patients,
-  onAvailableSlotClick,
   confirmablePatient,
   onCancel,
   onConfirm,
@@ -10400,9 +10397,7 @@ function AgendaDayEventsDialog({
 }: {
   dateKey: string;
   events: CalendarEvent[];
-  slots: AvailableAppointmentSlot[];
   patients: Patient[];
-  onAvailableSlotClick?: (slot: AvailableAppointmentSlot) => void;
   confirmablePatient?: Patient | null;
   onCancel?: (event: CalendarEvent) => void;
   onConfirm?: (event: CalendarEvent) => void;
@@ -10432,29 +10427,6 @@ function AgendaDayEventsDialog({
           </button>
         </div>
         <div className="grid max-h-[68vh] gap-3 overflow-y-auto p-4 scrollbar-thin">
-          {onAvailableSlotClick && slots.length > 0 && (
-            <div className="rounded-lg border border-[#b8dccd] bg-[#effaf5] p-3">
-              <p className="mb-2 text-xs font-black uppercase text-[#255d50]">
-                Huecos disponibles
-              </p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {slots.map((slot) => (
-                  <button
-                    key={slot.id}
-                    type="button"
-                    className="inline-flex min-h-10 items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-left text-sm font-black text-[#255d50] ring-1 ring-[#cfe8dd] transition hover:ring-[var(--tenant-color)]"
-                    onClick={() => {
-                      onAvailableSlotClick(slot);
-                      onClose();
-                    }}
-                  >
-                    <span>{formatAgendaTimeRange(slot.startAt, slot.endAt)}</span>
-                    <Plus className="size-4 shrink-0" />
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
           {events.map((event) => (
             <AgendaEventCard
               key={event.id}
@@ -10484,14 +10456,16 @@ function AgendaDayEventsDialog({
 }
 
 function CalendarSlotActionDialog({
-  slot,
+  dateKey,
+  slots,
   patients,
   defaultPatientId,
   saving,
   onSubmit,
   onClose,
 }: {
-  slot: AvailableAppointmentSlot;
+  dateKey: string;
+  slots: AvailableAppointmentSlot[];
   patients: Patient[];
   defaultPatientId: string;
   saving: boolean;
@@ -10503,26 +10477,41 @@ function CalendarSlotActionDialog({
     videoUrl: string;
     title: string;
     notes: string;
+    durationMinutes: number;
   }) => Promise<void>;
   onClose: () => void;
 }) {
   const [actionType, setActionType] = useState<"appointment" | "block">("appointment");
   const [patientId, setPatientId] = useState(defaultPatientId);
   const [appointmentMode, setAppointmentMode] = useState<AppointmentMode>("online");
+  const [slotId, setSlotId] = useState(slots[0]?.id ?? "");
+  const selectedSlot = slots.find((slot) => slot.id === slotId) ?? slots[0] ?? null;
+  const durationOptions = selectedSlot
+    ? getAvailableAppointmentDurationOptions(selectedSlot)
+    : [];
+  const [durationMinutes, setDurationMinutes] = useState(
+    String(durationOptions.at(-1) ?? 60),
+  );
+  const effectiveDurationMinutes = durationOptions.includes(Number(durationMinutes))
+    ? Number(durationMinutes)
+    : durationOptions.at(-1) ?? 10;
   const [videoUrl, setVideoUrl] = useState("");
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!selectedSlot) return;
+
     await onSubmit({
-      slot,
+      slot: selectedSlot,
       actionType,
       patientId,
       appointmentMode,
       videoUrl,
       title,
       notes,
+      durationMinutes: effectiveDurationMinutes,
     });
   }
 
@@ -10532,10 +10521,10 @@ function CalendarSlotActionDialog({
         <div className="flex items-start justify-between gap-3 border-b border-[var(--line)] p-4">
           <div>
             <p className="text-xs font-black uppercase text-[var(--tenant-color)]">
-              Hueco disponible
+              Crear en agenda
             </p>
             <h2 className="mt-1 text-lg font-black">
-              {formatDate(slot.startAt)} - {formatAgendaTimeRange(slot.startAt, slot.endAt)}
+              {formatBookingDateLabel(dateKey)}
             </h2>
           </div>
           <button
@@ -10557,6 +10546,26 @@ function CalendarSlotActionDialog({
               { value: "block", label: "Bloquear hueco" },
             ]}
           />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <SelectField
+              label="Hora de inicio"
+              value={selectedSlot?.id ?? ""}
+              onChange={setSlotId}
+              options={slots.map((slot) => ({
+                value: slot.id,
+                label: `${formatTimeOnly(slot.startAt)} - hasta ${formatTimeOnly(slot.endAt)}`,
+              }))}
+            />
+            <SelectField
+              label="DuraciÃ³n"
+              value={String(effectiveDurationMinutes)}
+              onChange={setDurationMinutes}
+              options={durationOptions.map((duration) => ({
+                value: String(duration),
+                label: `${duration} min`,
+              }))}
+            />
+          </div>
           {actionType === "appointment" ? (
             <>
               <SelectField
@@ -10594,7 +10603,7 @@ function CalendarSlotActionDialog({
           <TextArea label="Notas" value={notes} onChange={setNotes} />
           <button
             className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60 sm:w-fit"
-            disabled={saving || (actionType === "appointment" && !patientId)}
+            disabled={saving || !selectedSlot || (actionType === "appointment" && !patientId)}
           >
             {saving ? <Loader2 className="size-4 animate-spin" /> : <CalendarDays className="size-4" />}
             {actionType === "appointment" ? "Enviar cita" : "Guardar bloqueo"}
@@ -10609,6 +10618,7 @@ function AppointmentRescheduleDialog({
   event,
   mode,
   availableSlots = [],
+  allowDurationSelect = false,
   saving,
   title,
   submitLabel,
@@ -10618,6 +10628,7 @@ function AppointmentRescheduleDialog({
   event: CalendarEvent;
   mode: "slots" | "manual";
   availableSlots?: AvailableAppointmentSlot[];
+  allowDurationSelect?: boolean;
   saving: boolean;
   title: string;
   submitLabel: string;
@@ -10632,8 +10643,7 @@ function AppointmentRescheduleDialog({
   const [manualStartTime, setManualStartTime] = useState(formatTimeOnly(event.start_at));
   const [manualDuration, setManualDuration] = useState(
     String(
-      Math.max(
-        15,
+      clampAppointmentDuration(
         Math.round(
           (new Date(event.end_at).getTime() - new Date(event.start_at).getTime()) /
             60000,
@@ -10641,6 +10651,7 @@ function AppointmentRescheduleDialog({
       ),
     ),
   );
+  const [slotDurationMinutes, setSlotDurationMinutes] = useState(manualDuration);
   const selectedDaySlots = availableSlots.filter(
     (slot) => slot.dateKey === selectedDate,
   );
@@ -10648,7 +10659,10 @@ function AppointmentRescheduleDialog({
   function submitManual(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const startAt = buildLocalDateTimeIso(manualDate, manualStartTime);
-    const endAt = addMinutesIso(startAt, Number(manualDuration) || 60);
+    const endAt = addMinutesIso(
+      startAt,
+      clampAppointmentDuration(Number(manualDuration) || 60),
+    );
     onSubmit(startAt, endAt);
   }
 
@@ -10687,25 +10701,55 @@ function AppointmentRescheduleDialog({
                 <p className="text-sm font-black text-[#24342f]">
                   {formatBookingDateLabel(selectedDate)}
                 </p>
+                {allowDurationSelect && (
+                  <div className="mt-3">
+                    <SelectField
+                      label="DuraciÃ³n"
+                      value={slotDurationMinutes}
+                      onChange={setSlotDurationMinutes}
+                      options={appointmentDurationOptions.map((duration) => ({
+                        value: String(duration),
+                        label: `${duration} min`,
+                      }))}
+                    />
+                  </div>
+                )}
                 <div className="mt-3 grid gap-2">
-                  {selectedDaySlots.map((slot) => (
-                    <button
-                      key={slot.id}
-                      type="button"
-                      className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-left text-sm transition hover:border-[var(--tenant-color)] disabled:opacity-60"
-                      onClick={() => onSubmit(slot.startAt, slot.endAt)}
-                      disabled={saving}
-                    >
-                      <span className="font-black text-[#24342f]">
-                        {formatAgendaTimeRange(slot.startAt, slot.endAt)}
-                      </span>
-                      {saving ? (
-                        <Loader2 className="size-4 shrink-0 animate-spin text-[var(--tenant-color)]" />
-                      ) : (
-                        <ChevronRight className="size-4 shrink-0 text-[var(--tenant-color)]" />
-                      )}
-                    </button>
-                  ))}
+                  {selectedDaySlots.map((slot) => {
+                    const duration = Number(slotDurationMinutes);
+                    const canUseDuration =
+                      !allowDurationSelect ||
+                      getAvailableAppointmentDurationOptions(slot).includes(duration);
+                    const endAt = allowDurationSelect
+                      ? addMinutesIso(slot.startAt, duration)
+                      : slot.endAt;
+
+                    return (
+                      <button
+                        key={slot.id}
+                        type="button"
+                        className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-left text-sm transition hover:border-[var(--tenant-color)] disabled:opacity-60"
+                        onClick={() => onSubmit(slot.startAt, endAt)}
+                        disabled={saving || !canUseDuration}
+                      >
+                        <span>
+                          <span className="block font-black text-[#24342f]">
+                            {formatTimeOnly(slot.startAt)}
+                          </span>
+                          <span className="text-xs font-semibold text-[var(--muted)]">
+                            {allowDurationSelect
+                              ? `${duration} min`
+                              : formatAgendaTimeRange(slot.startAt, slot.endAt)}
+                          </span>
+                        </span>
+                        {saving ? (
+                          <Loader2 className="size-4 shrink-0 animate-spin text-[var(--tenant-color)]" />
+                        ) : (
+                          <ChevronRight className="size-4 shrink-0 text-[var(--tenant-color)]" />
+                        )}
+                      </button>
+                    );
+                  })}
                   {selectedDaySlots.length === 0 && (
                     <EmptyState text="No hay horas disponibles en este día." />
                   )}
@@ -12704,9 +12748,16 @@ function buildAvailableAppointmentSlots(
   availabilitySlots: AppointmentAvailability[],
   busySlots: CalendarBusySlot[],
   daysAhead: number,
+  options: {
+    minimumDurationMinutes?: number;
+    maxDurationMinutes?: number;
+    stepMinutes?: number;
+  } = {},
 ): AvailableAppointmentSlot[] {
   const now = Date.now();
   const slots: AvailableAppointmentSlot[] = [];
+  const minimumDurationMinutes = options.minimumDurationMinutes ?? 60;
+  const maxDurationMinutes = options.maxDurationMinutes ?? minimumDurationMinutes;
 
   for (let dayOffset = 0; dayOffset < daysAhead; dayOffset += 1) {
     const date = new Date();
@@ -12720,27 +12771,52 @@ function buildAvailableAppointmentSlots(
       .forEach((availability) => {
         const startMinutes = parseTimeToMinutes(availability.start_time);
         const endMinutes = parseTimeToMinutes(availability.end_time);
-        const duration = availability.slot_minutes || 60;
+        const stepMinutes = Math.max(
+          10,
+          options.stepMinutes ?? availability.slot_minutes ?? minimumDurationMinutes,
+        );
 
         for (
           let cursor = startMinutes;
-          cursor + duration <= endMinutes;
-          cursor += duration
+          cursor + minimumDurationMinutes <= endMinutes;
+          cursor += stepMinutes
         ) {
           const startAt = buildLocalDateTimeIso(dateKey, minutesToTime(cursor));
-          const endAt = buildLocalDateTimeIso(dateKey, minutesToTime(cursor + duration));
+          const minimumEndAt = buildLocalDateTimeIso(
+            dateKey,
+            minutesToTime(cursor + minimumDurationMinutes),
+          );
           const startsAtMs = new Date(startAt).getTime();
 
           if (startsAtMs <= now + 5 * 60 * 1000) continue;
-          if (busySlots.some((busySlot) => timeRangesOverlap(startAt, endAt, busySlot.start_at, busySlot.end_at))) {
+          if (busySlots.some((busySlot) => timeRangesOverlap(startAt, minimumEndAt, busySlot.start_at, busySlot.end_at))) {
             continue;
           }
+
+          const maxEndMinutes = Math.min(cursor + maxDurationMinutes, endMinutes);
+          const maxEndAt = busySlots.reduce(
+            (candidateEndAt, busySlot) => {
+              const busyStartMs = new Date(busySlot.start_at).getTime();
+              const startMs = new Date(startAt).getTime();
+              const candidateEndMs = new Date(candidateEndAt).getTime();
+
+              if (
+                busyStartMs > startMs &&
+                busyStartMs < candidateEndMs
+              ) {
+                return busySlot.start_at;
+              }
+
+              return candidateEndAt;
+            },
+            buildLocalDateTimeIso(dateKey, minutesToTime(maxEndMinutes)),
+          );
 
           slots.push({
             id: `${availability.id}-${dateKey}-${cursor}`,
             dateKey,
             startAt,
-            endAt,
+            endAt: maxEndAt,
             label: `${formatShortWeekday(date)} ${formatTimeString(minutesToTime(cursor))}`,
           });
         }
@@ -12748,6 +12824,26 @@ function buildAvailableAppointmentSlots(
   }
 
   return slots.sort((first, second) => first.startAt.localeCompare(second.startAt));
+}
+
+function clampAppointmentDuration(durationMinutes: number) {
+  if (appointmentDurationOptions.includes(durationMinutes)) {
+    return durationMinutes;
+  }
+
+  return appointmentDurationOptions.reduce((closest, option) =>
+    Math.abs(option - durationMinutes) < Math.abs(closest - durationMinutes)
+      ? option
+      : closest,
+  );
+}
+
+function getAvailableAppointmentDurationOptions(slot: AvailableAppointmentSlot) {
+  const availableMinutes = Math.floor(
+    (new Date(slot.endAt).getTime() - new Date(slot.startAt).getTime()) / 60000,
+  );
+
+  return appointmentDurationOptions.filter((duration) => duration <= availableMinutes);
 }
 
 function groupCalendarEventsByDay(events: CalendarEvent[]) {
