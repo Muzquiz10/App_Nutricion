@@ -1,6 +1,14 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FormEvent,
+  type DragEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Activity,
   Archive,
@@ -340,6 +348,11 @@ type MealItem = {
   position: number;
 };
 
+type DietDragPayload =
+  | { type: "day"; dayIndex: number; items: MealItem[] }
+  | { type: "meal"; dayIndex: number; mealType: string; items: MealItem[] }
+  | { type: "item"; dayIndex: number; mealType: string; items: MealItem[] };
+
 type DraftMealItem = {
   dayIndex: number;
   mealType: string;
@@ -630,10 +643,6 @@ const agendaWeekdayLabels = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes"
 const appointmentModeOptions: Array<{ value: AppointmentMode; label: string }> = [
   { value: "online", label: "Online" },
   { value: "presential", label: "Presencial" },
-];
-const calendarEventTypeOptions: Array<{ value: CalendarEventType; label: string }> = [
-  { value: "block", label: "Bloqueo" },
-  { value: "note", label: "Nota" },
 ];
 
 const mealTypeOrder = new Map<string, number>([
@@ -2304,7 +2313,8 @@ export function NutriOSApp({
                 tenant={tenant}
                 professionalName={tenant.name}
                 selectedPatient={selectedPatient}
-                plans={patientPlans}
+                patients={patients}
+                plans={role === "patient" ? patientPlans : plans}
                 supabase={supabase}
                 onNotice={setNotice}
                 onReload={loadWorkspace}
@@ -5667,6 +5677,7 @@ function PlansPanel({
   tenant,
   professionalName,
   selectedPatient,
+  patients,
   plans,
   supabase,
   onNotice,
@@ -5676,6 +5687,7 @@ function PlansPanel({
   tenant: Tenant;
   professionalName: string;
   selectedPatient: Patient | null;
+  patients: Patient[];
   plans: MealPlan[];
   supabase: ReturnType<typeof createSupabaseBrowser>;
   onNotice: (message: string) => void;
@@ -5702,6 +5714,10 @@ function PlansPanel({
     `nutrios:diet-editor-mode:${selectedPatient?.id ?? "none"}`,
     "create",
   );
+  const [reusablePlanId, setReusablePlanId] = useStoredValue(
+    `nutrios:reusable-plan:${selectedPatient?.id ?? "none"}`,
+    "",
+  );
   const [publishing, setPublishing] = useState(false);
   const normalizedDraft = normalizePlanDraft(planDraft);
   const entryRows = normalizedDraft.entryRows;
@@ -5710,10 +5726,21 @@ function PlansPanel({
   );
   const isNutritionist = role !== "patient";
   const isEditingSavedPlan = isNutritionist && dietEditorMode === "edit";
-  const availablePlans = useMemo(
-    () => (isNutritionist ? plans : plans.filter((plan) => isPlanActive(plan))),
-    [isNutritionist, plans],
+  const selectedPatientId = selectedPatient?.id ?? "";
+  const selectedPatientPlans = useMemo(
+    () => plans.filter((plan) => plan.patient_id === selectedPatientId),
+    [plans, selectedPatientId],
   );
+  const availablePlans = useMemo(
+    () =>
+      isNutritionist
+        ? selectedPatientPlans
+        : selectedPatientPlans.filter((plan) => isPlanActive(plan)),
+    [isNutritionist, selectedPatientPlans],
+  );
+  const reusablePlans = useMemo(() => (isNutritionist ? plans : []), [isNutritionist, plans]);
+  const reusablePlan =
+    reusablePlans.find((plan) => plan.id === reusablePlanId) ?? reusablePlans[0] ?? null;
   const selectedPublishedPlan =
     availablePlans.find((plan) => plan.id === selectedPlanId) ?? availablePlans[0] ?? null;
   const draftPlan =
@@ -5730,6 +5757,11 @@ function PlansPanel({
     if (!availablePlans.length || availablePlans.some((plan) => plan.id === selectedPlanId)) return;
     setSelectedPlanId(availablePlans[0].id);
   }, [availablePlans, selectedPlanId, setSelectedPlanId]);
+
+  useEffect(() => {
+    if (!reusablePlans.length || reusablePlans.some((plan) => plan.id === reusablePlanId)) return;
+    setReusablePlanId(reusablePlans[0].id);
+  }, [reusablePlanId, reusablePlans, setReusablePlanId]);
 
   function addRowsToDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -5911,6 +5943,36 @@ function PlansPanel({
     await onReload();
   }
 
+  async function duplicateReusablePlanForSelectedPatient() {
+    if (!selectedPatient || !reusablePlan) {
+      onNotice("Selecciona un cliente y una dieta para reutilizar.");
+      return;
+    }
+
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para reutilizar dietas reales.");
+      return;
+    }
+
+    const duplicatedPlan = await duplicateMealPlan(
+      supabase,
+      tenant.id,
+      reusablePlan,
+      `${reusablePlan.title} copia`,
+      selectedPatient.id,
+    );
+
+    if (duplicatedPlan.error || !duplicatedPlan.planId) {
+      onNotice(duplicatedPlan.error?.message ?? "No se pudo reutilizar la dieta.");
+      return;
+    }
+
+    setSelectedPlanId(duplicatedPlan.planId);
+    setDietEditorMode("edit");
+    onNotice("Dieta copiada para este cliente como inactiva.");
+    await onReload();
+  }
+
   async function togglePlanStatus(plan: MealPlan) {
     if (!supabase) {
       onNotice("Modo demo: conecta Supabase para activar o desactivar dietas reales.");
@@ -5975,6 +6037,40 @@ function PlansPanel({
                 ]}
               />
             </div>
+            {isNutritionist && selectedPatient && reusablePlans.length > 0 && (
+              <div className="mt-4 rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-3">
+                <p className="text-sm font-black">Usar dieta existente</p>
+                <p className="mt-1 text-xs font-semibold text-[var(--muted)]">
+                  Copia una dieta creada anteriormente y modifícala para este cliente.
+                </p>
+                <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                  <SelectField
+                    label="Dieta"
+                    value={reusablePlan?.id ?? ""}
+                    onChange={setReusablePlanId}
+                    options={reusablePlans.map((savedPlan) => {
+                      const ownerName =
+                        patients.find((patient) => patient.id === savedPlan.patient_id)
+                          ?.full_name ?? "Cliente anterior";
+
+                      return {
+                        value: savedPlan.id,
+                        label: `${savedPlan.title} - ${ownerName} - ${formatMealPlanStatus(savedPlan)}`,
+                      };
+                    })}
+                  />
+                  <button
+                    type="button"
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-black text-[#39433f] hover:border-[var(--tenant-color)] disabled:opacity-60"
+                    onClick={duplicateReusablePlanForSelectedPatient}
+                    disabled={!reusablePlan || publishing}
+                  >
+                    <Copy className="size-4 text-[var(--tenant-color)]" />
+                    Usar en este cliente
+                  </button>
+                </div>
+              </div>
+            )}
             {dietEditorMode === "create" && (
               <form className="mt-5 space-y-4" onSubmit={addRowsToDraft}>
               <Field
@@ -6019,16 +6115,16 @@ function PlansPanel({
             )}
             {dietEditorMode === "edit" && (
               <div className="mt-5 space-y-4">
-                {plans.length === 0 && (
+                {availablePlans.length === 0 && (
                   <EmptyState text="No hay dietas guardadas para modificar." />
                 )}
-                {plans.length > 0 && (
+                {availablePlans.length > 0 && (
                   <>
                     <SelectField
                       label="Dieta a modificar"
                       value={selectedPublishedPlan?.id ?? ""}
                       onChange={setSelectedPlanId}
-                      options={plans.map((savedPlan) => ({
+                      options={availablePlans.map((savedPlan) => ({
                         value: savedPlan.id,
                         label: `${savedPlan.title} - ${formatDate(savedPlan.start_date)} - ${formatMealPlanStatus(savedPlan)}`,
                       }))}
@@ -6082,7 +6178,7 @@ function PlansPanel({
             <DietPublishedSummary
               plan={activePlan}
               isDraft={activePlanIsDraft}
-              plans={plans}
+              plans={availablePlans}
               selectedPlanId={selectedPublishedPlan?.id ?? ""}
               onSelectPlan={setSelectedPlanId}
               onDeletePlan={deletePlan}
@@ -6107,7 +6203,7 @@ function PlansPanel({
           onReload={onReload}
           onUpdateDraftMeal={updateDraftPlanMeal}
           onDeleteDraftMeal={deleteDraftPlanMeal}
-          onPasteDraftDay={pasteDraftDayMeals}
+          onPasteDraftMeals={pasteDraftMeals}
         />
       </Panel>
     </div>
@@ -6189,7 +6285,11 @@ function PlansPanel({
     });
   }
 
-  function pasteDraftDayMeals(targetDayIndex: number, copiedItems: MealItem[]) {
+  function pasteDraftMeals(
+    targetDayIndex: number,
+    copiedItems: MealItem[],
+    targetMealType?: string,
+  ) {
     setPlanDraft((current) => {
       const draft = normalizePlanDraft(current);
 
@@ -6197,7 +6297,10 @@ function PlansPanel({
         ...draft,
         draftItems: sortDraftItems([
           ...draft.draftItems,
-          ...copiedItems.map((item) => mealItemToDraftMealItem(item, targetDayIndex)),
+          ...copiedItems.map((item) => ({
+            ...mealItemToDraftMealItem(item, targetDayIndex),
+            ...(targetMealType ? { mealType: targetMealType } : {}),
+          })),
         ]),
       };
     });
@@ -6472,7 +6575,7 @@ function MealPlanCalendar({
   onReload,
   onUpdateDraftMeal,
   onDeleteDraftMeal,
-  onPasteDraftDay,
+  onPasteDraftMeals,
 }: {
   plan: MealPlan | null;
   isDraft: boolean;
@@ -6486,14 +6589,14 @@ function MealPlanCalendar({
   onReload: () => Promise<void>;
   onUpdateDraftMeal: (index: number, patch: Partial<DraftMealItem>) => void;
   onDeleteDraftMeal: (index: number) => void;
-  onPasteDraftDay: (targetDayIndex: number, copiedItems: MealItem[]) => void;
+  onPasteDraftMeals: (
+    targetDayIndex: number,
+    copiedItems: MealItem[],
+    targetMealType?: string,
+  ) => void;
 }) {
   const planDays = plan?.meal_plan_days ?? [];
-  const [copiedDay, setCopiedDay] = useState<{
-    dayIndex: number;
-    dayLabel: string;
-    items: MealItem[];
-  } | null>(null);
+  const [draggedMeals, setDraggedMeals] = useState<DietDragPayload | null>(null);
 
   function handlePrint() {
     if (typeof document === "undefined") return;
@@ -6542,33 +6645,49 @@ function MealPlanCalendar({
     }
   }
 
-  function copyDay(dayIndex: number) {
-    if (!plan) return;
+  function startDietDrag(event: DragEvent<HTMLElement>, payload: DietDragPayload) {
+    if (!isEditable || payload.items.length === 0) return;
 
-    const items = getMealItemsForDay(plan, dayIndex);
-    if (items.length === 0) {
-      onNotice("Ese día no tiene comidas para copiar.");
-      return;
-    }
-
-    setCopiedDay({
-      dayIndex,
-      dayLabel: dayLabels[dayIndex - 1],
-      items,
-    });
-    onNotice(`Comidas de ${dayLabels[dayIndex - 1]} copiadas.`);
+    setDraggedMeals(payload);
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData("text/plain", payload.type);
   }
 
-  async function pasteDay(targetDayIndex: number) {
-    if (!plan || !copiedDay) return;
-    if (copiedDay.dayIndex === targetDayIndex) {
-      onNotice("Elige un día diferente para pegar las comidas.");
+  function allowDietDrop(event: DragEvent<HTMLElement>) {
+    if (!draggedMeals || !isEditable) return;
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  async function dropDietMeals(
+    event: DragEvent<HTMLElement>,
+    targetDayIndex: number,
+    targetMealType?: string,
+  ) {
+    event.preventDefault();
+    const draggedPayload = draggedMeals;
+    setDraggedMeals(null);
+    if (!plan || !draggedPayload || draggedPayload.items.length === 0) return;
+
+    if (targetMealType && draggedPayload.type === "day") {
+      onNotice("Suelta el día completo sobre otro día.");
       return;
     }
 
+    if (
+      draggedPayload.dayIndex === targetDayIndex &&
+      (!targetMealType || draggedPayload.mealType === targetMealType)
+    ) {
+      onNotice("Elige una posición diferente para copiar.");
+      return;
+    }
+
+    const itemsToCopy = draggedPayload.items;
+
     if (isDraft) {
-      onPasteDraftDay(targetDayIndex, copiedDay.items);
-      onNotice(`Comidas pegadas en ${dayLabels[targetDayIndex - 1]}.`);
+      onPasteDraftMeals(targetDayIndex, itemsToCopy, targetMealType);
+      onNotice("Comidas copiadas en la dieta.");
       return;
     }
 
@@ -6588,12 +6707,17 @@ function MealPlanCalendar({
       return;
     }
 
-    const targetItems = getMealItemsForDay(plan, targetDayIndex);
+    const targetItems = targetMealType
+      ? getMealItemsForCell(plan, targetDayIndex, targetMealType)
+      : getMealItemsForDay(plan, targetDayIndex);
     const nextPosition =
       targetItems.reduce((max, item) => Math.max(max, item.position), 0) + 1;
-    const rows = copiedDay.items.map((item, index) =>
+    const rows = itemsToCopy.map((item, index) =>
       mealItemPayloadFromDraft(
-        mealItemToDraftMealItem(item, targetDayIndex),
+        {
+          ...mealItemToDraftMealItem(item, targetDayIndex),
+          ...(targetMealType ? { mealType: targetMealType } : {}),
+        },
         mealPlanDayId,
         nextPosition + index,
       ),
@@ -6605,7 +6729,7 @@ function MealPlanCalendar({
       return;
     }
 
-    onNotice(`Comidas pegadas en ${dayLabels[targetDayIndex - 1]}.`);
+    onNotice("Comidas copiadas en la dieta.");
     await onReload();
   }
 
@@ -6700,33 +6824,34 @@ function MealPlanCalendar({
               </div>
               {dayLabels.map((dayLabel, dayIndex) => {
                 const calendarDayIndex = dayIndex + 1;
+                const dayItems = getMealItemsForDay(plan, calendarDayIndex);
+                const canDragDay = isEditable && dayItems.length > 0;
 
                 return (
                 <div
                   key={dayLabel}
-                  className="diet-calendar-day-header border-r border-[var(--line)] p-3 text-xs font-black uppercase text-[#53605a] last:border-r-0"
+                  className={`diet-calendar-day-header border-r border-[var(--line)] p-3 text-xs font-black uppercase text-[#53605a] last:border-r-0 ${
+                    canDragDay ? "cursor-grab active:cursor-grabbing" : ""
+                  } ${draggedMeals ? "ring-1 ring-inset ring-[var(--tenant-color)]" : ""}`}
+                  draggable={canDragDay}
+                  onDragStart={(event) =>
+                    startDietDrag(event, {
+                      type: "day",
+                      dayIndex: calendarDayIndex,
+                      items: dayItems,
+                    })
+                  }
+                  onDragEnd={() => setDraggedMeals(null)}
+                  onDragOver={allowDietDrop}
+                  onDrop={(event) => dropDietMeals(event, calendarDayIndex)}
+                  title={canDragDay ? "Arrastra para copiar el día completo" : undefined}
                 >
                   <div className="flex flex-col gap-2">
                     <span>{dayLabel}</span>
                     {isEditable && (
-                      <div className="print-hidden flex flex-wrap gap-1">
-                        <button
-                          type="button"
-                          className="inline-flex h-7 flex-1 items-center justify-center gap-1 rounded-md border border-[var(--line)] bg-white px-2 text-[11px] font-bold normal-case text-[#53605a]"
-                          onClick={() => copyDay(calendarDayIndex)}
-                        >
-                          <Copy className="size-3" />
-                          Copiar
-                        </button>
-                        <button
-                          type="button"
-                          className="inline-flex h-7 flex-1 items-center justify-center gap-1 rounded-md border border-[var(--line)] bg-white px-2 text-[11px] font-bold normal-case text-[#53605a] disabled:opacity-50"
-                          onClick={() => pasteDay(calendarDayIndex)}
-                          disabled={!copiedDay}
-                        >
-                          Pegar
-                        </button>
-                      </div>
+                      <span className="print-hidden inline-flex w-fit rounded-md bg-white px-2 py-1 text-[11px] font-bold normal-case text-[#53605a] ring-1 ring-[var(--line)]">
+                        {canDragDay ? "Arrastra día" : draggedMeals ? "Suelta aquí" : "Sin comidas"}
+                      </span>
                     )}
                   </div>
                 </div>
@@ -6744,11 +6869,27 @@ function MealPlanCalendar({
                 {dayLabels.map((dayLabel, dayIndex) => {
                   const calendarDayIndex = dayIndex + 1;
                   const cellItems = getMealItemsForCell(plan, calendarDayIndex, mealType);
+                  const canDragCell = isEditable && cellItems.length > 0;
 
                   return (
                     <div
                       key={`${mealType}-${dayLabel}`}
-                      className="diet-calendar-cell min-h-[118px] border-r border-[var(--line)] p-2 last:border-r-0"
+                      className={`diet-calendar-cell min-h-[118px] border-r border-[var(--line)] p-2 transition last:border-r-0 ${
+                        canDragCell ? "cursor-grab active:cursor-grabbing" : ""
+                      } ${draggedMeals ? "ring-1 ring-inset ring-[var(--tenant-color)]" : ""}`}
+                      draggable={canDragCell}
+                      onDragStart={(event) =>
+                        startDietDrag(event, {
+                          type: "meal",
+                          dayIndex: calendarDayIndex,
+                          mealType,
+                          items: cellItems,
+                        })
+                      }
+                      onDragEnd={() => setDraggedMeals(null)}
+                      onDragOver={allowDietDrop}
+                      onDrop={(event) => dropDietMeals(event, calendarDayIndex, mealType)}
+                      title={canDragCell ? "Arrastra para copiar esta comida" : undefined}
                     >
                       <div className="space-y-2">
                         {cellItems.map((item) => (
@@ -6765,6 +6906,16 @@ function MealPlanCalendar({
                             onReload={onReload}
                             onUpdateDraftMeal={onUpdateDraftMeal}
                             onDeleteDraftMeal={onDeleteDraftMeal}
+                            onDragStart={(event, draggedItem) => {
+                              event.stopPropagation();
+                              startDietDrag(event, {
+                                type: "item",
+                                dayIndex: calendarDayIndex,
+                                mealType,
+                                items: [draggedItem],
+                              });
+                            }}
+                            onDragEnd={() => setDraggedMeals(null)}
                           />
                         ))}
                         {cellItems.length === 0 && (
@@ -6797,6 +6948,8 @@ function CalendarMealItem({
   onReload,
   onUpdateDraftMeal,
   onDeleteDraftMeal,
+  onDragStart,
+  onDragEnd,
 }: {
   item: MealItem;
   planId: string;
@@ -6809,6 +6962,8 @@ function CalendarMealItem({
   onReload: () => Promise<void>;
   onUpdateDraftMeal: (index: number, patch: Partial<DraftMealItem>) => void;
   onDeleteDraftMeal: (index: number) => void;
+  onDragStart?: (event: DragEvent<HTMLDivElement>, item: MealItem) => void;
+  onDragEnd?: () => void;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [dayIndex, setDayIndex] = useState(String(currentDayIndex));
@@ -6915,7 +7070,15 @@ function CalendarMealItem({
   }
 
   return (
-    <div className="diet-calendar-item rounded-md border border-[var(--line)] bg-[#fffdf8] p-2 text-xs">
+    <div
+      className={`diet-calendar-item rounded-md border border-[var(--line)] bg-[#fffdf8] p-2 text-xs ${
+        isEditable && !isEditing ? "cursor-grab active:cursor-grabbing" : ""
+      }`}
+      draggable={isEditable && !isEditing}
+      onDragStart={(event) => onDragStart?.(event, item)}
+      onDragEnd={onDragEnd}
+      title={isEditable && !isEditing ? "Arrastra para copiar este alimento" : undefined}
+    >
       {!isEditing && (
         <div>
           <p className="font-black text-[#17201d]">{getMealFoodName(item)}</p>
@@ -7210,6 +7373,7 @@ async function duplicateMealPlan(
   tenantId: string,
   plan: MealPlan,
   title: string,
+  targetPatientId = plan.patient_id,
 ) {
   if (!supabase) return { planId: null, error: null };
 
@@ -7217,7 +7381,7 @@ async function duplicateMealPlan(
     .from("meal_plans")
     .insert({
       tenant_id: tenantId,
-      patient_id: plan.patient_id,
+      patient_id: targetPatientId,
       title,
       start_date: plan.start_date,
       status: "archived",
@@ -9637,26 +9801,9 @@ function NutritionistAgendaPanel({
     endTime: "13:00",
     slotMinutes: "60",
   });
-  const [appointmentDraft, setAppointmentDraft] = useState({
-    patientId: selectedPatient?.id ?? patients[0]?.id ?? "",
-    date: getLocalDateString(),
-    startTime: "09:00",
-    durationMinutes: "60",
-    mode: "online" as AppointmentMode,
-    videoUrl: "",
-    notes: "",
-  });
-  const [eventDraft, setEventDraft] = useState({
-    title: "",
-    date: getLocalDateString(),
-    startTime: "12:00",
-    durationMinutes: "60",
-    eventType: "block" as CalendarEventType,
-    blocksAvailability: true,
-    notes: "",
-  });
-  const [activeAgendaTool, setActiveAgendaTool] =
-    useState<"" | "availability" | "appointment" | "event">("");
+  const [activeAgendaTool, setActiveAgendaTool] = useState<"" | "availability">("");
+  const [selectedAgendaSlot, setSelectedAgendaSlot] =
+    useState<AvailableAppointmentSlot | null>(null);
   const [savingAgenda, setSavingAgenda] = useState(false);
   const [rescheduleEvent, setRescheduleEvent] = useState<CalendarEvent | null>(null);
   const [rescheduling, setRescheduling] = useState(false);
@@ -9664,12 +9811,6 @@ function NutritionistAgendaPanel({
   const pendingAppointments = visibleEvents.filter(
     (event) => isPendingNutritionistConfirmation(event, patients),
   );
-  const selectedDraftPatientIsValid = patients.some(
-    (patient) => patient.id === appointmentDraft.patientId,
-  );
-  const appointmentPatientId = selectedDraftPatientIsValid
-    ? appointmentDraft.patientId
-    : patients[0]?.id || "";
   const availableSlots = useMemo(
     () => buildAvailableAppointmentSlots(availabilitySlots, calendarBusySlots, 28),
     [availabilitySlots, calendarBusySlots],
@@ -9728,47 +9869,55 @@ function NutritionistAgendaPanel({
     await onReload();
   }
 
-  async function scheduleAppointment(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const patient = patients.find((item) => item.id === appointmentPatientId);
-    if (!patient) {
-      onNotice("Selecciona un cliente para agendar la cita.");
-      return;
-    }
+  async function saveCalendarSlotAction({
+    slot,
+    actionType,
+    patientId,
+    appointmentMode,
+    videoUrl,
+    title,
+    notes,
+  }: {
+    slot: AvailableAppointmentSlot;
+    actionType: "appointment" | "block";
+    patientId: string;
+    appointmentMode: AppointmentMode;
+    videoUrl: string;
+    title: string;
+    notes: string;
+  }) {
+    if (actionType === "appointment") {
+      const patient = patients.find((item) => item.id === patientId);
+      if (!patient) {
+        onNotice("Selecciona un cliente para agendar la cita.");
+        return;
+      }
 
-    await insertCalendarEvent({
-      tenant,
-      supabase,
-      onNotice,
-      onReload,
-      setSavingAgenda,
-      row: {
-        tenant_id: tenant.id,
-        patient_id: patient.id,
-        title: `Cita con ${patient.full_name}`,
-        notes: appointmentDraft.notes || null,
-        event_type: "appointment",
-        appointment_mode: appointmentDraft.mode,
-        video_url:
-          appointmentDraft.mode === "online" && appointmentDraft.videoUrl.trim()
-            ? appointmentDraft.videoUrl.trim()
-            : undefined,
-        blocks_availability: true,
-        start_at: buildLocalDateTimeIso(appointmentDraft.date, appointmentDraft.startTime),
-        end_at: addMinutesIso(
-          buildLocalDateTimeIso(appointmentDraft.date, appointmentDraft.startTime),
-          Number(appointmentDraft.durationMinutes) || 60,
-        ),
-        status: "pending",
-      },
-      successMessage: "Cita enviada al cliente para confirmar.",
-    });
-  }
-
-  async function saveOtherEvent(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!eventDraft.title.trim()) {
-      onNotice("Indica un titulo para el evento.");
+      await insertCalendarEvent({
+        tenant,
+        supabase,
+        onNotice,
+        onReload,
+        setSavingAgenda,
+        row: {
+          tenant_id: tenant.id,
+          patient_id: patient.id,
+          title: `Cita con ${patient.full_name}`,
+          notes: notes || null,
+          event_type: "appointment",
+          appointment_mode: appointmentMode,
+          video_url:
+            appointmentMode === "online" && videoUrl.trim()
+              ? videoUrl.trim()
+              : undefined,
+          blocks_availability: true,
+          start_at: slot.startAt,
+          end_at: slot.endAt,
+          status: "pending",
+        },
+        successMessage: "Cita enviada al cliente para confirmar.",
+        afterSuccess: () => setSelectedAgendaSlot(null),
+      });
       return;
     }
 
@@ -9781,25 +9930,17 @@ function NutritionistAgendaPanel({
       row: {
         tenant_id: tenant.id,
         patient_id: null,
-        title: eventDraft.title,
-        notes: eventDraft.notes || null,
-        event_type: eventDraft.eventType,
+        title: title.trim() || "Bloqueo",
+        notes: notes || null,
+        event_type: "block",
         appointment_mode: null,
-        blocks_availability: eventDraft.blocksAvailability,
-        start_at: buildLocalDateTimeIso(eventDraft.date, eventDraft.startTime),
-        end_at: addMinutesIso(
-          buildLocalDateTimeIso(eventDraft.date, eventDraft.startTime),
-          Number(eventDraft.durationMinutes) || 60,
-        ),
+        blocks_availability: true,
+        start_at: slot.startAt,
+        end_at: slot.endAt,
         status: "confirmed",
       },
-      successMessage: "Evento guardado.",
-      afterSuccess: () =>
-        setEventDraft((current) => ({
-          ...current,
-          title: "",
-          notes: "",
-        })),
+      successMessage: "Bloqueo guardado.",
+      afterSuccess: () => setSelectedAgendaSlot(null),
     });
   }
 
@@ -9900,41 +10041,25 @@ function NutritionistAgendaPanel({
           <div>
             <h2 className="text-lg font-black">Gestionar agenda</h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Ajusta tu horario, agenda citas y bloquea huecos desde este menú.
+              Ajusta tu horario y pulsa sobre un hueco disponible del calendario para crear citas o bloqueos.
             </p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[560px]">
-            {[
-              { id: "availability", label: "Ajustar mi horario", icon: Clock },
-              { id: "appointment", label: "Agendar cita con cliente", icon: CalendarDays },
-              { id: "event", label: "Añadir bloqueo o cita", icon: Plus },
-            ].map((tool) => {
-              const Icon = tool.icon;
-              const active = activeAgendaTool === tool.id;
-
-              return (
-                <button
-                  key={tool.id}
-                  type="button"
-                  className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-black transition ${
-                    active
-                      ? "border-[var(--tenant-color)] bg-[var(--tenant-color)] text-white"
-                      : "border-[var(--line)] bg-white text-[#39433f] hover:border-[var(--tenant-color)]"
-                  }`}
-                  onClick={() =>
-                    setActiveAgendaTool((current) =>
-                      current === tool.id
-                        ? ""
-                        : (tool.id as "availability" | "appointment" | "event"),
-                    )
-                  }
-                >
-                  <Icon className="size-4" />
-                  {tool.label}
-                </button>
-              );
-            })}
-          </div>
+          <button
+            type="button"
+            className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-black transition ${
+              activeAgendaTool === "availability"
+                ? "border-[var(--tenant-color)] bg-[var(--tenant-color)] text-white"
+                : "border-[var(--line)] bg-white text-[#39433f] hover:border-[var(--tenant-color)]"
+            }`}
+            onClick={() =>
+              setActiveAgendaTool((current) =>
+                current === "availability" ? "" : "availability",
+              )
+            }
+          >
+            <Clock className="size-4" />
+            Ajustar mi horario
+          </button>
         </div>
       </Panel>
 
@@ -10020,177 +10145,6 @@ function NutritionistAgendaPanel({
           </Panel>
         )}
 
-        {activeAgendaTool === "appointment" && (
-          <Panel>
-            <h2 className="text-base font-black sm:text-lg">Agendar cita con cliente</h2>
-            <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={scheduleAppointment}>
-              <SelectField
-                label="Cliente"
-                value={appointmentPatientId}
-                onChange={(value) =>
-                  setAppointmentDraft((current) => ({ ...current, patientId: value }))
-                }
-                options={patients.map((patient) => ({
-                  value: patient.id,
-                  label: patient.full_name,
-                }))}
-              />
-              <SelectField
-                label="Tipo"
-                value={appointmentDraft.mode}
-                onChange={(value) =>
-                  setAppointmentDraft((current) => ({
-                    ...current,
-                    mode: value as AppointmentMode,
-                  }))
-                }
-                options={appointmentModeOptions}
-              />
-              {appointmentDraft.mode === "online" && (
-                <Field
-                  label="Enlace de videollamada"
-                  value={appointmentDraft.videoUrl}
-                  onChange={(value) =>
-                    setAppointmentDraft((current) => ({
-                      ...current,
-                      videoUrl: value,
-                    }))
-                  }
-                  placeholder="https://meet.google.com/..."
-                />
-              )}
-              <Field
-                label="Fecha"
-                type="date"
-                value={appointmentDraft.date}
-                onChange={(value) =>
-                  setAppointmentDraft((current) => ({ ...current, date: value }))
-                }
-                required
-              />
-              <Field
-                label="Hora"
-                type="time"
-                value={appointmentDraft.startTime}
-                onChange={(value) =>
-                  setAppointmentDraft((current) => ({ ...current, startTime: value }))
-                }
-                required
-              />
-              <Field
-                label="Duración (min)"
-                type="number"
-                value={appointmentDraft.durationMinutes}
-                onChange={(value) =>
-                  setAppointmentDraft((current) => ({
-                    ...current,
-                    durationMinutes: value,
-                  }))
-                }
-                required
-              />
-              <div className="lg:col-span-2">
-                <TextArea
-                  label="Notas"
-                  value={appointmentDraft.notes}
-                  onChange={(value) =>
-                    setAppointmentDraft((current) => ({ ...current, notes: value }))
-                  }
-                />
-              </div>
-              <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60 lg:w-fit"
-                disabled={savingAgenda}
-              >
-                <CalendarDays className="size-4" />
-                Agendar cita
-              </button>
-            </form>
-          </Panel>
-        )}
-
-        {activeAgendaTool === "event" && (
-          <Panel>
-            <h2 className="text-base font-black sm:text-lg">Añadir bloqueo o cita</h2>
-            <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={saveOtherEvent}>
-              <Field
-                label="Título"
-                value={eventDraft.title}
-                onChange={(value) =>
-                  setEventDraft((current) => ({ ...current, title: value }))
-                }
-                required
-              />
-              <SelectField
-                label="Tipo"
-                value={eventDraft.eventType}
-                onChange={(value) =>
-                  setEventDraft((current) => ({
-                    ...current,
-                    eventType: value as CalendarEventType,
-                  }))
-                }
-                options={calendarEventTypeOptions}
-              />
-              <Field
-                label="Fecha"
-                type="date"
-                value={eventDraft.date}
-                onChange={(value) =>
-                  setEventDraft((current) => ({ ...current, date: value }))
-                }
-                required
-              />
-              <Field
-                label="Hora"
-                type="time"
-                value={eventDraft.startTime}
-                onChange={(value) =>
-                  setEventDraft((current) => ({ ...current, startTime: value }))
-                }
-                required
-              />
-              <Field
-                label="Duración (min)"
-                type="number"
-                value={eventDraft.durationMinutes}
-                onChange={(value) =>
-                  setEventDraft((current) => ({ ...current, durationMinutes: value }))
-                }
-                required
-              />
-              <label className="flex h-11 items-center gap-3 self-end rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm font-semibold text-[#39433f]">
-                <input
-                  type="checkbox"
-                  checked={eventDraft.blocksAvailability}
-                  onChange={(event) =>
-                    setEventDraft((current) => ({
-                      ...current,
-                      blocksAvailability: event.target.checked,
-                    }))
-                  }
-                />
-                Bloquear disponibilidad
-              </label>
-              <div className="lg:col-span-2">
-                <TextArea
-                  label="Notas"
-                  value={eventDraft.notes}
-                  onChange={(value) =>
-                    setEventDraft((current) => ({ ...current, notes: value }))
-                  }
-                />
-              </div>
-              <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60 lg:w-fit"
-                disabled={savingAgenda}
-              >
-                <Plus className="size-4" />
-                Guardar evento
-              </button>
-            </form>
-          </Panel>
-        )}
       </div>
 
       {pendingAppointments.length > 0 && (
@@ -10209,39 +10163,28 @@ function NutritionistAgendaPanel({
           title="Agenda"
           events={visibleEvents}
           patients={patients}
+          availableSlots={availableSlots}
+          onAvailableSlotClick={setSelectedAgendaSlot}
           onCancel={cancelEvent}
           onReschedule={setRescheduleEvent}
           onSaveVideoUrl={saveAppointmentVideoUrl}
         />
-        <Panel>
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-black">Próximos huecos disponibles</h2>
-            <Clock className="size-5 text-[var(--tenant-color)]" />
-          </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            {availableSlots.slice(0, 8).map((slot) => (
-              <div
-                key={slot.id}
-                className="rounded-lg border border-[var(--line)] bg-white p-3 text-sm"
-              >
-                <p className="font-black">{slot.label}</p>
-                <p className="mt-1 text-xs font-semibold text-[var(--muted)]">
-                  {formatDate(slot.startAt)}
-                </p>
-              </div>
-            ))}
-            {availableSlots.length === 0 && (
-              <div className="sm:col-span-2 xl:col-span-4">
-                <EmptyState text="No hay huecos disponibles con la configuración actual." />
-              </div>
-            )}
-          </div>
-        </Panel>
       </div>
+      {selectedAgendaSlot && (
+        <CalendarSlotActionDialog
+          slot={selectedAgendaSlot}
+          patients={patients}
+          defaultPatientId={selectedPatient?.id ?? patients[0]?.id ?? ""}
+          saving={savingAgenda}
+          onSubmit={saveCalendarSlotAction}
+          onClose={() => setSelectedAgendaSlot(null)}
+        />
+      )}
       {rescheduleEvent && (
         <AppointmentRescheduleDialog
           event={rescheduleEvent}
-          mode="manual"
+          mode="slots"
+          availableSlots={availableSlots}
           saving={rescheduling}
           title="Cambiar fecha/hora"
           submitLabel="Enviar cambio"
@@ -10259,6 +10202,8 @@ function AgendaCalendar({
   title,
   events,
   patients,
+  availableSlots = [],
+  onAvailableSlotClick,
   onCancel,
   onConfirm,
   onReschedule,
@@ -10268,6 +10213,8 @@ function AgendaCalendar({
   title: string;
   events: CalendarEvent[];
   patients: Patient[];
+  availableSlots?: AvailableAppointmentSlot[];
+  onAvailableSlotClick?: (slot: AvailableAppointmentSlot) => void;
   onCancel?: (event: CalendarEvent) => void;
   onConfirm?: (event: CalendarEvent) => void;
   onReschedule?: (event: CalendarEvent) => void;
@@ -10277,9 +10224,11 @@ function AgendaCalendar({
   const [expandedDay, setExpandedDay] = useState<{
     dateKey: string;
     events: CalendarEvent[];
+    slots: AvailableAppointmentSlot[];
   } | null>(null);
   const weeks = getAgendaWeeks(4);
   const eventsByDay = groupCalendarEventsByDay(events);
+  const slotsByDay = groupAvailableAppointmentSlotsByDay(availableSlots);
 
   return (
     <Panel>
@@ -10314,6 +10263,10 @@ function AgendaCalendar({
             >
               {week.map((day) => {
                 const dayEvents = eventsByDay.get(day.dateKey) ?? [];
+                const daySlots = slotsByDay.get(day.dateKey) ?? [];
+                const visibleDaySlots = daySlots.slice(0, 5);
+                const hasCalendarItems = dayEvents.length > 0 || daySlots.length > 0;
+
                 return (
                   <div
                     key={day.dateKey}
@@ -10328,13 +10281,33 @@ function AgendaCalendar({
                           {day.monthLabel}
                         </p>
                       </div>
-                      {dayEvents.length > 0 && (
+                      {hasCalendarItems && (
                         <span className="grid min-w-7 place-items-center rounded-md bg-white px-2 py-1 text-xs font-black text-[var(--tenant-color)]">
-                          {dayEvents.length}
+                          {dayEvents.length + daySlots.length}
                         </span>
                       )}
                     </div>
                     <div className="mt-3 grid gap-2">
+                      {onAvailableSlotClick && visibleDaySlots.length > 0 && (
+                        <div className="rounded-lg border border-[#b8dccd] bg-[#effaf5] p-2">
+                          <p className="mb-2 text-[11px] font-black uppercase text-[#255d50]">
+                            Disponible
+                          </p>
+                          <div className="grid gap-1.5">
+                            {visibleDaySlots.map((slot) => (
+                              <button
+                                key={slot.id}
+                                type="button"
+                                className="inline-flex min-h-8 items-center justify-between gap-2 rounded-md bg-white px-2 py-1 text-left text-[11px] font-black text-[#255d50] ring-1 ring-[#cfe8dd] transition hover:ring-[var(--tenant-color)]"
+                                onClick={() => onAvailableSlotClick(slot)}
+                              >
+                                <span>{formatAgendaTimeRange(slot.startAt, slot.endAt)}</span>
+                                <Plus className="size-3.5 shrink-0" />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       {dayEvents.slice(0, 3).map((event) => (
                         <AgendaEventCard
                           key={event.id}
@@ -10358,13 +10331,29 @@ function AgendaCalendar({
                             setExpandedDay({
                               dateKey: day.dateKey,
                               events: dayEvents,
+                              slots: daySlots,
                             })
                           }
                         >
                           +{dayEvents.length - 3} más
                         </button>
                       )}
-                      {dayEvents.length === 0 && (
+                      {onAvailableSlotClick && daySlots.length > 5 && (
+                        <button
+                          type="button"
+                          className="rounded-md bg-white px-2 py-1 text-left text-xs font-black text-[#255d50] ring-1 ring-[var(--line)] transition hover:ring-[var(--tenant-color)]"
+                          onClick={() =>
+                            setExpandedDay({
+                              dateKey: day.dateKey,
+                              events: dayEvents,
+                              slots: daySlots,
+                            })
+                          }
+                        >
+                          +{daySlots.length - 5} huecos
+                        </button>
+                      )}
+                      {!hasCalendarItems && (
                         <p className="rounded-lg border border-dashed border-[var(--line)] bg-white/70 px-2 py-4 text-center text-xs font-semibold text-[var(--muted)]">
                           Sin eventos
                         </p>
@@ -10381,7 +10370,9 @@ function AgendaCalendar({
         <AgendaDayEventsDialog
           dateKey={expandedDay.dateKey}
           events={expandedDay.events}
+          slots={expandedDay.slots}
           patients={patients}
+          onAvailableSlotClick={onAvailableSlotClick}
           confirmablePatient={confirmablePatient}
           onCancel={onCancel}
           onConfirm={onConfirm}
@@ -10397,7 +10388,9 @@ function AgendaCalendar({
 function AgendaDayEventsDialog({
   dateKey,
   events,
+  slots,
   patients,
+  onAvailableSlotClick,
   confirmablePatient,
   onCancel,
   onConfirm,
@@ -10407,7 +10400,9 @@ function AgendaDayEventsDialog({
 }: {
   dateKey: string;
   events: CalendarEvent[];
+  slots: AvailableAppointmentSlot[];
   patients: Patient[];
+  onAvailableSlotClick?: (slot: AvailableAppointmentSlot) => void;
   confirmablePatient?: Patient | null;
   onCancel?: (event: CalendarEvent) => void;
   onConfirm?: (event: CalendarEvent) => void;
@@ -10437,6 +10432,29 @@ function AgendaDayEventsDialog({
           </button>
         </div>
         <div className="grid max-h-[68vh] gap-3 overflow-y-auto p-4 scrollbar-thin">
+          {onAvailableSlotClick && slots.length > 0 && (
+            <div className="rounded-lg border border-[#b8dccd] bg-[#effaf5] p-3">
+              <p className="mb-2 text-xs font-black uppercase text-[#255d50]">
+                Huecos disponibles
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {slots.map((slot) => (
+                  <button
+                    key={slot.id}
+                    type="button"
+                    className="inline-flex min-h-10 items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-left text-sm font-black text-[#255d50] ring-1 ring-[#cfe8dd] transition hover:ring-[var(--tenant-color)]"
+                    onClick={() => {
+                      onAvailableSlotClick(slot);
+                      onClose();
+                    }}
+                  >
+                    <span>{formatAgendaTimeRange(slot.startAt, slot.endAt)}</span>
+                    <Plus className="size-4 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {events.map((event) => (
             <AgendaEventCard
               key={event.id}
@@ -10460,6 +10478,128 @@ function AgendaDayEventsDialog({
             />
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function CalendarSlotActionDialog({
+  slot,
+  patients,
+  defaultPatientId,
+  saving,
+  onSubmit,
+  onClose,
+}: {
+  slot: AvailableAppointmentSlot;
+  patients: Patient[];
+  defaultPatientId: string;
+  saving: boolean;
+  onSubmit: (payload: {
+    slot: AvailableAppointmentSlot;
+    actionType: "appointment" | "block";
+    patientId: string;
+    appointmentMode: AppointmentMode;
+    videoUrl: string;
+    title: string;
+    notes: string;
+  }) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [actionType, setActionType] = useState<"appointment" | "block">("appointment");
+  const [patientId, setPatientId] = useState(defaultPatientId);
+  const [appointmentMode, setAppointmentMode] = useState<AppointmentMode>("online");
+  const [videoUrl, setVideoUrl] = useState("");
+  const [title, setTitle] = useState("");
+  const [notes, setNotes] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await onSubmit({
+      slot,
+      actionType,
+      patientId,
+      appointmentMode,
+      videoUrl,
+      title,
+      notes,
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#121715]/45 px-4 py-6">
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-[0_22px_70px_rgba(24,32,29,0.28)]">
+        <div className="flex items-start justify-between gap-3 border-b border-[var(--line)] p-4">
+          <div>
+            <p className="text-xs font-black uppercase text-[var(--tenant-color)]">
+              Hueco disponible
+            </p>
+            <h2 className="mt-1 text-lg font-black">
+              {formatDate(slot.startAt)} - {formatAgendaTimeRange(slot.startAt, slot.endAt)}
+            </h2>
+          </div>
+          <button
+            type="button"
+            className="grid size-9 shrink-0 place-items-center rounded-lg border border-[var(--line)] bg-white text-[#39433f]"
+            onClick={onClose}
+            title="Cerrar"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <form className="grid max-h-[76vh] gap-4 overflow-y-auto p-4 scrollbar-thin" onSubmit={submit}>
+          <SelectField
+            label="Acción"
+            value={actionType}
+            onChange={(value) => setActionType(value as "appointment" | "block")}
+            options={[
+              { value: "appointment", label: "Crear cita con cliente" },
+              { value: "block", label: "Bloquear hueco" },
+            ]}
+          />
+          {actionType === "appointment" ? (
+            <>
+              <SelectField
+                label="Cliente"
+                value={patientId}
+                onChange={setPatientId}
+                options={patients.map((patient) => ({
+                  value: patient.id,
+                  label: patient.full_name,
+                }))}
+              />
+              <SelectField
+                label="Tipo"
+                value={appointmentMode}
+                onChange={(value) => setAppointmentMode(value as AppointmentMode)}
+                options={appointmentModeOptions}
+              />
+              {appointmentMode === "online" && (
+                <Field
+                  label="Enlace de videollamada"
+                  value={videoUrl}
+                  onChange={setVideoUrl}
+                  placeholder="https://meet.google.com/..."
+                />
+              )}
+            </>
+          ) : (
+            <Field
+              label="Título del bloqueo"
+              value={title}
+              onChange={setTitle}
+              placeholder="Bloqueo"
+            />
+          )}
+          <TextArea label="Notas" value={notes} onChange={setNotes} />
+          <button
+            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60 sm:w-fit"
+            disabled={saving || (actionType === "appointment" && !patientId)}
+          >
+            {saving ? <Loader2 className="size-4 animate-spin" /> : <CalendarDays className="size-4" />}
+            {actionType === "appointment" ? "Enviar cita" : "Guardar bloqueo"}
+          </button>
+        </form>
       </div>
     </div>
   );
@@ -10719,7 +10859,10 @@ function PendingAppointmentsPanel({
         </span>
       </div>
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {events.map((event) => (
+        {events.map((event) => {
+          const canModify = !isPastCalendarEvent(event);
+
+          return (
           <article
             key={event.id}
             className="rounded-lg border border-[#ead39b] bg-[#fff8df] p-4 text-sm"
@@ -10746,37 +10889,44 @@ function PendingAppointmentsPanel({
               <AppointmentVideoLinkEditor
                 key={`${event.id}-${event.video_url ?? "no-link"}-pending`}
                 event={event}
-                onSaveVideoUrl={onSaveVideoUrl}
+                onSaveVideoUrl={canModify ? onSaveVideoUrl : undefined}
               />
             )}
-            <div className="mt-4 grid gap-2 sm:grid-cols-3">
-              <button
-                type="button"
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-3 text-xs font-black text-white"
-                onClick={() => onConfirm(event)}
-              >
-                <Check className="size-4" />
-                Confirmar
-              </button>
-              <button
-                type="button"
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-xs font-black text-[#39433f]"
-                onClick={() => onReschedule(event)}
-              >
-                <CalendarDays className="size-4 text-[var(--tenant-color)]" />
-                Proponer
-              </button>
-              <button
-                type="button"
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[#efc4ba] bg-white px-3 text-xs font-black text-[#8a3327]"
-                onClick={() => onCancel(event)}
-              >
-                <Ban className="size-4" />
-                Cancelar
-              </button>
-            </div>
+            {canModify ? (
+              <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                <button
+                  type="button"
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-3 text-xs font-black text-white"
+                  onClick={() => onConfirm(event)}
+                >
+                  <Check className="size-4" />
+                  Confirmar
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-xs font-black text-[#39433f]"
+                  onClick={() => onReschedule(event)}
+                >
+                  <CalendarDays className="size-4 text-[var(--tenant-color)]" />
+                  Proponer
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[#efc4ba] bg-white px-3 text-xs font-black text-[#8a3327]"
+                  onClick={() => onCancel(event)}
+                >
+                  <Ban className="size-4" />
+                  Cancelar
+                </button>
+              </div>
+            ) : (
+              <p className="mt-4 rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-xs font-bold text-[var(--muted)]">
+                Cita pasada sin edición.
+              </p>
+            )}
           </article>
-        ))}
+          );
+        })}
       </div>
     </Panel>
   );
@@ -10800,10 +10950,12 @@ function AgendaEventCard({
   canConfirm?: boolean;
 }) {
   const meta = getCalendarEventMeta(event);
+  const canModify = !isPastCalendarEvent(event);
   const canChangeAppointment =
     Boolean(onReschedule) &&
     event.event_type === "appointment" &&
-    event.status !== "cancelled";
+    event.status !== "cancelled" &&
+    canModify;
 
   return (
     <article className={`min-w-0 overflow-hidden rounded-lg border p-2 text-xs ${meta.className}`}>
@@ -10840,11 +10992,11 @@ function AgendaEventCard({
         <AppointmentVideoLinkEditor
           key={`${event.id}-${event.video_url ?? "no-link"}-calendar`}
           event={event}
-          onSaveVideoUrl={onSaveVideoUrl}
+          onSaveVideoUrl={canModify ? onSaveVideoUrl : undefined}
           compact
         />
       )}
-      {canConfirm && onConfirm && event.status !== "cancelled" && (
+      {canConfirm && onConfirm && event.status !== "cancelled" && canModify && (
         <button
           type="button"
           className="mt-3 inline-flex h-8 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-2 text-[11px] font-black text-white"
@@ -10864,7 +11016,7 @@ function AgendaEventCard({
           Cambiar fecha/hora
         </button>
       )}
-      {onCancel && event.status !== "cancelled" && (
+      {onCancel && event.status !== "cancelled" && canModify && (
         <button
           type="button"
           className="mt-2 inline-flex h-8 w-full items-center justify-center gap-2 rounded-lg border border-[#efc4ba] bg-white px-2 text-[11px] font-black text-[#8a3327]"
@@ -10873,6 +11025,11 @@ function AgendaEventCard({
           <Ban className="size-3.5" />
           Cancelar
         </button>
+      )}
+      {!canModify && event.status !== "cancelled" && (
+        <p className="mt-2 rounded-md bg-white/80 px-2 py-1 text-[11px] font-bold text-[var(--muted)]">
+          Pasada
+        </p>
       )}
     </article>
   );
@@ -12606,6 +12763,21 @@ function groupCalendarEventsByDay(events: CalendarEvent[]) {
   return grouped;
 }
 
+function groupAvailableAppointmentSlotsByDay(slots: AvailableAppointmentSlot[]) {
+  const grouped = new Map<string, AvailableAppointmentSlot[]>();
+
+  slots.forEach((slot) => {
+    const daySlots = grouped.get(slot.dateKey) ?? [];
+    daySlots.push(slot);
+    grouped.set(
+      slot.dateKey,
+      daySlots.sort((first, second) => first.startAt.localeCompare(second.startAt)),
+    );
+  });
+
+  return grouped;
+}
+
 function getAgendaWeeks(weekCount: number) {
   const firstMonday = getMondayStart(new Date());
 
@@ -12654,6 +12826,10 @@ function formatBookingDateLabel(dateKey: string) {
 
 function compareCalendarEvents(first: CalendarEvent, second: CalendarEvent) {
   return new Date(first.start_at).getTime() - new Date(second.start_at).getTime();
+}
+
+function isPastCalendarEvent(event: CalendarEvent) {
+  return new Date(event.start_at).getTime() <= Date.now();
 }
 
 function getPatientName(patients: Patient[], patientId: string | null) {

@@ -146,6 +146,13 @@ async function createCalendarEvent(
     return NextResponse.json({ error: validationError }, { status: 400 });
   }
 
+  if (isPastCalendarStart(row.start_at)) {
+    return NextResponse.json(
+      { error: "No se pueden crear citas o eventos en el pasado." },
+      { status: 400 },
+    );
+  }
+
   const tenantId = row.tenant_id;
   const membership = await getMembership(supabase, tenantId, userId);
   const isNutritionist = isActiveNutritionist(membership);
@@ -181,8 +188,21 @@ async function createCalendarEvent(
     );
   }
 
+  const blocksAvailability =
+    row.event_type === "appointment" || row.blocks_availability === true;
+  if (
+    blocksAvailability &&
+    (await hasOverlappingCalendarBlock(supabase, row.tenant_id, row.start_at, row.end_at))
+  ) {
+    return NextResponse.json(
+      { error: "Ese hueco ya esta ocupado en la agenda." },
+      { status: 409 },
+    );
+  }
+
   let insertRow = {
     ...row,
+    blocks_availability: blocksAvailability,
     created_by: userId,
     ...(normalizedVideoUrl ? { video_url: normalizedVideoUrl } : {}),
   } as CalendarEventInsertRow;
@@ -257,6 +277,13 @@ async function updateCalendarEventStatus(
   }
 
   const storedEvent = event as StoredCalendarEvent;
+  if (isPastCalendarStart(storedEvent.start_at)) {
+    return NextResponse.json(
+      { error: "Las citas o eventos pasados no se pueden modificar." },
+      { status: 400 },
+    );
+  }
+
   const membership = await getMembership(supabase, storedEvent.tenant_id, userId);
   const isNutritionist = isActiveNutritionist(membership);
   const patientCanConfirm = await canPatientConfirmAppointment(
@@ -342,7 +369,7 @@ async function updateCalendarEventVideoUrl(
 
   const { data: event, error: eventError } = await supabase
     .from("calendar_events")
-    .select("id,tenant_id,event_type,appointment_mode")
+    .select("id,tenant_id,event_type,appointment_mode,start_at,status")
     .eq("id", eventId)
     .maybeSingle();
 
@@ -361,6 +388,13 @@ async function updateCalendarEventVideoUrl(
   if (event.event_type !== "appointment" || event.appointment_mode !== "online") {
     return NextResponse.json(
       { error: "Solo se puede editar el enlace en citas online." },
+      { status: 400 },
+    );
+  }
+
+  if (event.status === "cancelled" || isPastCalendarStart(event.start_at)) {
+    return NextResponse.json(
+      { error: "Las citas canceladas o pasadas no se pueden modificar." },
       { status: 400 },
     );
   }
@@ -417,6 +451,13 @@ async function rescheduleCalendarEvent(
     );
   }
 
+  if (isPastCalendarStart(startAt)) {
+    return NextResponse.json(
+      { error: "No se puede cambiar una cita a una fecha pasada." },
+      { status: 400 },
+    );
+  }
+
   const { data: event, error: eventError } = await supabase
     .from("calendar_events")
     .select("id,tenant_id,patient_id,created_by,title,event_type,appointment_mode,start_at,end_at,status")
@@ -442,6 +483,13 @@ async function rescheduleCalendarEvent(
     );
   }
 
+  if (isPastCalendarStart(storedEvent.start_at)) {
+    return NextResponse.json(
+      { error: "Las citas pasadas no se pueden modificar." },
+      { status: 400 },
+    );
+  }
+
   const membership = await getMembership(supabase, storedEvent.tenant_id, userId);
   const isNutritionist = isActiveNutritionist(membership);
   const isPatientOwner = await getActivePatientForUser(
@@ -455,6 +503,21 @@ async function rescheduleCalendarEvent(
     return NextResponse.json(
       { error: "No tienes permisos para cambiar esta cita." },
       { status: 403 },
+    );
+  }
+
+  if (
+    await hasOverlappingCalendarBlock(
+      supabase,
+      storedEvent.tenant_id,
+      startAt,
+      endAt,
+      storedEvent.id,
+    )
+  ) {
+    return NextResponse.json(
+      { error: "Ese hueco ya esta ocupado en la agenda." },
+      { status: 409 },
     );
   }
 
@@ -680,6 +743,43 @@ async function notifyCalendarEventRescheduled({
     title: "Nueva propuesta de cambio",
     body: `${patient.full_name} ha propuesto cambiar la cita a ${when}. Entra en Agenda para revisarla.`,
   });
+}
+
+function isPastCalendarStart(startAt: string | undefined) {
+  if (!startAt) return false;
+  return new Date(startAt).getTime() <= Date.now();
+}
+
+async function hasOverlappingCalendarBlock(
+  supabase: Awaited<ReturnType<typeof getSupabaseAdmin>>,
+  tenantId: string | undefined,
+  startAt: string | undefined,
+  endAt: string | undefined,
+  excludeEventId?: string,
+) {
+  if (!supabase || !tenantId || !startAt || !endAt) return false;
+
+  let query = supabase
+    .from("calendar_events")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("blocks_availability", true)
+    .neq("status", "cancelled")
+    .lt("start_at", endAt)
+    .gt("end_at", startAt)
+    .limit(1);
+
+  if (excludeEventId) {
+    query = query.neq("id", excludeEventId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error("Could not check calendar overlap", error.message);
+    return true;
+  }
+
+  return Boolean(data?.length);
 }
 
 function validateCalendarRow(row: CalendarEventRow | undefined) {

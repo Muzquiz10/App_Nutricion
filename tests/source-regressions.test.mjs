@@ -152,8 +152,14 @@ test("diet builder keeps serving fields and weekly calendar", async () => {
   assert.match(source, /Publicar dieta/);
   assert.match(source, /Descargar \/ imprimir/);
   assert.match(source, /Compartir/);
-  assert.match(source, /Copiar/);
-  assert.match(source, /Pegar/);
+  assert.match(source, /Usar dieta existente/);
+  assert.match(source, /Usar en este cliente/);
+  assert.match(source, /onPasteDraftMeals/);
+  assert.match(source, /startDietDrag/);
+  assert.match(source, /dropDietMeals/);
+  assert.match(source, /draggable=\{canDragDay\}/);
+  assert.match(source, /draggable=\{canDragCell\}/);
+  assert.match(source, /Arrastra para copiar este alimento/);
   assert.match(source, /Duplicar dieta/);
   assert.match(source, /Activar dieta/);
   assert.match(source, /Desactivar dieta/);
@@ -213,7 +219,9 @@ test("appointment notifications require customer confirmation and immediate emai
   assert.match(source, /Cita enviada al cliente para confirmar/);
   assert.match(source, /Citas pendientes de confirmar/);
   assert.match(source, /Confirmar cita/);
-  assert.match(source, /selectedDraftPatientIsValid/);
+  assert.match(source, /CalendarSlotActionDialog/);
+  assert.match(source, /onAvailableSlotClick/);
+  assert.match(source, /availableSlots=\{availableSlots\}/);
   assert.match(source, /isPendingPatientConfirmation/);
   assert.match(source, /isPendingNutritionistConfirmation/);
   assert.match(source, /AgendaDayEventsDialog/);
@@ -228,6 +236,9 @@ test("appointment notifications require customer confirmation and immediate emai
   assert.match(calendarRoute, /canPatientConfirmAppointment/);
   assert.match(calendarRoute, /canPatientCancelAppointment/);
   assert.match(calendarRoute, /rescheduleCalendarEvent/);
+  assert.match(calendarRoute, /isPastCalendarStart/);
+  assert.match(calendarRoute, /hasOverlappingCalendarBlock/);
+  assert.match(calendarRoute, /Ese hueco ya esta ocupado en la agenda/);
   assert.match(calendarRoute, /notifyCalendarEventRescheduled/);
   assert.match(calendarRoute, /Nueva propuesta de cambio/);
   assert.match(calendarRoute, /insertRow\.event_type === "appointment" && insertRow\.status === "pending"/);
