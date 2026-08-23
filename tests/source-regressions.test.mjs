@@ -224,6 +224,9 @@ test("appointment notifications require customer confirmation and immediate emai
   assert.match(source, /getAgendaMonthWeeks/);
   assert.match(source, /formatAgendaMonthLabel/);
   assert.match(source, /Vista mensual completa/);
+  assert.match(source, /clientBookingDaysAhead = 365/);
+  assert.match(source, /function BookingCalendar/);
+  assert.match(source, /dateKeyToLocalDate/);
   assert.match(source, /appointmentDurationOptions/);
   assert.match(source, /bulkAppointmentCountOptions/);
   assert.match(source, /allowDurationSelect/);

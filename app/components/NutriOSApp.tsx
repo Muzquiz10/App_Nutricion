@@ -655,6 +655,7 @@ const appointmentModeOptions: Array<{ value: AppointmentMode; label: string }> =
 ];
 const appointmentDurationOptions = [10, 20, 30, 40, 50, 60];
 const bulkAppointmentCountOptions = Array.from({ length: 11 }, (_, index) => index + 2);
+const clientBookingDaysAhead = 365;
 
 const mealTypeOrder = new Map<string, number>([
   ...mealTypes.map((mealType, index) => [mealType, index] as const),
@@ -9513,10 +9514,15 @@ function PatientAgendaPanel({
   );
   const availableSlots = useMemo(
     () =>
-      buildAvailableAppointmentSlots(availabilitySlots, calendarBusySlots, 28, {
-        minimumDurationMinutes: 60,
-        maxDurationMinutes: 60,
-      }),
+      buildAvailableAppointmentSlots(
+        availabilitySlots,
+        calendarBusySlots,
+        clientBookingDaysAhead,
+        {
+          minimumDurationMinutes: 60,
+          maxDurationMinutes: 60,
+        },
+      ),
     [availabilitySlots, calendarBusySlots],
   );
   const selectedDaySlots = availableSlots.filter(
@@ -10983,69 +10989,116 @@ function BookingCalendar({
   selectedDate: string;
   onSelectDate: (dateKey: string) => void;
 }) {
-  const weeks = getAgendaWeeks(4);
+  const [visibleMonth, setVisibleMonth] = useState(() =>
+    getMonthStart(dateKeyToLocalDate(selectedDate)),
+  );
+  const weeks = getAgendaMonthWeeks(visibleMonth);
   const slotCountByDay = countSlotsByDay(availableSlots);
+  const visibleMonthLabel = formatAgendaMonthLabel(visibleMonth);
+
+  function changeVisibleMonth(offset: number) {
+    setVisibleMonth((current) => addMonths(current, offset));
+  }
+
+  function selectDate(dateKey: string) {
+    setVisibleMonth(getMonthStart(dateKeyToLocalDate(dateKey)));
+    onSelectDate(dateKey);
+  }
 
   return (
-    <div className="overflow-x-auto pb-2 scrollbar-thin">
-      <div className="min-w-[760px] rounded-lg border border-[var(--line)] bg-white shadow-sm">
-        <div className="grid grid-cols-7 border-b border-[var(--line)] bg-[#f3f0e8]">
-          {agendaWeekdayLabels.map((label) => (
+    <div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-black text-[#24342f]">
+          {visibleMonthLabel}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="grid size-9 place-items-center rounded-lg border border-[var(--line)] bg-white text-[#39433f] transition hover:border-[var(--tenant-color)]"
+            onClick={() => changeVisibleMonth(-1)}
+            title="Mes anterior"
+          >
+            <ChevronLeft className="size-4" />
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-9 items-center justify-center rounded-lg border border-[var(--line)] bg-white px-3 text-xs font-black text-[#39433f] transition hover:border-[var(--tenant-color)]"
+            onClick={() => setVisibleMonth(getMonthStart(new Date()))}
+          >
+            Hoy
+          </button>
+          <button
+            type="button"
+            className="grid size-9 place-items-center rounded-lg border border-[var(--line)] bg-white text-[#39433f] transition hover:border-[var(--tenant-color)]"
+            onClick={() => changeVisibleMonth(1)}
+            title="Mes siguiente"
+          >
+            <ChevronRight className="size-4" />
+          </button>
+        </div>
+      </div>
+      <div className="overflow-x-auto pb-2 scrollbar-thin">
+        <div className="min-w-[760px] rounded-lg border border-[var(--line)] bg-white shadow-sm">
+          <div className="grid grid-cols-7 border-b border-[var(--line)] bg-[#f3f0e8]">
+            {agendaWeekdayLabels.map((label) => (
+              <div
+                key={label}
+                className="px-3 py-3 text-xs font-black uppercase text-[var(--muted)]"
+              >
+                {label}
+              </div>
+            ))}
+          </div>
+          {weeks.map((week) => (
             <div
-              key={label}
-              className="px-3 py-3 text-xs font-black uppercase text-[var(--muted)]"
+              key={week[0].dateKey}
+              className="grid grid-cols-7 border-b border-[var(--line)] last:border-b-0"
             >
-              {label}
+              {week.map((day) => {
+                const slotsCount = slotCountByDay.get(day.dateKey) ?? 0;
+                const selected = selectedDate === day.dateKey;
+                const available = slotsCount > 0;
+
+                return (
+                  <button
+                    key={day.dateKey}
+                    type="button"
+                    className={`min-h-28 border-r border-[var(--line)] p-3 text-left transition last:border-r-0 ${
+                      selected
+                        ? "bg-[var(--tenant-color)] text-white"
+                        : available
+                          ? "bg-[#effaf5] text-[#24342f] hover:bg-[#dcefe7]"
+                          : day.isOutsideMonth
+                            ? "bg-[#f1eee7] text-[#aaa297]"
+                            : "bg-[#f6f3ed] text-[#9a9388]"
+                    }`}
+                    onClick={() => selectDate(day.dateKey)}
+                  >
+                    <span className="block text-sm font-black">{day.dayNumber}</span>
+                    <span
+                      className={`mt-1 block text-[11px] font-bold ${
+                        selected ? "text-white/80" : "text-[var(--muted)]"
+                      }`}
+                    >
+                      {day.monthLabel}
+                    </span>
+                    <span
+                      className={`mt-4 inline-flex rounded-md px-2 py-1 text-xs font-black ${
+                        selected
+                          ? "bg-white/20 text-white"
+                          : available
+                            ? "bg-white text-[#255d50]"
+                            : "bg-white/70 text-[#8a8378]"
+                      }`}
+                    >
+                      {available ? `${slotsCount} huecos` : "Sin huecos"}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           ))}
         </div>
-        {weeks.map((week) => (
-          <div
-            key={week[0].dateKey}
-            className="grid grid-cols-7 border-b border-[var(--line)] last:border-b-0"
-          >
-            {week.map((day) => {
-              const slotsCount = slotCountByDay.get(day.dateKey) ?? 0;
-              const selected = selectedDate === day.dateKey;
-              const available = slotsCount > 0;
-
-              return (
-                <button
-                  key={day.dateKey}
-                  type="button"
-                  className={`min-h-28 border-r border-[var(--line)] p-3 text-left transition last:border-r-0 ${
-                    selected
-                      ? "bg-[var(--tenant-color)] text-white"
-                      : available
-                        ? "bg-[#effaf5] text-[#24342f] hover:bg-[#dcefe7]"
-                        : "bg-[#f6f3ed] text-[#9a9388]"
-                  }`}
-                  onClick={() => onSelectDate(day.dateKey)}
-                >
-                  <span className="block text-sm font-black">{day.dayNumber}</span>
-                  <span
-                    className={`mt-1 block text-[11px] font-bold ${
-                      selected ? "text-white/80" : "text-[var(--muted)]"
-                    }`}
-                  >
-                    {day.monthLabel}
-                  </span>
-                  <span
-                    className={`mt-4 inline-flex rounded-md px-2 py-1 text-xs font-black ${
-                      selected
-                        ? "bg-white/20 text-white"
-                        : available
-                          ? "bg-white text-[#255d50]"
-                          : "bg-white/70 text-[#8a8378]"
-                    }`}
-                  >
-                    {available ? `${slotsCount} huecos` : "Sin huecos"}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -13037,25 +13090,6 @@ function groupCalendarEventsByDay(events: CalendarEvent[]) {
   return grouped;
 }
 
-function getAgendaWeeks(weekCount: number) {
-  const firstMonday = getMondayStart(new Date());
-
-  return Array.from({ length: weekCount }, (_, weekIndex) =>
-    Array.from({ length: 7 }, (_, dayIndex) => {
-      const date = new Date(firstMonday);
-      date.setDate(firstMonday.getDate() + weekIndex * 7 + dayIndex);
-      const dateKey = getLocalDateString(date);
-
-      return {
-        dateKey,
-        dayNumber: new Intl.DateTimeFormat("es-ES", { day: "2-digit" }).format(date),
-        monthLabel: new Intl.DateTimeFormat("es-ES", { month: "short" }).format(date),
-        isToday: dateKey === getLocalDateString(),
-      };
-    }),
-  );
-}
-
 function getAgendaMonthWeeks(month: Date) {
   const monthStart = getMonthStart(month);
   const firstMonday = getMondayStart(monthStart);
@@ -13109,6 +13143,10 @@ function addMonths(value: Date, months: number) {
   const date = getMonthStart(value);
   date.setMonth(date.getMonth() + months);
   return getMonthStart(date);
+}
+
+function dateKeyToLocalDate(dateKey: string) {
+  return new Date(`${dateKey}T12:00:00`);
 }
 
 function formatAgendaMonthLabel(value: Date) {
