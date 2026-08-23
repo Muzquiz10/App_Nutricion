@@ -221,10 +221,13 @@ test("appointment notifications require customer confirmation and immediate emai
   assert.match(source, /Confirmar cita/);
   assert.match(source, /CalendarSlotActionDialog/);
   assert.match(source, /onAvailableDayClick/);
-  assert.match(source, /availableSlots=\{availableSlots\}/);
   assert.match(source, /appointmentDurationOptions/);
-  assert.match(source, /getAvailableAppointmentDurationOptions/);
   assert.match(source, /allowDurationSelect/);
+  assert.match(source, /buildLocalDateTimeIso\(dateKey, appointmentStartTime\)/);
+  assert.match(source, /Bloquear todo el día/);
+  assert.match(source, /getAllDayBlockStartAt/);
+  assert.match(source, /mode="manual"/);
+  assert.doesNotMatch(source, /onAvailableSlotClick/);
   assert.match(source, /addMinutesIso\(slot\.startAt, 60\)/);
   assert.match(source, /isPendingPatientConfirmation/);
   assert.match(source, /isPendingNutritionistConfirmation/);

@@ -256,7 +256,6 @@ type AvailableAppointmentSlot = {
 
 type AgendaDaySelection = {
   dateKey: string;
-  slots: AvailableAppointmentSlot[];
 };
 
 type CalendarBusySlot = {
@@ -9468,7 +9467,6 @@ function AgendaPanel({
       selectedPatient={selectedPatient}
       availabilitySlots={availabilitySlots}
       calendarEvents={calendarEvents}
-      calendarBusySlots={calendarBusySlots}
       supabase={supabase}
       onNotice={onNotice}
       onReload={onReload}
@@ -9790,7 +9788,6 @@ function NutritionistAgendaPanel({
   selectedPatient,
   availabilitySlots,
   calendarEvents,
-  calendarBusySlots,
   supabase,
   onNotice,
   onReload,
@@ -9800,7 +9797,6 @@ function NutritionistAgendaPanel({
   selectedPatient: Patient | null;
   availabilitySlots: AppointmentAvailability[];
   calendarEvents: CalendarEvent[];
-  calendarBusySlots: CalendarBusySlot[];
   supabase: ReturnType<typeof createSupabaseBrowser>;
   onNotice: (message: string) => void;
   onReload: () => Promise<void>;
@@ -9821,16 +9817,6 @@ function NutritionistAgendaPanel({
   const pendingAppointments = visibleEvents.filter(
     (event) => isPendingNutritionistConfirmation(event, patients),
   );
-  const availableSlots = useMemo(
-    () =>
-      buildAvailableAppointmentSlots(availabilitySlots, calendarBusySlots, 28, {
-        minimumDurationMinutes: 10,
-        maxDurationMinutes: 60,
-        stepMinutes: 10,
-      }),
-    [availabilitySlots, calendarBusySlots],
-  );
-
   async function saveAvailability(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase) {
@@ -9884,27 +9870,25 @@ function NutritionistAgendaPanel({
     await onReload();
   }
 
-  async function saveCalendarSlotAction({
-    slot,
+  async function saveCalendarDayAction({
     actionType,
     patientId,
     appointmentMode,
     videoUrl,
     title,
     notes,
-    durationMinutes,
+    startAt,
+    endAt,
   }: {
-    slot: AvailableAppointmentSlot;
     actionType: "appointment" | "block";
     patientId: string;
     appointmentMode: AppointmentMode;
     videoUrl: string;
     title: string;
     notes: string;
-    durationMinutes: number;
+    startAt: string;
+    endAt: string;
   }) {
-    const endAt = addMinutesIso(slot.startAt, clampAppointmentDuration(durationMinutes));
-
     if (actionType === "appointment") {
       const patient = patients.find((item) => item.id === patientId);
       if (!patient) {
@@ -9930,7 +9914,7 @@ function NutritionistAgendaPanel({
               ? videoUrl.trim()
               : undefined,
           blocks_availability: true,
-          start_at: slot.startAt,
+          start_at: startAt,
           end_at: endAt,
           status: "pending",
         },
@@ -9954,7 +9938,7 @@ function NutritionistAgendaPanel({
         event_type: "block",
         appointment_mode: null,
         blocks_availability: true,
-        start_at: slot.startAt,
+        start_at: startAt,
         end_at: endAt,
         status: "confirmed",
       },
@@ -10060,7 +10044,7 @@ function NutritionistAgendaPanel({
           <div>
             <h2 className="text-lg font-black">Gestionar agenda</h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Ajusta tu horario y pulsa sobre un hueco disponible del calendario para crear citas o bloqueos.
+              Ajusta tu horario y pulsa en el botón + de un día para crear citas o bloqueos.
             </p>
           </div>
           <button
@@ -10117,7 +10101,7 @@ function NutritionistAgendaPanel({
                 required
               />
               <Field
-                label="Duración cita (min)"
+                label="Intervalo de inicio (min)"
                 type="number"
                 value={availabilityDraft.slotMinutes}
                 onChange={(value) =>
@@ -10182,7 +10166,6 @@ function NutritionistAgendaPanel({
           title="Agenda"
           events={visibleEvents}
           patients={patients}
-          availableSlots={availableSlots}
           onAvailableDayClick={setSelectedAgendaDay}
           onCancel={cancelEvent}
           onReschedule={setRescheduleEvent}
@@ -10192,19 +10175,17 @@ function NutritionistAgendaPanel({
       {selectedAgendaDay && (
         <CalendarSlotActionDialog
           dateKey={selectedAgendaDay.dateKey}
-          slots={selectedAgendaDay.slots}
           patients={patients}
           defaultPatientId={selectedPatient?.id ?? patients[0]?.id ?? ""}
           saving={savingAgenda}
-          onSubmit={saveCalendarSlotAction}
+          onSubmit={saveCalendarDayAction}
           onClose={() => setSelectedAgendaDay(null)}
         />
       )}
       {rescheduleEvent && (
         <AppointmentRescheduleDialog
           event={rescheduleEvent}
-          mode="slots"
-          availableSlots={availableSlots}
+          mode="manual"
           allowDurationSelect
           saving={rescheduling}
           title="Cambiar fecha/hora"
@@ -10223,7 +10204,6 @@ function AgendaCalendar({
   title,
   events,
   patients,
-  availableSlots = [],
   onAvailableDayClick,
   onCancel,
   onConfirm,
@@ -10234,7 +10214,6 @@ function AgendaCalendar({
   title: string;
   events: CalendarEvent[];
   patients: Patient[];
-  availableSlots?: AvailableAppointmentSlot[];
   onAvailableDayClick?: (selection: AgendaDaySelection) => void;
   onCancel?: (event: CalendarEvent) => void;
   onConfirm?: (event: CalendarEvent) => void;
@@ -10248,7 +10227,6 @@ function AgendaCalendar({
   } | null>(null);
   const weeks = getAgendaWeeks(4);
   const eventsByDay = groupCalendarEventsByDay(events);
-  const slotsByDay = groupAvailableAppointmentSlotsByDay(availableSlots);
 
   return (
     <Panel>
@@ -10283,8 +10261,9 @@ function AgendaCalendar({
             >
               {week.map((day) => {
                 const dayEvents = eventsByDay.get(day.dateKey) ?? [];
-                const daySlots = slotsByDay.get(day.dateKey) ?? [];
-                const canCreateOnDay = Boolean(onAvailableDayClick && daySlots.length > 0);
+                const canCreateOnDay = Boolean(
+                  onAvailableDayClick && !isPastAgendaDate(day.dateKey),
+                );
                 const hasCalendarItems = dayEvents.length > 0;
 
                 return (
@@ -10309,7 +10288,6 @@ function AgendaCalendar({
                             onClick={() =>
                               onAvailableDayClick?.({
                                 dateKey: day.dateKey,
-                                slots: daySlots,
                               })
                             }
                             title="Crear cita o bloqueo"
@@ -10457,7 +10435,6 @@ function AgendaDayEventsDialog({
 
 function CalendarSlotActionDialog({
   dateKey,
-  slots,
   patients,
   defaultPatientId,
   saving,
@@ -10465,53 +10442,60 @@ function CalendarSlotActionDialog({
   onClose,
 }: {
   dateKey: string;
-  slots: AvailableAppointmentSlot[];
   patients: Patient[];
   defaultPatientId: string;
   saving: boolean;
   onSubmit: (payload: {
-    slot: AvailableAppointmentSlot;
     actionType: "appointment" | "block";
     patientId: string;
     appointmentMode: AppointmentMode;
     videoUrl: string;
     title: string;
     notes: string;
-    durationMinutes: number;
+    startAt: string;
+    endAt: string;
   }) => Promise<void>;
   onClose: () => void;
 }) {
   const [actionType, setActionType] = useState<"appointment" | "block">("appointment");
   const [patientId, setPatientId] = useState(defaultPatientId);
   const [appointmentMode, setAppointmentMode] = useState<AppointmentMode>("online");
-  const [slotId, setSlotId] = useState(slots[0]?.id ?? "");
-  const selectedSlot = slots.find((slot) => slot.id === slotId) ?? slots[0] ?? null;
-  const durationOptions = selectedSlot
-    ? getAvailableAppointmentDurationOptions(selectedSlot)
-    : [];
-  const [durationMinutes, setDurationMinutes] = useState(
-    String(durationOptions.at(-1) ?? 60),
+  const defaultStartTime = getDefaultAgendaStartTime(dateKey);
+  const [appointmentStartTime, setAppointmentStartTime] = useState(defaultStartTime);
+  const [appointmentDurationMinutes, setAppointmentDurationMinutes] = useState("60");
+  const [blockAllDay, setBlockAllDay] = useState(false);
+  const [blockStartTime, setBlockStartTime] = useState(defaultStartTime);
+  const [blockEndTime, setBlockEndTime] = useState(
+    formatTimeOnly(addMinutesIso(buildLocalDateTimeIso(dateKey, defaultStartTime), 60)),
   );
-  const effectiveDurationMinutes = durationOptions.includes(Number(durationMinutes))
-    ? Number(durationMinutes)
-    : durationOptions.at(-1) ?? 10;
   const [videoUrl, setVideoUrl] = useState("");
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedSlot) return;
+    const startAt =
+      actionType === "appointment"
+        ? buildLocalDateTimeIso(dateKey, appointmentStartTime)
+        : blockAllDay
+          ? getAllDayBlockStartAt(dateKey)
+          : buildLocalDateTimeIso(dateKey, blockStartTime);
+    const endAt =
+      actionType === "appointment"
+        ? addMinutesIso(startAt, Number(appointmentDurationMinutes) || 60)
+        : blockAllDay
+          ? buildLocalDateTimeIso(addDaysDateKey(dateKey, 1), "00:00")
+          : buildLocalDateTimeIso(dateKey, blockEndTime);
 
     await onSubmit({
-      slot: selectedSlot,
       actionType,
       patientId,
       appointmentMode,
       videoUrl,
       title,
       notes,
-      durationMinutes: effectiveDurationMinutes,
+      startAt,
+      endAt,
     });
   }
 
@@ -10546,28 +10530,26 @@ function CalendarSlotActionDialog({
               { value: "block", label: "Bloquear hueco" },
             ]}
           />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <SelectField
-              label="Hora de inicio"
-              value={selectedSlot?.id ?? ""}
-              onChange={setSlotId}
-              options={slots.map((slot) => ({
-                value: slot.id,
-                label: `${formatTimeOnly(slot.startAt)} - hasta ${formatTimeOnly(slot.endAt)}`,
-              }))}
-            />
-            <SelectField
-              label="Duración"
-              value={String(effectiveDurationMinutes)}
-              onChange={setDurationMinutes}
-              options={durationOptions.map((duration) => ({
-                value: String(duration),
-                label: `${duration} min`,
-              }))}
-            />
-          </div>
           {actionType === "appointment" ? (
             <>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field
+                  label="Hora de inicio"
+                  type="time"
+                  value={appointmentStartTime}
+                  onChange={setAppointmentStartTime}
+                  required
+                />
+                <SelectField
+                  label="Duración"
+                  value={appointmentDurationMinutes}
+                  onChange={setAppointmentDurationMinutes}
+                  options={appointmentDurationOptions.map((duration) => ({
+                    value: String(duration),
+                    label: `${duration} min`,
+                  }))}
+                />
+              </div>
               <SelectField
                 label="Cliente"
                 value={patientId}
@@ -10593,17 +10575,46 @@ function CalendarSlotActionDialog({
               )}
             </>
           ) : (
-            <Field
-              label="Título del bloqueo"
-              value={title}
-              onChange={setTitle}
-              placeholder="Bloqueo"
-            />
+            <>
+              <Field
+                label="Título del bloqueo"
+                value={title}
+                onChange={setTitle}
+                placeholder="Bloqueo"
+              />
+              <label className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-white px-3 py-3 text-sm font-bold text-[#39433f]">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-[var(--tenant-color)]"
+                  checked={blockAllDay}
+                  onChange={(event) => setBlockAllDay(event.target.checked)}
+                />
+                Bloquear todo el día
+              </label>
+              {!blockAllDay && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field
+                    label="Hora de inicio"
+                    type="time"
+                    value={blockStartTime}
+                    onChange={setBlockStartTime}
+                    required
+                  />
+                  <Field
+                    label="Hora de fin"
+                    type="time"
+                    value={blockEndTime}
+                    onChange={setBlockEndTime}
+                    required
+                  />
+                </div>
+              )}
+            </>
           )}
           <TextArea label="Notas" value={notes} onChange={setNotes} />
           <button
             className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60 sm:w-fit"
-            disabled={saving || !selectedSlot || (actionType === "appointment" && !patientId)}
+            disabled={saving || (actionType === "appointment" && !patientId)}
           >
             {saving ? <Loader2 className="size-4 animate-spin" /> : <CalendarDays className="size-4" />}
             {actionType === "appointment" ? "Enviar cita" : "Guardar bloqueo"}
@@ -10772,13 +10783,25 @@ function AppointmentRescheduleDialog({
                 onChange={setManualStartTime}
                 required
               />
-              <Field
-                label="Duración (min)"
-                type="number"
-                value={manualDuration}
-                onChange={setManualDuration}
-                required
-              />
+              {allowDurationSelect ? (
+                <SelectField
+                  label="Duración"
+                  value={manualDuration}
+                  onChange={setManualDuration}
+                  options={appointmentDurationOptions.map((duration) => ({
+                    value: String(duration),
+                    label: `${duration} min`,
+                  }))}
+                />
+              ) : (
+                <Field
+                  label="Duración (min)"
+                  type="number"
+                  value={manualDuration}
+                  onChange={setManualDuration}
+                  required
+                />
+              )}
               <div className="sm:col-span-3">
                 <button
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
@@ -10917,7 +10940,7 @@ function PendingAppointmentsPanel({
                   {getPatientName(patients, event.patient_id) || event.title}
                 </p>
                 <p className="mt-1 text-xs font-semibold text-[#6b5420]">
-                  {formatDate(event.start_at)} · {formatAgendaTimeRange(event.start_at, event.end_at)}
+                  {formatDate(event.start_at)} · {formatCalendarEventTimeLabel(event)}
                 </p>
               </div>
               <span className="rounded-md bg-white px-2 py-1 text-xs font-black text-[#8a5c18]">
@@ -11007,7 +11030,7 @@ function AgendaEventCard({
         <div className="min-w-0">
           <p className="truncate font-black text-[#24342f]">{event.title}</p>
           <p className="mt-1 truncate text-[11px] font-semibold text-[#4a554f]">
-            {formatAgendaTimeRange(event.start_at, event.end_at)}
+            {formatCalendarEventTimeLabel(event)}
           </p>
         </div>
         <meta.Icon className="size-4 shrink-0 text-[var(--tenant-color)]" />
@@ -12859,21 +12882,6 @@ function groupCalendarEventsByDay(events: CalendarEvent[]) {
   return grouped;
 }
 
-function groupAvailableAppointmentSlotsByDay(slots: AvailableAppointmentSlot[]) {
-  const grouped = new Map<string, AvailableAppointmentSlot[]>();
-
-  slots.forEach((slot) => {
-    const daySlots = grouped.get(slot.dateKey) ?? [];
-    daySlots.push(slot);
-    grouped.set(
-      slot.dateKey,
-      daySlots.sort((first, second) => first.startAt.localeCompare(second.startAt)),
-    );
-  });
-
-  return grouped;
-}
-
 function getAgendaWeeks(weekCount: number) {
   const firstMonday = getMondayStart(new Date());
 
@@ -12890,6 +12898,36 @@ function getAgendaWeeks(weekCount: number) {
         isToday: dateKey === getLocalDateString(),
       };
     }),
+  );
+}
+
+function isPastAgendaDate(dateKey: string) {
+  return dateKey < getLocalDateString();
+}
+
+function addDaysDateKey(dateKey: string, days: number) {
+  const date = new Date(`${dateKey}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return getLocalDateString(date);
+}
+
+function getDefaultAgendaStartTime(dateKey: string) {
+  if (dateKey !== getLocalDateString()) return "09:00";
+
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const roundedMinutes = Math.min(
+    23 * 60 + 50,
+    Math.ceil((currentMinutes + 5) / 10) * 10,
+  );
+
+  return minutesToTime(roundedMinutes);
+}
+
+function getAllDayBlockStartAt(dateKey: string) {
+  return buildLocalDateTimeIso(
+    dateKey,
+    dateKey === getLocalDateString() ? getDefaultAgendaStartTime(dateKey) : "00:00",
   );
 }
 
@@ -13028,6 +13066,27 @@ function formatAppointmentMode(mode: AppointmentMode | null) {
 
 function formatAgendaTimeRange(startAt: string, endAt: string) {
   return `${formatPhotoTime(startAt)} - ${formatPhotoTime(endAt)}`;
+}
+
+function formatCalendarEventTimeLabel(event: CalendarEvent) {
+  if (isAllDayCalendarEvent(event)) return "Todo el día";
+  return formatAgendaTimeRange(event.start_at, event.end_at);
+}
+
+function isAllDayCalendarEvent(event: CalendarEvent) {
+  const start = new Date(event.start_at);
+  const end = new Date(event.end_at);
+  const expectedEnd = new Date(start);
+  expectedEnd.setDate(start.getDate() + 1);
+
+  return (
+    event.event_type === "block" &&
+    start.getHours() === 0 &&
+    start.getMinutes() === 0 &&
+    end.getHours() === 0 &&
+    end.getMinutes() === 0 &&
+    getLocalDateString(end) === getLocalDateString(expectedEnd)
+  );
 }
 
 function formatTimeOnly(value: string) {
