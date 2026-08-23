@@ -10557,7 +10557,7 @@ function CalendarSlotActionDialog({
               }))}
             />
             <SelectField
-              label="DuraciÃ³n"
+              label="Duración"
               value={String(effectiveDurationMinutes)}
               onChange={setDurationMinutes}
               options={durationOptions.map((duration) => ({
@@ -10704,7 +10704,7 @@ function AppointmentRescheduleDialog({
                 {allowDurationSelect && (
                   <div className="mt-3">
                     <SelectField
-                      label="DuraciÃ³n"
+                      label="Duración"
                       value={slotDurationMinutes}
                       onChange={setSlotDurationMinutes}
                       options={appointmentDurationOptions.map((duration) => ({
