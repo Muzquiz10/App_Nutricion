@@ -5060,7 +5060,7 @@ function InvitationPanel({
   );
   const [managedDraft, setManagedDraft, clearManagedDraft] = useStoredDraft(
     `nutrios:draft:managed-patient:${tenant.id}`,
-    { email: "" },
+    { email: "", fullName: "" },
   );
   const [inviteAccess, setInviteAccess] = useState<ClientPortalAccess>(() => ({
     ...defaultClientPortalAccess,
@@ -5151,6 +5151,7 @@ function InvitationPanel({
         },
         body: JSON.stringify({
           email: managedDraft.email,
+          fullName: managedDraft.fullName,
           tenantId: tenant.id,
           tenantSlug: tenant.slug,
           portalAccess: managedAccess,
@@ -5202,6 +5203,14 @@ function InvitationPanel({
               El cliente completa su ficha inicial al aceptar la invitación.
             </p>
           </div>
+          <Field
+            label="Nombre y apellidos"
+            value={managedDraft.fullName}
+            onChange={(value) =>
+              setManagedDraft((current) => ({ ...current, fullName: value }))
+            }
+            required
+          />
           <Field
             label="Correo electrónico"
             type="email"

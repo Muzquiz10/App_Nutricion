@@ -415,6 +415,8 @@ test("client access and professional onboarding are configurable per patient", a
   assert.match(source, /defaultClientPortalAccess/);
   assert.match(source, /ClientAccessPicker/);
   assert.match(source, /PatientAccessPanel/);
+  assert.match(source, /Nombre y apellidos/);
+  assert.match(source, /fullName: managedDraft\.fullName/);
   assert.match(source, /\/api\/patients\/access/);
   assert.match(source, /\/api\/patients\/create-managed/);
   assert.match(source, /onboarding_mode === "professional"/);
@@ -425,6 +427,9 @@ test("client access and professional onboarding are configurable per patient", a
   assert.match(accessRoute, /No tienes permisos para cambiar los accesos/);
   assert.match(managedRoute, /generateTemporaryPassword/);
   assert.match(managedRoute, /sendManagedPatientWelcomeEmail/);
+  assert.match(managedRoute, /fullName\?: string/);
+  assert.match(managedRoute, /const patientName = fullName/);
+  assert.doesNotMatch(managedRoute, /const patientName = email/);
   assert.match(managedRoute, /onboarding_mode: "professional"/);
   assert.match(managedRoute, /questionnaire_completed_at: now/);
   assert.match(invitationCreateRoute, /portal_access: portalAccess/);

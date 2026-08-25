@@ -14,6 +14,7 @@ import {
 
 type CreateManagedPatientBody = {
   email?: string;
+  fullName?: string;
   tenantId?: string;
   tenantSlug?: string;
   portalAccess?: Partial<ClientPortalAccess>;
@@ -82,10 +83,11 @@ export async function POST(request: Request) {
 
   const body = (await request.json()) as CreateManagedPatientBody;
   const email = body.email?.trim().toLowerCase();
+  const fullName = body.fullName?.trim();
 
-  if (!email || !isValidEmail(email) || !body.tenantId) {
+  if (!email || !isValidEmail(email) || !fullName || !body.tenantId) {
     return NextResponse.json(
-      { error: "Faltan email o tenant validos." },
+      { error: "Faltan nombre, email o tenant validos." },
       { status: 400 },
     );
   }
@@ -118,7 +120,7 @@ export async function POST(request: Request) {
   const tenantName = tenant?.name ?? body.tenantSlug ?? APP_NAME;
   const portalAccess = normalizePortalAccess(body.portalAccess);
   const temporaryPassword = generateTemporaryPassword();
-  const patientName = email;
+  const patientName = fullName;
   const patientCode = `PAT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 
   const authUserResult = await resolveManagedPatientUser({
@@ -222,6 +224,7 @@ export async function POST(request: Request) {
   const emailResult = await sendManagedPatientWelcomeEmail({
     request,
     email,
+    fullName: patientName,
     temporaryPassword,
     tenantName,
   });
@@ -303,11 +306,13 @@ async function resolveManagedPatientUser({
 async function sendManagedPatientWelcomeEmail({
   request,
   email,
+  fullName,
   temporaryPassword,
   tenantName,
 }: {
   request: Request;
   email: string;
+  fullName: string;
   temporaryPassword: string;
   tenantName: string;
 }) {
@@ -328,6 +333,7 @@ async function sendManagedPatientWelcomeEmail({
     ``,
     `Tu profesional ha creado tu acceso a ${APP_NAME}.`,
     ``,
+    `Nombre: ${fullName}`,
     `Email: ${email}`,
     `Contraseña temporal: ${temporaryPassword}`,
     `Acceso: ${appUrl}`,
