@@ -13,13 +13,48 @@ type CreateInvitationBody = {
   email?: string;
   tenantId?: string;
   tenantSlug?: string;
+  portalAccess?: Partial<ClientPortalAccess>;
 };
+
+type ClientFeatureAccessKey =
+  | "goals"
+  | "plans"
+  | "data_entry"
+  | "activities"
+  | "stats"
+  | "chat"
+  | "documents"
+  | "agenda";
+
+type ClientPortalAccess = Record<ClientFeatureAccessKey, boolean>;
 
 type InviteMetadata = {
   tenant_id: string;
   tenant_slug: string;
   invitation_token: string;
   role: "patient";
+};
+
+const accessKeys: ClientFeatureAccessKey[] = [
+  "goals",
+  "plans",
+  "data_entry",
+  "activities",
+  "stats",
+  "chat",
+  "documents",
+  "agenda",
+];
+
+const defaultPortalAccess: ClientPortalAccess = {
+  goals: true,
+  plans: true,
+  data_entry: true,
+  activities: true,
+  stats: true,
+  chat: true,
+  documents: true,
+  agenda: true,
 };
 
 export async function POST(request: Request) {
@@ -58,6 +93,8 @@ export async function POST(request: Request) {
     );
   }
 
+  const portalAccess = normalizePortalAccess(body.portalAccess);
+
   const { data: membership, error: membershipError } = await supabase
     .from("tenant_members")
     .select("role,status")
@@ -94,18 +131,37 @@ export async function POST(request: Request) {
   }
 
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14).toISOString();
-  const { data: invitation, error: invitationError } = await supabase
+  const invitationPayload = {
+    tenant_id: body.tenantId,
+    invited_by: user.id,
+    email,
+    role: "patient",
+    status: "pending",
+    portal_access: portalAccess,
+    expires_at: expiresAt,
+  };
+  let invitationResult = await supabase
     .from("invitations")
-    .insert({
-      tenant_id: body.tenantId,
-      invited_by: user.id,
-      email,
-      role: "patient",
-      status: "pending",
-      expires_at: expiresAt,
-    })
+    .insert(invitationPayload)
     .select("id, token")
     .single();
+
+  if (isMissingPortalAccessColumn(invitationResult.error)) {
+    invitationResult = await supabase
+      .from("invitations")
+      .insert({
+        tenant_id: invitationPayload.tenant_id,
+        invited_by: invitationPayload.invited_by,
+        email: invitationPayload.email,
+        role: invitationPayload.role,
+        status: invitationPayload.status,
+        expires_at: invitationPayload.expires_at,
+      })
+      .select("id, token")
+      .single();
+  }
+
+  const { data: invitation, error: invitationError } = invitationResult;
 
   if (invitationError || !invitation) {
     return NextResponse.json(
@@ -149,6 +205,28 @@ export async function POST(request: Request) {
     invitationId: invitation.id,
     invitationUrl: `${appOrigin}${invitePath}`,
   });
+}
+
+function normalizePortalAccess(
+  value: Partial<ClientPortalAccess> | undefined,
+): ClientPortalAccess {
+  return accessKeys.reduce<ClientPortalAccess>((result, key) => {
+    result[key] =
+      typeof value?.[key] === "boolean"
+        ? Boolean(value[key])
+        : defaultPortalAccess[key];
+    return result;
+  }, { ...defaultPortalAccess });
+}
+
+function isMissingPortalAccessColumn(
+  error: { message?: string; code?: string } | null,
+) {
+  if (!error) return false;
+  return (
+    error.code === "PGRST204" ||
+    /portal_access|schema cache/i.test(error.message ?? "")
+  );
 }
 
 function toManualInvitationWarning(message: string) {

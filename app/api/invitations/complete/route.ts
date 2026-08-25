@@ -24,7 +24,39 @@ type CompleteInvitationBody = {
   consentAccepted?: boolean;
 };
 
+type ClientFeatureAccessKey =
+  | "goals"
+  | "plans"
+  | "data_entry"
+  | "activities"
+  | "stats"
+  | "chat"
+  | "documents"
+  | "agenda";
+
+type ClientPortalAccess = Record<ClientFeatureAccessKey, boolean>;
+
 const CURRENT_QUESTIONNAIRE_VERSION = 2;
+const accessKeys: ClientFeatureAccessKey[] = [
+  "goals",
+  "plans",
+  "data_entry",
+  "activities",
+  "stats",
+  "chat",
+  "documents",
+  "agenda",
+];
+const defaultPortalAccess: ClientPortalAccess = {
+  goals: true,
+  plans: true,
+  data_entry: true,
+  activities: true,
+  stats: true,
+  chat: true,
+  documents: true,
+  agenda: true,
+};
 const validObjectives = new Set([
   "Reducir peso",
   "Ganar masa muscular",
@@ -96,7 +128,7 @@ export async function POST(request: Request) {
 
   const { data: invitation, error: invitationError } = await supabase
     .from("invitations")
-    .select("id,email,status,expires_at,tenant_id,invited_by")
+    .select("*")
     .eq("token", body.token)
     .maybeSingle();
 
@@ -157,32 +189,66 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: profileError.message }, { status: 500 });
   }
 
-  const { data: patient, error: patientError } = await supabase
+  const patientPayload = {
+    tenant_id: invitation.tenant_id,
+    user_id: user.id,
+    nutritionist_user_id: invitation.invited_by,
+    patient_code: patientCode,
+    full_name: fullName,
+    age: body.age,
+    height_cm: body.heightCm,
+    initial_weight_kg: body.currentWeightKg,
+    current_weight_kg: body.currentWeightKg,
+    objective: body.objective,
+    sex: body.sex,
+    allergies: body.allergies?.trim() ?? "",
+    avoided_foods: body.avoidedFoods?.trim() ?? "",
+    exercise_routine: exerciseRoutine,
+    exercise_hours_per_week: body.exerciseHoursPerWeek,
+    exercise_type: exerciseType,
+    questionnaire_version: CURRENT_QUESTIONNAIRE_VERSION,
+    questionnaire_completed_at: new Date().toISOString(),
+    onboarding_mode: "self",
+    portal_access: normalizePortalAccess(invitation.portal_access),
+    consent_given_at: new Date().toISOString(),
+    gdpr_policy_version: "2026-07-30",
+  };
+  let patientResult = await supabase
     .from("patients")
-    .insert({
-      tenant_id: invitation.tenant_id,
-      user_id: user.id,
-      nutritionist_user_id: invitation.invited_by,
-      patient_code: patientCode,
-      full_name: fullName,
-      age: body.age,
-      height_cm: body.heightCm,
-      initial_weight_kg: body.currentWeightKg,
-      current_weight_kg: body.currentWeightKg,
-      objective: body.objective,
-      sex: body.sex,
-      allergies: body.allergies?.trim() ?? "",
-      avoided_foods: body.avoidedFoods?.trim() ?? "",
-      exercise_routine: exerciseRoutine,
-      exercise_hours_per_week: body.exerciseHoursPerWeek,
-      exercise_type: exerciseType,
-      questionnaire_version: CURRENT_QUESTIONNAIRE_VERSION,
-      questionnaire_completed_at: new Date().toISOString(),
-      consent_given_at: new Date().toISOString(),
-      gdpr_policy_version: "2026-07-30",
-    })
+    .insert(patientPayload)
     .select("id")
     .single();
+
+  if (isMissingOnboardingColumn(patientResult.error)) {
+    patientResult = await supabase
+      .from("patients")
+      .insert({
+        tenant_id: patientPayload.tenant_id,
+        user_id: patientPayload.user_id,
+        nutritionist_user_id: patientPayload.nutritionist_user_id,
+        patient_code: patientPayload.patient_code,
+        full_name: patientPayload.full_name,
+        age: patientPayload.age,
+        height_cm: patientPayload.height_cm,
+        initial_weight_kg: patientPayload.initial_weight_kg,
+        current_weight_kg: patientPayload.current_weight_kg,
+        objective: patientPayload.objective,
+        sex: patientPayload.sex,
+        allergies: patientPayload.allergies,
+        avoided_foods: patientPayload.avoided_foods,
+        exercise_routine: patientPayload.exercise_routine,
+        exercise_hours_per_week: patientPayload.exercise_hours_per_week,
+        exercise_type: patientPayload.exercise_type,
+        questionnaire_version: patientPayload.questionnaire_version,
+        questionnaire_completed_at: patientPayload.questionnaire_completed_at,
+        consent_given_at: patientPayload.consent_given_at,
+        gdpr_policy_version: patientPayload.gdpr_policy_version,
+      })
+      .select("id")
+      .single();
+  }
+
+  const { data: patient, error: patientError } = patientResult;
 
   if (patientError || !patient) {
     const rawMessage = patientError?.message ?? "No se pudo crear la ficha.";
@@ -375,4 +441,29 @@ function toActivationConflictMessage(message: string) {
   }
 
   return message;
+}
+
+function normalizePortalAccess(value: unknown): ClientPortalAccess {
+  const access =
+    value && typeof value === "object"
+      ? (value as Partial<ClientPortalAccess>)
+      : undefined;
+
+  return accessKeys.reduce<ClientPortalAccess>((result, key) => {
+    result[key] =
+      typeof access?.[key] === "boolean"
+        ? Boolean(access[key])
+        : defaultPortalAccess[key];
+    return result;
+  }, { ...defaultPortalAccess });
+}
+
+function isMissingOnboardingColumn(
+  error: { message?: string; code?: string } | null,
+) {
+  if (!error) return false;
+  return (
+    error.code === "PGRST204" ||
+    /portal_access|onboarding_mode|schema cache/i.test(error.message ?? "")
+  );
 }

@@ -82,6 +82,17 @@ import type { Tenant } from "../lib/types";
 type UserRole = "owner" | "nutritionist" | "patient";
 type LoginIntent = "patient" | "professional";
 type DietEditorMode = "create" | "edit";
+type PatientOnboardingMode = "self" | "professional";
+type ClientFeatureAccessKey =
+  | "goals"
+  | "plans"
+  | "data_entry"
+  | "activities"
+  | "stats"
+  | "chat"
+  | "documents"
+  | "agenda";
+type ClientPortalAccess = Record<ClientFeatureAccessKey, boolean>;
 
 type Patient = {
   id: string;
@@ -90,10 +101,10 @@ type Patient = {
   nutritionist_user_id: string;
   patient_code: string;
   full_name: string;
-  age: number;
-  height_cm: number;
-  initial_weight_kg: number;
-  current_weight_kg: number;
+  age: number | null;
+  height_cm: number | null;
+  initial_weight_kg: number | null;
+  current_weight_kg: number | null;
   waist_cm: number | null;
   objective: string | null;
   sex: "male" | "female" | null;
@@ -104,6 +115,8 @@ type Patient = {
   exercise_type: string | null;
   profile_photo_path?: string | null;
   profile_photo_url?: string | null;
+  portal_access?: Partial<ClientPortalAccess> | null;
+  onboarding_mode?: PatientOnboardingMode;
   questionnaire_version?: number;
   questionnaire_completed_at?: string | null;
   status?: "active" | "inactive" | "archived";
@@ -115,6 +128,7 @@ type PendingInvitation = {
   email: string;
   token: string;
   status: string;
+  portal_access?: Partial<ClientPortalAccess> | null;
   expires_at: string;
   created_at: string;
 };
@@ -448,7 +462,7 @@ type TabId =
   | "notifications"
   | "settings";
 type PatientListView = "active" | "pending" | "inactive";
-type PatientDetailTab = "record" | "consultations";
+type PatientDetailTab = "record" | "consultations" | "access";
 
 type CreateInvitationResponse = {
   error?: string;
@@ -457,6 +471,19 @@ type CreateInvitationResponse = {
   invitationUrl?: string;
   actionLink?: string;
   warning?: string;
+};
+
+type CreateManagedPatientResponse = {
+  error?: string;
+  ok?: boolean;
+  patientId?: string;
+  warning?: string;
+};
+
+type UpdatePatientAccessResponse = {
+  error?: string;
+  ok?: boolean;
+  portalAccess?: ClientPortalAccess;
 };
 
 type SendChatMessageResponse = {
@@ -574,6 +601,89 @@ const professionalTabOrder: TabId[] = [
   "notifications",
   "settings",
 ];
+
+const defaultClientPortalAccess: ClientPortalAccess = {
+  goals: true,
+  plans: true,
+  data_entry: true,
+  activities: true,
+  stats: true,
+  chat: true,
+  documents: true,
+  agenda: true,
+};
+
+const clientPortalAccessDefinitions: Array<{
+  key: ClientFeatureAccessKey;
+  tabId: TabId;
+  label: string;
+  description: string;
+  icon: typeof Users;
+}> = [
+  {
+    key: "goals",
+    tabId: "goals",
+    label: "Objetivos",
+    description: "Cumplimiento y seguimiento de objetivos.",
+    icon: Target,
+  },
+  {
+    key: "plans",
+    tabId: "plans",
+    label: "Dietas",
+    description: "Consulta de dietas publicadas.",
+    icon: BookOpen,
+  },
+  {
+    key: "data_entry",
+    tabId: "data-entry",
+    label: "Registrar datos",
+    description: "Peso, cintura, pasos, actividad y fotos.",
+    icon: Plus,
+  },
+  {
+    key: "activities",
+    tabId: "activities",
+    label: "Actividades",
+    description: "Histórico y resumen semanal de actividades.",
+    icon: Dumbbell,
+  },
+  {
+    key: "stats",
+    tabId: "stats",
+    label: "Estadísticas",
+    description: "Gráficas de evolución y fotos por día.",
+    icon: Activity,
+  },
+  {
+    key: "chat",
+    tabId: "chat",
+    label: "Chat",
+    description: "Mensajes con el profesional.",
+    icon: MessageCircle,
+  },
+  {
+    key: "documents",
+    tabId: "documents",
+    label: "Documentos",
+    description: "Documentación complementaria.",
+    icon: FileText,
+  },
+  {
+    key: "agenda",
+    tabId: "agenda",
+    label: "Citas",
+    description: "Calendario y reserva de citas.",
+    icon: CalendarDays,
+  },
+];
+
+const tabToClientAccessKey = new Map<TabId, ClientFeatureAccessKey>(
+  clientPortalAccessDefinitions.map((definition) => [
+    definition.tabId,
+    definition.key,
+  ]),
+);
 
 const dayLabels = [
   "Lunes",
@@ -1272,7 +1382,16 @@ export function NutriOSApp({
     activeStartedAt: 0,
   });
   const accessTokenRef = useRef("");
-  const visibleTabs = useMemo(() => getVisibleTabsForRole(role), [role]);
+  const visibleTabs = useMemo(
+    () => getVisibleTabsForRole(role, selectedPatient),
+    [role, selectedPatient],
+  );
+
+  useEffect(() => {
+    if (!role) return;
+    if (isTabAvailableForRole(activeTab, role, selectedPatient)) return;
+    setActiveTab("patients");
+  }, [activeTab, role, selectedPatient, setActiveTab]);
 
   function handleSidebarEnter() {
     if (!sidebarCollapsedAfterClick) {
@@ -1506,7 +1625,7 @@ export function NutriOSApp({
     if (["owner", "nutritionist"].includes(resolvedRole)) {
       const { data: invitationRows } = await supabase
         .from("invitations")
-        .select("id,email,token,status,expires_at,created_at")
+        .select("*")
         .eq("tenant_id", resolvedTenant.id)
         .eq("status", "pending")
         .gt("expires_at", new Date().toISOString())
@@ -3617,7 +3736,11 @@ function PatientsPanel({
   if (role === "patient") {
     return (
       <div className="grid gap-4 lg:grid-cols-4">
-        <StatCard label="Peso inicial" value={`${selectedPatient?.initial_weight_kg ?? "-"} kg`} icon={Weight} />
+        <StatCard
+          label="Peso inicial"
+          value={formatMetricValue(selectedPatient?.initial_weight_kg, "kg")}
+          icon={Weight}
+        />
         <StatCard label="Peso actual" value={`${currentWeight ?? "-"} kg`} icon={Activity} />
         <StatCard label="IMC actual" value={formatOptionalNumber(currentBmi, 1)} icon={ClipboardList} />
         <StatCard label="Fecha de alta" value={formatDate(selectedPatient?.registered_at)} icon={CalendarDays} />
@@ -3730,6 +3853,7 @@ function PatientsPanel({
         onTabChange={setPatientDetailTab}
         supabase={supabase}
         onNotice={onNotice}
+        onReload={onReload}
       />
       {onlineConsultationEvent && (
         <OnlineConsultationChoiceDialog
@@ -4199,6 +4323,7 @@ function ProfessionalPatientDetail({
   onTabChange,
   supabase,
   onNotice,
+  onReload,
 }: {
   patient: Patient | null;
   weights: WeightLog[];
@@ -4206,6 +4331,7 @@ function ProfessionalPatientDetail({
   onTabChange: (tab: PatientDetailTab) => void;
   supabase: ReturnType<typeof createSupabaseBrowser>;
   onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
 }) {
   return (
     <div className="grid gap-3">
@@ -4213,6 +4339,7 @@ function ProfessionalPatientDetail({
         {[
           { id: "record", label: "Ficha del cliente", icon: ClipboardList },
           { id: "consultations", label: "Consultas", icon: FileText },
+          { id: "access", label: "Accesos", icon: ShieldCheck },
         ].map((tab) => {
           const active = activeTab === tab.id;
           const Icon = tab.icon;
@@ -4249,6 +4376,202 @@ function ProfessionalPatientDetail({
           onNotice={onNotice}
         />
       )}
+      {activeTab === "access" && (
+        <PatientAccessPanel
+          patient={patient}
+          supabase={supabase}
+          onNotice={onNotice}
+          onReload={onReload}
+        />
+      )}
+    </div>
+  );
+}
+
+function PatientAccessPanel({
+  patient,
+  supabase,
+  onNotice,
+  onReload,
+}: {
+  patient: Patient | null;
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const [savingKey, setSavingKey] = useState<ClientFeatureAccessKey | null>(null);
+  const access = getClientPortalAccess(patient);
+
+  async function updateAccess(key: ClientFeatureAccessKey, enabled: boolean) {
+    if (!patient) return;
+
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para cambiar accesos reales.");
+      return;
+    }
+
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) {
+      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+      return;
+    }
+
+    setSavingKey(key);
+    try {
+      const response = await fetch("/api/patients/access", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          patientId: patient.id,
+          portalAccess: {
+            ...access,
+            [key]: enabled,
+          },
+        }),
+      });
+      const payload = (await response.json()) as UpdatePatientAccessResponse;
+
+      if (!response.ok) {
+        onNotice(payload.error ?? "No se pudieron actualizar los accesos.");
+        return;
+      }
+
+      onNotice("Accesos del cliente actualizados.");
+      await onReload();
+    } finally {
+      setSavingKey(null);
+    }
+  }
+
+  if (!patient) {
+    return (
+      <Panel>
+        <EmptyState text="Selecciona un cliente para configurar sus accesos." />
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase text-[var(--tenant-color)]">
+            Accesos del cliente
+          </p>
+          <h2 className="mt-1 text-lg font-black">{patient.full_name}</h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Mi Ficha Personal siempre estará visible. Aquí puedes decidir qué módulos adicionales ve este cliente.
+          </p>
+        </div>
+        <ShieldCheck className="size-5 shrink-0 text-[var(--tenant-color)]" />
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        {clientPortalAccessDefinitions.map((definition) => {
+          const Icon = definition.icon;
+          const enabled = access[definition.key];
+          const saving = savingKey === definition.key;
+
+          return (
+            <article
+              key={definition.key}
+              className={`flex min-w-0 items-center justify-between gap-3 rounded-lg border p-4 transition ${
+                enabled
+                  ? "border-[#bde5c2] bg-[#f3fbf4]"
+                  : "border-[var(--line)] bg-white"
+              }`}
+            >
+              <div className="flex min-w-0 items-start gap-3">
+                <span
+                  className={`grid size-10 shrink-0 place-items-center rounded-lg ${
+                    enabled
+                      ? "bg-white text-[var(--tenant-color)]"
+                      : "bg-[#f5f1e8] text-[#7a817c]"
+                  }`}
+                >
+                  <Icon className="size-5" />
+                </span>
+                <div className="min-w-0">
+                  <p className="font-black">{definition.label}</p>
+                  <p className="mt-1 text-sm leading-5 text-[var(--muted)]">
+                    {definition.description}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className={`inline-flex h-10 shrink-0 items-center justify-center rounded-lg border px-3 text-sm font-black transition disabled:opacity-60 ${
+                  enabled
+                    ? "border-[#efc4ba] bg-white text-[#8a3327]"
+                    : "border-[var(--tenant-color)] bg-[var(--tenant-color)] text-white"
+                }`}
+                disabled={saving}
+                onClick={() => updateAccess(definition.key, !enabled)}
+              >
+                {saving ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : enabled ? (
+                  "Quitar"
+                ) : (
+                  "Dar acceso"
+                )}
+              </button>
+            </article>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+function ClientAccessPicker({
+  value,
+  onChange,
+}: {
+  value: ClientPortalAccess;
+  onChange: (value: ClientPortalAccess) => void;
+}) {
+  function toggleAccess(key: ClientFeatureAccessKey) {
+    onChange({
+      ...value,
+      [key]: !value[key],
+    });
+  }
+
+  return (
+    <div>
+      <p className="text-sm font-black">Accesos iniciales</p>
+      <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
+        Mi Ficha Personal siempre estará visible.
+      </p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {clientPortalAccessDefinitions.map((definition) => {
+          const Icon = definition.icon;
+          const enabled = value[definition.key];
+
+          return (
+            <button
+              key={definition.key}
+              type="button"
+              className={`flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs font-black transition ${
+                enabled
+                  ? "border-[#bde5c2] bg-[#f3fbf4] text-[#255d50]"
+                  : "border-[var(--line)] bg-[#fbfaf6] text-[#6a726d]"
+              }`}
+              onClick={() => toggleAccess(definition.key)}
+            >
+              <Icon className="size-4 shrink-0" />
+              <span className="min-w-0 truncate">{definition.label}</span>
+              <span className="ml-auto shrink-0">
+                {enabled ? <Check className="size-4" /> : <X className="size-4" />}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -4735,8 +5058,19 @@ function InvitationPanel({
     `nutrios:draft:invite:${tenant.id}`,
     { email: "" },
   );
+  const [managedDraft, setManagedDraft, clearManagedDraft] = useStoredDraft(
+    `nutrios:draft:managed-patient:${tenant.id}`,
+    { email: "" },
+  );
+  const [inviteAccess, setInviteAccess] = useState<ClientPortalAccess>(() => ({
+    ...defaultClientPortalAccess,
+  }));
+  const [managedAccess, setManagedAccess] = useState<ClientPortalAccess>(() => ({
+    ...defaultClientPortalAccess,
+  }));
   const [manualInviteLink, setManualInviteLink] = useState("");
   const [sendingInvite, setSendingInvite] = useState(false);
+  const [creatingManagedPatient, setCreatingManagedPatient] = useState(false);
 
   async function invitePatient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -4767,6 +5101,7 @@ function InvitationPanel({
           email: inviteDraft.email,
           tenantId: tenant.id,
           tenantSlug: tenant.slug,
+          portalAccess: inviteAccess,
         }),
       });
 
@@ -4777,6 +5112,7 @@ function InvitationPanel({
       }
 
       clearInviteDraft();
+      setInviteAccess({ ...defaultClientPortalAccess });
       if (payload.delivery === "manual_link" && payload.actionLink) {
         setManualInviteLink(payload.actionLink);
         onNotice(payload.warning ?? "Invitacion creada con enlace manual.");
@@ -4786,6 +5122,56 @@ function InvitationPanel({
       await onReload();
     } finally {
       setSendingInvite(false);
+    }
+  }
+
+  async function createManagedPatient(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (creatingManagedPatient) return;
+
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para crear clientes reales.");
+      return;
+    }
+
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) {
+      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+      return;
+    }
+
+    setCreatingManagedPatient(true);
+
+    try {
+      const response = await fetch("/api/patients/create-managed", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          email: managedDraft.email,
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          portalAccess: managedAccess,
+        }),
+      });
+
+      const payload = (await response.json()) as CreateManagedPatientResponse;
+      if (!response.ok) {
+        onNotice(payload.error ?? "No se pudo crear el cliente.");
+        return;
+      }
+
+      clearManagedDraft();
+      setManagedAccess({ ...defaultClientPortalAccess });
+      onNotice(
+        payload.warning ??
+          "Cliente creado. Le hemos enviado la contraseña temporal por email.",
+      );
+      await onReload();
+    } finally {
+      setCreatingManagedPatient(false);
     }
   }
 
@@ -4805,30 +5191,81 @@ function InvitationPanel({
         <h2 className="text-base font-black sm:text-lg">Dar de alta cliente</h2>
         <UserPlus className="size-5 text-[var(--tenant-color)]" />
       </div>
-      <form className="mt-5 space-y-3" onSubmit={invitePatient}>
-        <Field
-          label="Correo electronico"
-          type="email"
-          value={inviteDraft.email}
-          onChange={(value) =>
-            setInviteDraft((current) => ({ ...current, email: value }))
-          }
-          required
-        />
-        <button
-          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
-          disabled={sendingInvite}
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        <form
+          className="space-y-3 rounded-lg border border-[var(--line)] bg-white p-4"
+          onSubmit={invitePatient}
         >
-          {sendingInvite ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <Send className="size-4" />
-          )}
-          {sendingInvite ? "Enviando..." : "Enviar invitacion"}
-        </button>
-      </form>
+          <div>
+            <p className="font-black">Invitación con formulario</p>
+            <p className="mt-1 text-sm leading-5 text-[var(--muted)]">
+              El cliente completa su ficha inicial al aceptar la invitación.
+            </p>
+          </div>
+          <Field
+            label="Correo electrónico"
+            type="email"
+            value={inviteDraft.email}
+            onChange={(value) =>
+              setInviteDraft((current) => ({ ...current, email: value }))
+            }
+            required
+          />
+          <ClientAccessPicker
+            value={inviteAccess}
+            onChange={setInviteAccess}
+          />
+          <button
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
+            disabled={sendingInvite}
+          >
+            {sendingInvite ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Send className="size-4" />
+            )}
+            {sendingInvite ? "Enviando..." : "Enviar invitación"}
+          </button>
+        </form>
+
+        <form
+          className="space-y-3 rounded-lg border border-[var(--line)] bg-white p-4"
+          onSubmit={createManagedPatient}
+        >
+          <div>
+            <p className="font-black">Alta directa por profesional</p>
+            <p className="mt-1 text-sm leading-5 text-[var(--muted)]">
+              El cliente recibe una contraseña temporal y no tendrá que rellenar el formulario inicial.
+            </p>
+          </div>
+          <Field
+            label="Correo electrónico"
+            type="email"
+            value={managedDraft.email}
+            onChange={(value) =>
+              setManagedDraft((current) => ({ ...current, email: value }))
+            }
+            required
+          />
+          <ClientAccessPicker
+            value={managedAccess}
+            onChange={setManagedAccess}
+          />
+          <button
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-[var(--tenant-color)] bg-white px-4 text-sm font-black text-[var(--tenant-color)] disabled:opacity-60"
+            disabled={creatingManagedPatient}
+          >
+            {creatingManagedPatient ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <KeyRound className="size-4" />
+            )}
+            {creatingManagedPatient ? "Creando..." : "Crear y enviar contraseña"}
+          </button>
+        </form>
+      </div>
       <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
-        El cliente completara su ficha al aceptar la invitacion. El ID interno y la fecha de registro se generan automaticamente.
+        En ambos casos se genera automáticamente el ID interno y la fecha de registro.
       </p>
       {manualInviteLink && (
         <div className="mt-4 rounded-lg border border-[#e8d9aa] bg-[#fff8df] p-3">
@@ -4933,10 +5370,10 @@ function PatientCards({
                 <ChevronRight className="size-4 text-[var(--muted)]" />
               </div>
               <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                <Metric label="Edad" value={`${patient.age}`} />
-                <Metric label="Altura" value={`${patient.height_cm} cm`} />
-                <Metric label="Inicial" value={`${patient.initial_weight_kg} kg`} />
-                <Metric label="Actual" value={`${patient.current_weight_kg} kg`} />
+                <Metric label="Edad" value={formatMetricValue(patient.age)} />
+                <Metric label="Altura" value={formatMetricValue(patient.height_cm, "cm")} />
+                <Metric label="Inicial" value={formatMetricValue(patient.initial_weight_kg, "kg")} />
+                <Metric label="Actual" value={formatMetricValue(patient.current_weight_kg, "kg")} />
               </div>
             </button>
             <button
@@ -4995,6 +5432,9 @@ function PendingInvitationList({
           </div>
           <p className="mt-3 text-sm text-[var(--muted)]">
             Caduca: {formatDate(invitation.expires_at)}
+          </p>
+          <p className="mt-2 text-xs font-semibold text-[var(--muted)]">
+            Accesos: {formatClientAccessSummary(invitation.portal_access)}
           </p>
           <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
             <input
@@ -5056,9 +5496,9 @@ function PatientQuestionnairePanel({
   const emptyQuestionnaireDraft = useMemo(
     () => ({
       fullName: patient?.full_name ?? "",
-      age: patient ? String(patient.age) : "",
-      heightCm: patient ? String(patient.height_cm) : "",
-      currentWeightKg: patient ? String(patient.current_weight_kg) : "",
+      age: formatNumberForInput(patient?.age ?? null),
+      heightCm: formatNumberForInput(patient?.height_cm ?? null),
+      currentWeightKg: formatNumberForInput(patient?.current_weight_kg ?? null),
       objective: patient?.objective ?? goalOptions[0],
       sex: patient?.sex ?? "male",
       allergies: patient?.allergies ?? "",
@@ -5334,82 +5774,88 @@ function PatientQuestionnairePanel({
           onClose={() => setProfileCameraOpen(false)}
         />
       )}
-      <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={saveQuestionnaire}>
-        <Field
-          label="Nombre y apellidos"
-          value={questionnaireDraft.fullName}
-          onChange={(value) => updateQuestionnaireDraft("fullName", value)}
-          required
-        />
-        <Field
-          label="Edad"
-          type="number"
-          value={questionnaireDraft.age}
-          onChange={(value) => updateQuestionnaireDraft("age", value)}
-          required
-        />
-        <Field
-          label="Altura cm"
-          type="number"
-          value={questionnaireDraft.heightCm}
-          onChange={(value) => updateQuestionnaireDraft("heightCm", value)}
-          required
-        />
-        <Field
-          label="Peso actual kg"
-          type="number"
-          step="0.1"
-          value={questionnaireDraft.currentWeightKg}
-          onChange={(value) => updateQuestionnaireDraft("currentWeightKg", value)}
-          required
-        />
-        <SelectField
-          label="Objetivo"
-          value={questionnaireDraft.objective}
-          onChange={(value) => updateQuestionnaireDraft("objective", value)}
-          options={goalOptions.map((label) => ({ value: label, label }))}
-        />
-        <SelectField
-          label="Sexo para calculo basal"
-          value={questionnaireDraft.sex}
-          onChange={(value) => updateQuestionnaireDraft("sex", value)}
-          options={sexOptions}
-        />
-        <TextArea
-          label="Alergias/intolerancias"
-          value={questionnaireDraft.allergies}
-          onChange={(value) => updateQuestionnaireDraft("allergies", value)}
-        />
-        <TextArea
-          label="Alimentos a evitar"
-          value={questionnaireDraft.avoidedFoods}
-          onChange={(value) => updateQuestionnaireDraft("avoidedFoods", value)}
-        />
-        <Field
-          label="Horas estimadas de ejercicio a la semana"
-          type="number"
-          step="0.5"
-          value={questionnaireDraft.exerciseHoursPerWeek}
-          onChange={(value) =>
-            updateQuestionnaireDraft("exerciseHoursPerWeek", value)
-          }
-          required
-        />
-        <TextArea
-          label="Tipo de ejercicio"
-          value={questionnaireDraft.exerciseType}
-          onChange={(value) => updateQuestionnaireDraft("exerciseType", value)}
-        />
-        <div className="md:col-span-2">
-          <button
-            className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={saving}
-          >
-            <Check className="size-4" />
-            {saving ? "Guardando..." : "Guardar ficha"}
-          </button>
+      {patient.onboarding_mode === "professional" ? (
+        <div className="mt-5 rounded-lg border border-[var(--line)] bg-[#fbfaf6] p-4 text-sm leading-6 text-[var(--muted)]">
+          Tu profesional completará los datos principales de tu ficha en consulta. Si necesitas cambiar algún dato, escríbele por el chat o coméntalo en la próxima cita.
         </div>
-      </form>
+      ) : (
+        <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={saveQuestionnaire}>
+          <Field
+            label="Nombre y apellidos"
+            value={questionnaireDraft.fullName}
+            onChange={(value) => updateQuestionnaireDraft("fullName", value)}
+            required
+          />
+          <Field
+            label="Edad"
+            type="number"
+            value={questionnaireDraft.age}
+            onChange={(value) => updateQuestionnaireDraft("age", value)}
+            required
+          />
+          <Field
+            label="Altura cm"
+            type="number"
+            value={questionnaireDraft.heightCm}
+            onChange={(value) => updateQuestionnaireDraft("heightCm", value)}
+            required
+          />
+          <Field
+            label="Peso actual kg"
+            type="number"
+            step="0.1"
+            value={questionnaireDraft.currentWeightKg}
+            onChange={(value) => updateQuestionnaireDraft("currentWeightKg", value)}
+            required
+          />
+          <SelectField
+            label="Objetivo"
+            value={questionnaireDraft.objective}
+            onChange={(value) => updateQuestionnaireDraft("objective", value)}
+            options={goalOptions.map((label) => ({ value: label, label }))}
+          />
+          <SelectField
+            label="Sexo para calculo basal"
+            value={questionnaireDraft.sex}
+            onChange={(value) => updateQuestionnaireDraft("sex", value)}
+            options={sexOptions}
+          />
+          <TextArea
+            label="Alergias/intolerancias"
+            value={questionnaireDraft.allergies}
+            onChange={(value) => updateQuestionnaireDraft("allergies", value)}
+          />
+          <TextArea
+            label="Alimentos a evitar"
+            value={questionnaireDraft.avoidedFoods}
+            onChange={(value) => updateQuestionnaireDraft("avoidedFoods", value)}
+          />
+          <Field
+            label="Horas estimadas de ejercicio a la semana"
+            type="number"
+            step="0.5"
+            value={questionnaireDraft.exerciseHoursPerWeek}
+            onChange={(value) =>
+              updateQuestionnaireDraft("exerciseHoursPerWeek", value)
+            }
+            required
+          />
+          <TextArea
+            label="Tipo de ejercicio"
+            value={questionnaireDraft.exerciseType}
+            onChange={(value) => updateQuestionnaireDraft("exerciseType", value)}
+          />
+          <div className="md:col-span-2">
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-semibold text-white disabled:opacity-60"
+              disabled={saving}
+            >
+              <Check className="size-4" />
+              {saving ? "Guardando..." : "Guardar ficha"}
+            </button>
+          </div>
+        </form>
+      )}
     </Panel>
   );
 }
@@ -5678,7 +6124,14 @@ function PatientRecord({
           }
         />
         <InfoBlock label="Tipo de ejercicio" value={patient.exercise_type || patient.exercise_routine} />
-        <InfoBlock label="Base de evolucion" value={`${patient.initial_weight_kg} kg desde ${formatDate(patient.registered_at)}`} />
+        <InfoBlock
+          label="Base de evolucion"
+          value={
+            patient.initial_weight_kg
+              ? `${formatOptionalNumber(patient.initial_weight_kg, 1)} kg desde ${formatDate(patient.registered_at)}`
+              : `Sin peso inicial registrado desde ${formatDate(patient.registered_at)}`
+          }
+        />
       </div>
     </Panel>
   );
@@ -12491,6 +12944,16 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function formatMetricValue(
+  value: number | string | null | undefined,
+  unit = "",
+) {
+  if (value === null || value === undefined || value === "") return "Sin datos";
+  const formattedValue =
+    typeof value === "number" ? formatOptionalNumber(value, value % 1 === 0 ? 0 : 1) : value;
+  return unit ? `${formattedValue} ${unit}` : String(formattedValue);
+}
+
 function InfoBlock({ label, value }: { label: string; value: string | number | null }) {
   return (
     <div className="rounded-lg border border-[var(--line)] bg-white p-3">
@@ -12704,6 +13167,8 @@ function isInactivePatient(patient: Patient) {
 }
 
 function needsQuestionnaireUpdate(patient: Patient) {
+  if (patient.onboarding_mode === "professional") return false;
+
   const exerciseHours = patient.exercise_hours_per_week;
   return (
     (patient.questionnaire_version ?? 1) < currentQuestionnaireVersion ||
@@ -13675,7 +14140,10 @@ function buildStepChartData(steps: StepLog[]) {
   });
 }
 
-function buildBmiChartData(weights: WeightLog[], heightCm: number) {
+function buildBmiChartData(
+  weights: WeightLog[],
+  heightCm: number | null | undefined,
+) {
   return weights
     .slice()
     .sort((a, b) => new Date(a.logged_at).getTime() - new Date(b.logged_at).getTime())
@@ -13839,8 +14307,11 @@ function roundNumber(value: number | null, digits: number) {
   return Math.round(value * factor) / factor;
 }
 
-function formatOptionalNumber(value: number | null, digits: number) {
-  if (value === null) return "-";
+function formatOptionalNumber(
+  value: number | null | undefined,
+  digits: number,
+) {
+  if (value === null || value === undefined) return "-";
   return value.toFixed(digits);
 }
 
@@ -14000,10 +14471,57 @@ function getAnalyticsTabLabel(tabId: TabId, role: UserRole) {
   return tabs.find((tab) => tab.id === tabId)?.label ?? tabId;
 }
 
-function getVisibleTabsForRole(role: UserRole | null) {
+function getClientPortalAccess(patient: Patient | null | undefined): ClientPortalAccess {
+  return {
+    ...defaultClientPortalAccess,
+    ...(patient?.portal_access ?? {}),
+  };
+}
+
+function normalizeClientPortalAccess(
+  access: Partial<ClientPortalAccess> | null | undefined,
+): ClientPortalAccess {
+  return {
+    ...defaultClientPortalAccess,
+    ...(access ?? {}),
+  };
+}
+
+function formatClientAccessSummary(
+  access: Partial<ClientPortalAccess> | null | undefined,
+) {
+  const normalizedAccess = normalizeClientPortalAccess(access);
+  const enabledLabels = clientPortalAccessDefinitions
+    .filter((definition) => normalizedAccess[definition.key])
+    .map((definition) => definition.label);
+
+  return enabledLabels.length > 0 ? enabledLabels.join(", ") : "Solo Mi Ficha Personal";
+}
+
+function isTabAvailableForRole(
+  tabId: TabId,
+  role: UserRole | null,
+  patient: Patient | null | undefined,
+) {
+  if (role !== "patient") return true;
+  if (tabId === "patients" || tabId === "notifications" || tabId === "settings") {
+    return true;
+  }
+
+  const accessKey = tabToClientAccessKey.get(tabId);
+  if (!accessKey) return true;
+
+  return getClientPortalAccess(patient)[accessKey];
+}
+
+function getVisibleTabsForRole(
+  role: UserRole | null,
+  patient?: Patient | null,
+) {
   const filteredTabs = tabs.filter((tab) => {
     if (tab.patientOnly && role !== "patient") return false;
     if (tab.nutritionistOnly && role === "patient") return false;
+    if (!isTabAvailableForRole(tab.id, role, patient)) return false;
     return true;
   });
 

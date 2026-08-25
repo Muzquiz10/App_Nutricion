@@ -36,6 +36,10 @@ const patientProfilePhotoMigrationPath = new URL(
   "../supabase/migrations/202608220002_patient_profile_photo.sql",
   import.meta.url,
 );
+const clientAccessMigrationPath = new URL(
+  "../supabase/migrations/202608250001_client_access_and_professional_onboarding.sql",
+  import.meta.url,
+);
 const trackingRoutePath = new URL("../app/api/tracking/logs/route.ts", import.meta.url);
 const exerciseRoutePath = new URL("../app/api/tracking/exercises/route.ts", import.meta.url);
 const analyticsRoutePath = new URL("../app/api/analytics/events/route.ts", import.meta.url);
@@ -47,6 +51,22 @@ const patientConsultationsRoutePath = new URL(
 );
 const patientProfilePhotoRoutePath = new URL(
   "../app/api/patients/profile-photo/route.ts",
+  import.meta.url,
+);
+const patientAccessRoutePath = new URL(
+  "../app/api/patients/access/route.ts",
+  import.meta.url,
+);
+const managedPatientRoutePath = new URL(
+  "../app/api/patients/create-managed/route.ts",
+  import.meta.url,
+);
+const invitationCreateRoutePath = new URL(
+  "../app/api/invitations/create/route.ts",
+  import.meta.url,
+);
+const invitationCompleteRoutePath = new URL(
+  "../app/api/invitations/complete/route.ts",
   import.meta.url,
 );
 const notificationServerPath = new URL("../app/lib/notifications/server.ts", import.meta.url);
@@ -361,7 +381,7 @@ test("nutritionist patient detail has consultation records", async () => {
   const route = await readFile(patientConsultationsRoutePath, "utf8");
   const sql = await readFile(patientConsultationsMigrationPath, "utf8");
 
-  assert.match(source, /PatientDetailTab = "record" \| "consultations"/);
+  assert.match(source, /PatientDetailTab = "record" \| "consultations" \| "access"/);
   assert.match(source, /Ficha del cliente/);
   assert.match(source, /Consultas/);
   assert.match(source, /Medidas básicas/);
@@ -373,8 +393,45 @@ test("nutritionist patient detail has consultation records", async () => {
   assert.match(source, /\/api\/patients\/consultations/);
   assert.match(route, /verifyNutritionistPatientAccess/);
   assert.match(route, /patient_consultations/);
+  assert.match(route, /buildPatientPatch/);
+  assert.match(route, /current_weight_kg/);
+  assert.match(route, /initial_weight_kg/);
+  assert.match(route, /source: "nutritionist"/);
   assert.match(route, /validActivityLevels/);
   assert.match(sql, /create table if not exists public\.patient_consultations/i);
   assert.match(sql, /enable row level security/i);
   assert.match(sql, /Nutritionists can insert patient consultations/i);
+});
+
+test("client access and professional onboarding are configurable per patient", async () => {
+  const source = await readFile(componentPath, "utf8");
+  const accessRoute = await readFile(patientAccessRoutePath, "utf8");
+  const managedRoute = await readFile(managedPatientRoutePath, "utf8");
+  const invitationCreateRoute = await readFile(invitationCreateRoutePath, "utf8");
+  const invitationCompleteRoute = await readFile(invitationCompleteRoutePath, "utf8");
+  const sql = await readFile(clientAccessMigrationPath, "utf8");
+
+  assert.match(source, /ClientFeatureAccessKey/);
+  assert.match(source, /defaultClientPortalAccess/);
+  assert.match(source, /ClientAccessPicker/);
+  assert.match(source, /PatientAccessPanel/);
+  assert.match(source, /\/api\/patients\/access/);
+  assert.match(source, /\/api\/patients\/create-managed/);
+  assert.match(source, /onboarding_mode === "professional"/);
+  assert.match(source, /getVisibleTabsForRole\(role, selectedPatient\)/);
+  assert.match(source, /isTabAvailableForRole/);
+  assert.match(source, /Mi Ficha Personal siempre estar/);
+  assert.match(accessRoute, /portal_access/);
+  assert.match(accessRoute, /No tienes permisos para cambiar los accesos/);
+  assert.match(managedRoute, /generateTemporaryPassword/);
+  assert.match(managedRoute, /sendManagedPatientWelcomeEmail/);
+  assert.match(managedRoute, /onboarding_mode: "professional"/);
+  assert.match(managedRoute, /questionnaire_completed_at: now/);
+  assert.match(invitationCreateRoute, /portal_access: portalAccess/);
+  assert.match(invitationCompleteRoute, /onboarding_mode: "self"/);
+  assert.match(invitationCompleteRoute, /portal_access: normalizePortalAccess/);
+  assert.match(sql, /add column if not exists portal_access jsonb/i);
+  assert.match(sql, /add column if not exists onboarding_mode text/i);
+  assert.match(sql, /alter column age drop not null/i);
+  assert.match(sql, /alter column initial_weight_kg drop not null/i);
 });

@@ -132,6 +132,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  const patientPatch = buildPatientPatch(body, access.initialWeightKg);
+  if (patientPatch) {
+    const { error: patientUpdateError } = await supabase
+      .from("patients")
+      .update(patientPatch)
+      .eq("id", body.patientId);
+
+    if (patientUpdateError) {
+      return NextResponse.json(
+        { error: patientUpdateError.message },
+        { status: 500 },
+      );
+    }
+  }
+
+  if (body.weightKg !== null && body.weightKg !== undefined) {
+    await supabase.from("weight_logs").insert({
+      tenant_id: access.tenantId,
+      patient_id: body.patientId,
+      weight_kg: body.weightKg,
+      source: "nutritionist",
+      logged_at: buildConsultationLoggedAt(body.consultationAt!),
+    });
+  }
+
   return NextResponse.json({ ok: true, consultation: data });
 }
 
@@ -193,7 +218,7 @@ async function verifyNutritionistPatientAccess(
 
   const { data: patient, error: patientError } = await supabase
     .from("patients")
-    .select("id,tenant_id")
+    .select("id,tenant_id,initial_weight_kg")
     .eq("id", patientId)
     .maybeSingle();
 
@@ -226,7 +251,11 @@ async function verifyNutritionistPatientAccess(
     };
   }
 
-  return { ok: true as const, tenantId: patient.tenant_id as string };
+  return {
+    ok: true as const,
+    tenantId: patient.tenant_id as string,
+    initialWeightKg: patient.initial_weight_kg as number | null,
+  };
 }
 
 function validateConsultationBody(body: ConsultationBody) {
@@ -286,4 +315,38 @@ function cleanText(value: unknown) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed || null;
+}
+
+function buildPatientPatch(
+  body: ConsultationBody,
+  initialWeightKg: number | null,
+) {
+  const patch: Record<string, unknown> = {};
+
+  if (body.age !== null && body.age !== undefined) {
+    patch.age = body.age;
+  }
+  if (body.heightCm !== null && body.heightCm !== undefined) {
+    patch.height_cm = body.heightCm;
+  }
+  if (body.weightKg !== null && body.weightKg !== undefined) {
+    patch.current_weight_kg = body.weightKg;
+    if (initialWeightKg === null || initialWeightKg === undefined) {
+      patch.initial_weight_kg = body.weightKg;
+    }
+  }
+  if (body.gender === "male" || body.gender === "female") {
+    patch.sex = body.gender;
+  }
+
+  if (Object.keys(patch).length === 0) return null;
+
+  return {
+    ...patch,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function buildConsultationLoggedAt(consultationAt: string) {
+  return `${consultationAt}T12:00:00.000Z`;
 }
