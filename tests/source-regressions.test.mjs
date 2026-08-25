@@ -417,6 +417,20 @@ test("client access and professional onboarding are configurable per patient", a
   assert.match(source, /PatientAccessPanel/);
   assert.match(source, /Nombre y apellidos/);
   assert.match(source, /fullName: managedDraft\.fullName/);
+  assert.ok(
+    source.indexOf('label="Nombre y apellidos"', source.indexOf("Alta directa por profesional")) >
+      source.indexOf("Alta directa por profesional"),
+  );
+  assert.ok(
+    source.indexOf('label="Nombre y apellidos"', source.indexOf("Invitación con formulario")) >
+      source.indexOf("Alta directa por profesional"),
+  );
+  assert.match(source, /SettingsTabId/);
+  assert.match(source, /Alta de clientes/);
+  assert.match(source, /Personalizar Mi/);
+  assert.match(source, /Configurar Notificaciones/);
+  assert.match(source, /Cambiar Contraseña/);
+  assert.match(source, /Asistencia Técnica/);
   assert.match(source, /\/api\/patients\/access/);
   assert.match(source, /\/api\/patients\/create-managed/);
   assert.match(source, /onboarding_mode === "professional"/);

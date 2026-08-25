@@ -463,6 +463,12 @@ type TabId =
   | "settings";
 type PatientListView = "active" | "pending" | "inactive";
 type PatientDetailTab = "record" | "consultations" | "access";
+type SettingsTabId =
+  | "client-signup"
+  | "brand"
+  | "notifications"
+  | "password"
+  | "support";
 
 type CreateInvitationResponse = {
   error?: string;
@@ -5204,14 +5210,6 @@ function InvitationPanel({
             </p>
           </div>
           <Field
-            label="Nombre y apellidos"
-            value={managedDraft.fullName}
-            onChange={(value) =>
-              setManagedDraft((current) => ({ ...current, fullName: value }))
-            }
-            required
-          />
-          <Field
             label="Correo electrónico"
             type="email"
             value={inviteDraft.email}
@@ -5247,6 +5245,14 @@ function InvitationPanel({
               El cliente recibe una contraseña temporal y no tendrá que rellenar el formulario inicial.
             </p>
           </div>
+          <Field
+            label="Nombre y apellidos"
+            value={managedDraft.fullName}
+            onChange={(value) =>
+              setManagedDraft((current) => ({ ...current, fullName: value }))
+            }
+            required
+          />
           <Field
             label="Correo electrónico"
             type="email"
@@ -12189,6 +12195,49 @@ function SettingsPanel({
   const [logoObjectUrl, setLogoObjectUrl] = useState("");
   const [primaryColor, setPrimaryColor] = useState(tenant.primary_color);
   const [savingBrand, setSavingBrand] = useState(false);
+  const availableSettingsTabs = useMemo(
+    () =>
+      [
+        ...(role !== "patient"
+          ? [
+              {
+                id: "client-signup" as const,
+                label: "Alta de clientes",
+                icon: UserPlus,
+              },
+              {
+                id: "brand" as const,
+                label: `Personalizar Mi ${APP_NAME}`,
+                icon: Palette,
+              },
+            ]
+          : []),
+        {
+          id: "notifications" as const,
+          label: "Configurar Notificaciones",
+          icon: Bell,
+        },
+        {
+          id: "password" as const,
+          label: "Cambiar Contraseña",
+          icon: KeyRound,
+        },
+        {
+          id: "support" as const,
+          label: "Asistencia Técnica",
+          icon: LifeBuoy,
+        },
+      ],
+    [role],
+  );
+  const [settingsTab, setSettingsTab] = useState<SettingsTabId>(
+    role === "patient" ? "notifications" : "client-signup",
+  );
+  const activeSettingsTab = availableSettingsTabs.some(
+    (tab) => tab.id === settingsTab,
+  )
+    ? settingsTab
+    : availableSettingsTabs[0]?.id ?? "notifications";
   const logoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -12284,26 +12333,51 @@ function SettingsPanel({
       if (logoObjectUrl) URL.revokeObjectURL(logoObjectUrl);
       setLogoObjectUrl("");
       setLogoPreview(nextLogoUrl ?? "");
-      onNotice("Personalizacion guardada.");
+      onNotice("Personalización guardada.");
     } finally {
       setSavingBrand(false);
     }
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
-      {role !== "patient" && (
-        <div className="grid min-w-0 gap-5">
-          <InvitationPanel
-            tenant={tenant}
-            pendingInvitations={pendingInvitations}
-            supabase={supabase}
-            onNotice={onNotice}
-            onReload={onReload}
-          />
+    <div className="grid gap-5">
+      <div className="flex gap-2 overflow-x-auto rounded-lg border border-[var(--line)] bg-white p-2 shadow-sm">
+        {availableSettingsTabs.map((tab) => {
+          const active = activeSettingsTab === tab.id;
+          const Icon = tab.icon;
+
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              className={`inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-black transition sm:px-4 ${
+                active
+                  ? "border-[var(--tenant-color)] bg-[var(--tenant-color)] text-white shadow-sm"
+                  : "border-transparent bg-[#fbfaf6] text-[#39433f] hover:border-[#bfb7aa]"
+              }`}
+              onClick={() => setSettingsTab(tab.id)}
+            >
+              <Icon className="size-4" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeSettingsTab === "client-signup" && role !== "patient" && (
+        <InvitationPanel
+          tenant={tenant}
+          pendingInvitations={pendingInvitations}
+          supabase={supabase}
+          onNotice={onNotice}
+          onReload={onReload}
+        />
+      )}
+
+      {activeSettingsTab === "brand" && role !== "patient" && (
           <Panel>
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-base font-black sm:text-lg">Personalizar mi {APP_NAME}</h2>
+              <h2 className="text-base font-black sm:text-lg">Personalizar Mi {APP_NAME}</h2>
               <Palette className="size-5 text-[var(--tenant-color)]" />
             </div>
             <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={saveSettings}>
@@ -12369,15 +12443,14 @@ function SettingsPanel({
                   ) : (
                     <Upload className="size-4" />
                   )}
-                  {savingBrand ? "Guardando..." : "Guardar personalizacion"}
+                  {savingBrand ? "Guardando..." : "Guardar personalización"}
                 </button>
               </div>
             </form>
           </Panel>
-        </div>
       )}
 
-      <div className={`grid min-w-0 gap-5 ${role === "patient" ? "xl:col-span-2" : ""}`}>
+      {activeSettingsTab === "notifications" && (
         <NotificationSettingsPanel
           tenant={tenant}
           preferences={preferences}
@@ -12385,16 +12458,22 @@ function SettingsPanel({
           onPreferences={onPreferences}
           onNotice={onNotice}
         />
+      )}
+
+      {activeSettingsTab === "password" && (
         <AccountSecurityPanel
           supabase={supabase}
           onNotice={onNotice}
         />
+      )}
+
+      {activeSettingsTab === "support" && (
         <TechnicalSupportPanel
           tenant={tenant}
           supabase={supabase}
           onNotice={onNotice}
         />
-      </div>
+      )}
     </div>
   );
 }
