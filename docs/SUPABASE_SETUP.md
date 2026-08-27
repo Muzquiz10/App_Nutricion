@@ -93,6 +93,14 @@ supabase/migrations/202608020004_one_active_patient_per_user.sql
 
 Esta migracion sincroniza fichas inactivas con membresias `disabled` y crea indices unicos para permitir solo una ficha/membresia activa por usuario paciente.
 
+Para activar la ficha clinica ampliada del cliente y guardar el email en `patients`, ejecuta tambien:
+
+```text
+supabase/migrations/202608270001_patient_clinical_record.sql
+```
+
+Esta migracion anade campos de consulta para datos generales, motivo, anamnesis, datos antropometricos/bioquimicos, habitos alimentarios, conocimientos y actividad fisica.
+
 Para activar notificaciones de chat, preferencias de usuario, Web Push y fallback por email, ejecuta tambien:
 
 ```text

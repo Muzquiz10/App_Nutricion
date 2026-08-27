@@ -101,6 +101,7 @@ type Patient = {
   nutritionist_user_id: string;
   patient_code: string;
   full_name: string;
+  email?: string | null;
   age: number | null;
   height_cm: number | null;
   initial_weight_kg: number | null;
@@ -401,6 +402,7 @@ type ConsultationActivityLevel =
   | "intense"
   | "very_intense"
   | "";
+type ConditionStatus = "yes" | "no" | "";
 
 type PatientConsultation = {
   id: string;
@@ -413,6 +415,9 @@ type PatientConsultation = {
   stress_level: StressLevel | null;
   body_fat_percentage: number | null;
   fat_mass_percentage: number | null;
+  phone_number: string | null;
+  country_city: string | null;
+  occupation: string | null;
   birth_date: string | null;
   age: number | null;
   gender: ConsultationGender | null;
@@ -420,6 +425,43 @@ type PatientConsultation = {
   menstruation_start_date: string | null;
   is_pregnant: boolean | null;
   physical_activity_level: ConsultationActivityLevel | null;
+  treatment_motivation: string | null;
+  self_esteem_identification: string | null;
+  situation_description: string | null;
+  condition_start_date: string | null;
+  trigger_factors: string | null;
+  previous_treatments: string | null;
+  associated_pathologies: string | null;
+  desired_weight_kg: number | null;
+  theoretical_weight_kg: number | null;
+  glucose_mg_dl: number | null;
+  hemoglobin_g_dl: number | null;
+  cholesterol_mg_dl: number | null;
+  triglycerides_mg_dl: number | null;
+  meals_per_day: number | null;
+  meal_context: string | null;
+  breakfast_time: string | null;
+  lunch_time: string | null;
+  dinner_time: string | null;
+  snacking_habit: string | null;
+  meal_preparer: string | null;
+  grocery_buyer: string | null;
+  food_preferences_aversions: string | null;
+  appetite_sensation: string | null;
+  peak_appetite_time: string | null;
+  fast_compulsive_eating: string | null;
+  previous_diet_treatment_followup: string | null;
+  diet_treatment_count_types: string | null;
+  frequent_cooking_methods: string | null;
+  healthy_eating_knowledge: string | null;
+  diet_knowledge: string | null;
+  diabetes_status: ConditionStatus | null;
+  hypertension_status: ConditionStatus | null;
+  fatty_liver_status: ConditionStatus | null;
+  culinary_resources: string | null;
+  activity_type: string | null;
+  activity_duration: string | null;
+  activity_frequency: string | null;
   diagnosis_problem: string | null;
   diagnosis_cause: string | null;
   diagnosis_symptoms: string | null;
@@ -435,6 +477,9 @@ type ConsultationDraft = {
   stressLevel: StressLevel;
   bodyFatPercentage: string;
   fatMassPercentage: string;
+  phoneNumber: string;
+  countryCity: string;
+  occupation: string;
   birthDate: string;
   age: string;
   gender: ConsultationGender;
@@ -442,6 +487,43 @@ type ConsultationDraft = {
   menstruationStartDate: string;
   isPregnant: "yes" | "no";
   physicalActivityLevel: ConsultationActivityLevel;
+  treatmentMotivation: string;
+  selfEsteemIdentification: string;
+  situationDescription: string;
+  conditionStartDate: string;
+  triggerFactors: string;
+  previousTreatments: string;
+  associatedPathologies: string;
+  desiredWeightKg: string;
+  theoreticalWeightKg: string;
+  glucoseMgDl: string;
+  hemoglobinGDl: string;
+  cholesterolMgDl: string;
+  triglyceridesMgDl: string;
+  mealsPerDay: string;
+  mealContext: string;
+  breakfastTime: string;
+  lunchTime: string;
+  dinnerTime: string;
+  snackingHabit: string;
+  mealPreparer: string;
+  groceryBuyer: string;
+  foodPreferencesAversions: string;
+  appetiteSensation: string;
+  peakAppetiteTime: string;
+  fastCompulsiveEating: string;
+  previousDietTreatmentFollowup: string;
+  dietTreatmentCountTypes: string;
+  frequentCookingMethods: string;
+  healthyEatingKnowledge: string;
+  dietKnowledge: string;
+  diabetesStatus: ConditionStatus;
+  hypertensionStatus: ConditionStatus;
+  fattyLiverStatus: ConditionStatus;
+  culinaryResources: string;
+  activityType: string;
+  activityDuration: string;
+  activityFrequency: string;
   diagnosisProblem: string;
   diagnosisCause: string;
   diagnosisSymptoms: string;
@@ -884,6 +966,12 @@ const consultationActivityLevelOptions: Array<{
 const yesNoOptions = [
   { value: "no", label: "No" },
   { value: "yes", label: "Sí" },
+];
+
+const conditionStatusOptions: Array<{ value: ConditionStatus; label: string }> = [
+  { value: "", label: "Sin indicar" },
+  { value: "yes", label: "Sí" },
+  { value: "no", label: "No" },
 ];
 
 const demoTenant = (slug: string): Tenant => ({
@@ -4372,6 +4460,8 @@ function ProfessionalPatientDetail({
           patient={patient}
           role="nutritionist"
           weights={weights}
+          supabase={supabase}
+          onNotice={onNotice}
         />
       )}
       {activeTab === "consultations" && (
@@ -4706,6 +4796,9 @@ function PatientConsultationsPanel({
           stressLevel: draft.stressLevel,
           bodyFatPercentage: parseOptionalNumberInput(draft.bodyFatPercentage),
           fatMassPercentage: parseOptionalNumberInput(draft.fatMassPercentage),
+          phoneNumber: draft.phoneNumber,
+          countryCity: draft.countryCity,
+          occupation: draft.occupation,
           birthDate: draft.birthDate || null,
           age: parseOptionalIntegerInput(draft.age),
           gender: draft.gender || null,
@@ -4714,6 +4807,43 @@ function PatientConsultationsPanel({
             draft.isMenstruating === "yes" ? draft.menstruationStartDate || null : null,
           isPregnant: draft.isPregnant === "yes",
           physicalActivityLevel: draft.physicalActivityLevel || null,
+          treatmentMotivation: draft.treatmentMotivation,
+          selfEsteemIdentification: draft.selfEsteemIdentification,
+          situationDescription: draft.situationDescription,
+          conditionStartDate: draft.conditionStartDate || null,
+          triggerFactors: draft.triggerFactors,
+          previousTreatments: draft.previousTreatments,
+          associatedPathologies: draft.associatedPathologies,
+          desiredWeightKg: parseOptionalNumberInput(draft.desiredWeightKg),
+          theoreticalWeightKg: parseOptionalNumberInput(draft.theoreticalWeightKg),
+          glucoseMgDl: parseOptionalNumberInput(draft.glucoseMgDl),
+          hemoglobinGDl: parseOptionalNumberInput(draft.hemoglobinGDl),
+          cholesterolMgDl: parseOptionalNumberInput(draft.cholesterolMgDl),
+          triglyceridesMgDl: parseOptionalNumberInput(draft.triglyceridesMgDl),
+          mealsPerDay: parseOptionalIntegerInput(draft.mealsPerDay),
+          mealContext: draft.mealContext,
+          breakfastTime: draft.breakfastTime,
+          lunchTime: draft.lunchTime,
+          dinnerTime: draft.dinnerTime,
+          snackingHabit: draft.snackingHabit,
+          mealPreparer: draft.mealPreparer,
+          groceryBuyer: draft.groceryBuyer,
+          foodPreferencesAversions: draft.foodPreferencesAversions,
+          appetiteSensation: draft.appetiteSensation,
+          peakAppetiteTime: draft.peakAppetiteTime,
+          fastCompulsiveEating: draft.fastCompulsiveEating,
+          previousDietTreatmentFollowup: draft.previousDietTreatmentFollowup,
+          dietTreatmentCountTypes: draft.dietTreatmentCountTypes,
+          frequentCookingMethods: draft.frequentCookingMethods,
+          healthyEatingKnowledge: draft.healthyEatingKnowledge,
+          dietKnowledge: draft.dietKnowledge,
+          diabetesStatus: draft.diabetesStatus || null,
+          hypertensionStatus: draft.hypertensionStatus || null,
+          fattyLiverStatus: draft.fattyLiverStatus || null,
+          culinaryResources: draft.culinaryResources,
+          activityType: draft.activityType,
+          activityDuration: draft.activityDuration,
+          activityFrequency: draft.activityFrequency,
           diagnosisProblem: draft.diagnosisProblem,
           diagnosisCause: draft.diagnosisCause,
           diagnosisSymptoms: draft.diagnosisSymptoms,
@@ -4775,7 +4905,7 @@ function PatientConsultationsPanel({
             />
           </div>
 
-          <ConsultationSection title="Medidas básicas" defaultOpen>
+          <ConsultationSection title="IV. Datos antropométricos y bioquímicos" defaultOpen>
             <div className="grid gap-4 md:grid-cols-2">
               <Field
                 label="Peso kg"
@@ -4811,10 +4941,52 @@ function PatientConsultationsPanel({
                 value={draft.fatMassPercentage}
                 onChange={(value) => updateDraft("fatMassPercentage", value)}
               />
+              <Field
+                label="Peso deseado kg"
+                type="number"
+                step="0.1"
+                value={draft.desiredWeightKg}
+                onChange={(value) => updateDraft("desiredWeightKg", value)}
+              />
+              <Field
+                label="Peso teórico kg"
+                type="number"
+                step="0.1"
+                value={draft.theoreticalWeightKg}
+                onChange={(value) => updateDraft("theoreticalWeightKg", value)}
+              />
+              <Field
+                label="Glucosa (75-115 mg/dl)"
+                type="number"
+                step="0.1"
+                value={draft.glucoseMgDl}
+                onChange={(value) => updateDraft("glucoseMgDl", value)}
+              />
+              <Field
+                label="Hemoglobina (12-14 g/dl)"
+                type="number"
+                step="0.1"
+                value={draft.hemoglobinGDl}
+                onChange={(value) => updateDraft("hemoglobinGDl", value)}
+              />
+              <Field
+                label="Colesterol (<200 mg/dl)"
+                type="number"
+                step="0.1"
+                value={draft.cholesterolMgDl}
+                onChange={(value) => updateDraft("cholesterolMgDl", value)}
+              />
+              <Field
+                label="Triglicéridos (<150 mg/dl)"
+                type="number"
+                step="0.1"
+                value={draft.triglyceridesMgDl}
+                onChange={(value) => updateDraft("triglyceridesMgDl", value)}
+              />
             </div>
           </ConsultationSection>
 
-          <ConsultationSection title="Datos personales" defaultOpen>
+          <ConsultationSection title="I. Datos generales" defaultOpen>
             <div className="grid gap-4 md:grid-cols-2">
               <Field
                 label="Fecha de nacimiento"
@@ -4833,6 +5005,21 @@ function PatientConsultationsPanel({
                 value={draft.gender}
                 onChange={(value) => updateDraft("gender", value)}
                 options={consultationGenderOptions}
+              />
+              <Field
+                label="Número de teléfono"
+                value={draft.phoneNumber}
+                onChange={(value) => updateDraft("phoneNumber", value)}
+              />
+              <Field
+                label="País/Ciudad"
+                value={draft.countryCity}
+                onChange={(value) => updateDraft("countryCity", value)}
+              />
+              <Field
+                label="Ocupación"
+                value={draft.occupation}
+                onChange={(value) => updateDraft("occupation", value)}
               />
             </div>
           </ConsultationSection>
@@ -4860,12 +5047,200 @@ function PatientConsultationsPanel({
             </div>
           </ConsultationSection>
 
-          <ConsultationSection title="Nivel Actividad Física">
+          <ConsultationSection title="Nivel de actividad física">
             <ChoiceButtonGroup
               value={draft.physicalActivityLevel}
               onChange={(value) => updateDraft("physicalActivityLevel", value)}
               options={consultationActivityLevelOptions.filter((option) => option.value)}
             />
+          </ConsultationSection>
+
+          <ConsultationSection title="II. Motivo de la consulta / Procedencia">
+            <div className="grid gap-4 md:grid-cols-2">
+              <TextArea
+                label="Grado y tipo de motivación para seguir tratamiento dietético"
+                value={draft.treatmentMotivation}
+                onChange={(value) => updateDraft("treatmentMotivation", value)}
+              />
+              <TextArea
+                label="Identificación del autoestima"
+                value={draft.selfEsteemIdentification}
+                onChange={(value) => updateDraft("selfEsteemIdentification", value)}
+              />
+            </div>
+          </ConsultationSection>
+
+          <ConsultationSection title="III. Anamnesis o historial familiar, personal y social">
+            <div className="grid gap-4 md:grid-cols-2">
+              <TextArea
+                label="Descripción de la situación o patología"
+                value={draft.situationDescription}
+                onChange={(value) => updateDraft("situationDescription", value)}
+              />
+              <Field
+                label="Fecha de inicio"
+                type="date"
+                value={draft.conditionStartDate}
+                onChange={(value) => updateDraft("conditionStartDate", value)}
+              />
+              <TextArea
+                label="Factores desencadenantes"
+                value={draft.triggerFactors}
+                onChange={(value) => updateDraft("triggerFactors", value)}
+              />
+              <TextArea
+                label="Tratamientos realizados hasta el momento"
+                value={draft.previousTreatments}
+                onChange={(value) => updateDraft("previousTreatments", value)}
+              />
+              <TextArea
+                label="Trastornos o patologías asociados"
+                value={draft.associatedPathologies}
+                onChange={(value) => updateDraft("associatedPathologies", value)}
+              />
+            </div>
+          </ConsultationSection>
+
+          <ConsultationSection title="V. Comportamiento / Hábitos alimentarios">
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field
+                label="Número de comidas que acostumbra realizar"
+                type="number"
+                value={draft.mealsPerDay}
+                onChange={(value) => updateDraft("mealsPerDay", value)}
+              />
+              <TextArea
+                label="Lugar y entorno social de las comidas"
+                value={draft.mealContext}
+                onChange={(value) => updateDraft("mealContext", value)}
+              />
+              <Field
+                label="Horario desayuno"
+                value={draft.breakfastTime}
+                onChange={(value) => updateDraft("breakfastTime", value)}
+              />
+              <Field
+                label="Horario almuerzo"
+                value={draft.lunchTime}
+                onChange={(value) => updateDraft("lunchTime", value)}
+              />
+              <Field
+                label="Horario cena"
+                value={draft.dinnerTime}
+                onChange={(value) => updateDraft("dinnerTime", value)}
+              />
+              <TextArea
+                label="Hábito de picar alimentos entre comidas"
+                value={draft.snackingHabit}
+                onChange={(value) => updateDraft("snackingHabit", value)}
+              />
+              <TextArea
+                label="Responsable de preparar las comidas"
+                value={draft.mealPreparer}
+                onChange={(value) => updateDraft("mealPreparer", value)}
+              />
+              <TextArea
+                label="Responsable de la compra de los alimentos"
+                value={draft.groceryBuyer}
+                onChange={(value) => updateDraft("groceryBuyer", value)}
+              />
+              <TextArea
+                label="Preferencias y aversiones alimentarias"
+                value={draft.foodPreferencesAversions}
+                onChange={(value) => updateDraft("foodPreferencesAversions", value)}
+              />
+              <TextArea
+                label="Sensación de apetito"
+                value={draft.appetiteSensation}
+                onChange={(value) => updateDraft("appetiteSensation", value)}
+              />
+              <TextArea
+                label="Momento del día de mayor sensación de apetito"
+                value={draft.peakAppetiteTime}
+                onChange={(value) => updateDraft("peakAppetiteTime", value)}
+              />
+              <TextArea
+                label="¿Come muy rápido, sin masticar o compulsivamente?"
+                value={draft.fastCompulsiveEating}
+                onChange={(value) => updateDraft("fastCompulsiveEating", value)}
+              />
+              <TextArea
+                label="Seguimiento anterior de tratamientos dietéticos"
+                value={draft.previousDietTreatmentFollowup}
+                onChange={(value) => updateDraft("previousDietTreatmentFollowup", value)}
+              />
+              <TextArea
+                label="Cuántas veces y qué tipo de tratamientos"
+                value={draft.dietTreatmentCountTypes}
+                onChange={(value) => updateDraft("dietTreatmentCountTypes", value)}
+              />
+              <TextArea
+                label="Tipos de cocción utilizados con mayor frecuencia"
+                value={draft.frequentCookingMethods}
+                onChange={(value) => updateDraft("frequentCookingMethods", value)}
+              />
+            </div>
+          </ConsultationSection>
+
+          <ConsultationSection title="VI. Conocimiento y aptitudes">
+            <div className="grid gap-4 md:grid-cols-2">
+              <TextArea
+                label="Conocimientos previos de alimentación saludable"
+                value={draft.healthyEatingKnowledge}
+                onChange={(value) => updateDraft("healthyEatingKnowledge", value)}
+              />
+              <TextArea
+                label="Dieta"
+                value={draft.dietKnowledge}
+                onChange={(value) => updateDraft("dietKnowledge", value)}
+              />
+              <SelectField
+                label="Diabetes"
+                value={draft.diabetesStatus}
+                onChange={(value) => updateDraft("diabetesStatus", value)}
+                options={conditionStatusOptions}
+              />
+              <SelectField
+                label="Hipertensión"
+                value={draft.hypertensionStatus}
+                onChange={(value) => updateDraft("hypertensionStatus", value)}
+                options={conditionStatusOptions}
+              />
+              <SelectField
+                label="Hígado graso"
+                value={draft.fattyLiverStatus}
+                onChange={(value) => updateDraft("fattyLiverStatus", value)}
+                options={conditionStatusOptions}
+              />
+            </div>
+          </ConsultationSection>
+
+          <ConsultationSection title="VII. Conocimientos culinarios">
+            <TextArea
+              label="Recursos y posibilidades"
+              value={draft.culinaryResources}
+              onChange={(value) => updateDraft("culinaryResources", value)}
+            />
+          </ConsultationSection>
+
+          <ConsultationSection title="VIII. Actividad física">
+            <div className="grid gap-4 md:grid-cols-3">
+              <TextArea
+                label="Tipo de actividad que realiza"
+                value={draft.activityType}
+                onChange={(value) => updateDraft("activityType", value)}
+              />
+              <Field
+                label="Duración"
+                value={draft.activityDuration}
+                onChange={(value) => updateDraft("activityDuration", value)}
+              />
+              <Field
+                label="Frecuencia"
+                value={draft.activityFrequency}
+                onChange={(value) => updateDraft("activityFrequency", value)}
+              />
+            </div>
           </ConsultationSection>
 
           <ConsultationSection title="Diagnóstico">
@@ -6077,19 +6452,78 @@ function PatientRecord({
   patient,
   role,
   weights,
+  supabase,
+  onNotice,
   className = "xl:col-span-2",
 }: {
   patient: Patient | null;
   role: UserRole | null;
   weights: WeightLog[];
+  supabase?: ReturnType<typeof createSupabaseBrowser>;
+  onNotice?: (message: string) => void;
   className?: string;
 }) {
+  const [latestConsultation, setLatestConsultation] = useState<PatientConsultation | null>(null);
+  const [loadingClinicalRecord, setLoadingClinicalRecord] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadLatestConsultation() {
+      setLatestConsultation(null);
+
+      if (!patient || role === "patient" || !supabase) {
+        setLoadingClinicalRecord(false);
+        return;
+      }
+
+      setLoadingClinicalRecord(true);
+      const accessToken = await getCurrentAccessToken(supabase);
+      if (!accessToken) {
+        if (!cancelled) {
+          setLoadingClinicalRecord(false);
+          onNotice?.("Tu sesión ha caducado. Cierra sesión y vuelve a entrar.");
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/patients/consultations?patientId=${encodeURIComponent(patient.id)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          },
+        );
+        const payload = (await response.json()) as PatientConsultationsResponse;
+
+        if (cancelled) return;
+        if (!response.ok) {
+          onNotice?.(payload.error ?? "No se pudo cargar la ficha clínica.");
+          return;
+        }
+
+        setLatestConsultation(payload.consultations?.[0] ?? null);
+      } finally {
+        if (!cancelled) setLoadingClinicalRecord(false);
+      }
+    }
+
+    void loadLatestConsultation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [patient, role, supabase, onNotice]);
+
   if (!patient) return <Panel><EmptyState text="Selecciona un cliente." /></Panel>;
 
   const currentWeight = getCurrentWeightKg(patient, weights);
   const initialBmi = calculateBmi(patient.initial_weight_kg, patient.height_cm);
   const currentBmi = calculateBmi(currentWeight, patient.height_cm);
   const basalCalories = calculateBasalCalories(patient, currentWeight);
+  const initialBasalCalories = calculateBasalCalories(patient, patient.initial_weight_kg);
 
   return (
     <Panel className={className}>
@@ -6116,39 +6550,267 @@ function PatientRecord({
           </span>
         </div>
       </div>
-      <div className="mt-5 grid gap-3 md:grid-cols-2">
-        <InfoBlock label="Objetivo" value={patient.objective} />
-        <InfoBlock label="IMC inicial" value={formatOptionalNumber(initialBmi, 1)} />
-        <InfoBlock label="IMC actual" value={formatOptionalNumber(currentBmi, 1)} />
-        {role !== "patient" && (
+      {role === "patient" ? (
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          <InfoBlock label="Objetivo" value={patient.objective} />
+          <InfoBlock label="IMC inicial" value={formatOptionalNumber(initialBmi, 1)} />
+          <InfoBlock label="IMC actual" value={formatOptionalNumber(currentBmi, 1)} />
+          <InfoBlock label="Sexo para cálculo basal" value={formatSex(patient.sex)} />
+          <InfoBlock label="Alergias/intolerancias" value={patient.allergies} />
+          <InfoBlock label="Alimentos a evitar" value={patient.avoided_foods} />
           <InfoBlock
-            label="Calorias basales actuales (TMB)"
-            value={basalCalories ? `${basalCalories} kcal/día` : "Faltan datos para calcular"}
+            label="Horas ejercicio/semana"
+            value={
+              patient.exercise_hours_per_week !== null &&
+              patient.exercise_hours_per_week !== undefined
+                ? `${patient.exercise_hours_per_week} h`
+                : null
+            }
           />
-        )}
-        <InfoBlock label="Sexo para calculo basal" value={formatSex(patient.sex)} />
-        <InfoBlock label="Alergias/intolerancias" value={patient.allergies} />
-        <InfoBlock label="Alimentos a evitar" value={patient.avoided_foods} />
-        <InfoBlock
-          label="Horas ejercicio/semana"
-          value={
-            patient.exercise_hours_per_week !== null &&
-            patient.exercise_hours_per_week !== undefined
-              ? `${patient.exercise_hours_per_week} h`
-              : null
-          }
-        />
-        <InfoBlock label="Tipo de ejercicio" value={patient.exercise_type || patient.exercise_routine} />
-        <InfoBlock
-          label="Base de evolucion"
-          value={
-            patient.initial_weight_kg
-              ? `${formatOptionalNumber(patient.initial_weight_kg, 1)} kg desde ${formatDate(patient.registered_at)}`
-              : `Sin peso inicial registrado desde ${formatDate(patient.registered_at)}`
-          }
-        />
-      </div>
+          <InfoBlock label="Tipo de ejercicio" value={patient.exercise_type || patient.exercise_routine} />
+          <InfoBlock
+            label="Fecha de inicio"
+            value={formatDate(patient.registered_at)}
+          />
+        </div>
+      ) : (
+        <>
+          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <InfoBlock label="Nombre completo" value={patient.full_name} />
+            <InfoBlock label="Edad" value={formatMetricValue(patient.age)} />
+            <InfoBlock label="Sexo" value={formatSex(patient.sex)} />
+            <InfoBlock label="Peso inicial" value={formatMetricValue(patient.initial_weight_kg, "kg")} />
+            <InfoBlock label="IMC inicial" value={formatOptionalNumber(initialBmi, 1)} />
+            <InfoBlock
+              label="Calorías basales iniciales (TMB)"
+              value={initialBasalCalories ? `${initialBasalCalories} kcal/día` : "Faltan datos para calcular"}
+            />
+            <InfoBlock label="Fecha de inicio" value={formatDate(patient.registered_at)} />
+            <InfoBlock label="Objetivo" value={patient.objective} />
+          </div>
+          <ProfessionalClinicalRecord
+            patient={patient}
+            consultation={latestConsultation}
+            currentWeight={currentWeight}
+            currentBmi={currentBmi}
+            basalCalories={basalCalories}
+            loading={loadingClinicalRecord}
+          />
+        </>
+      )}
     </Panel>
+  );
+}
+
+function ProfessionalClinicalRecord({
+  patient,
+  consultation,
+  currentWeight,
+  currentBmi,
+  basalCalories,
+  loading,
+}: {
+  patient: Patient;
+  consultation: PatientConsultation | null;
+  currentWeight: number | null;
+  currentBmi: number | null;
+  basalCalories: number | null;
+  loading: boolean;
+}) {
+  const clinicalWeight = consultation?.weight_kg ?? currentWeight;
+  const clinicalHeight = consultation?.height_cm ?? patient.height_cm;
+  const clinicalBmi = calculateBmi(clinicalWeight, clinicalHeight) ?? currentBmi;
+
+  return (
+    <div className="mt-5 grid gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--line)] bg-[#fbfaf6] px-3 py-2 text-sm text-[var(--muted)]">
+        <span>
+          {loading
+            ? "Cargando última consulta..."
+            : consultation
+              ? `Datos precargados desde la consulta del ${formatDateOnly(consultation.consultation_at)}`
+              : "Todavía no hay consultas guardadas para ampliar la ficha."}
+        </span>
+        <span className="font-bold text-[#39433f]">ID {patient.patient_code}</span>
+      </div>
+
+      <ClinicalRecordSection
+        title="I. Datos generales"
+        defaultOpen
+        items={[
+          { label: "Correo electrónico", value: patient.email ?? null },
+          { label: "Número de teléfono", value: consultation?.phone_number ?? null },
+          { label: "País/Ciudad", value: consultation?.country_city ?? null },
+          { label: "Ocupación", value: consultation?.occupation ?? null },
+        ]}
+      />
+
+      <ClinicalRecordSection
+        title="II. Motivo de la consulta / Procedencia"
+        items={[
+          {
+            label: "Grado y tipo de motivación para seguir tratamiento dietético",
+            value: consultation?.treatment_motivation ?? null,
+          },
+          {
+            label: "Identificación del autoestima",
+            value: consultation?.self_esteem_identification ?? null,
+          },
+        ]}
+      />
+
+      <ClinicalRecordSection
+        title="III. Anamnesis o historial familiar, personal y social"
+        items={[
+          {
+            label: "Descripción de la situación o patología",
+            value: consultation?.situation_description ?? null,
+          },
+          { label: "Fecha de inicio", value: formatDateOnly(consultation?.condition_start_date) },
+          { label: "Factores desencadenantes", value: consultation?.trigger_factors ?? null },
+          {
+            label: "Tratamientos realizados hasta el momento",
+            value: consultation?.previous_treatments ?? null,
+          },
+          {
+            label: "Trastornos o patologías asociados",
+            value: consultation?.associated_pathologies ?? null,
+          },
+        ]}
+      />
+
+      <ClinicalRecordSection
+        title="IV. Datos antropométricos y bioquímicos"
+        items={[
+          { label: "Peso actual", value: formatMetricValue(clinicalWeight, "kg") },
+          { label: "Peso deseado", value: formatMetricValue(consultation?.desired_weight_kg, "kg") },
+          { label: "Peso teórico", value: formatMetricValue(consultation?.theoretical_weight_kg, "kg") },
+          { label: "Talla", value: formatMetricValue(clinicalHeight, "cm") },
+          { label: "Índice de masa corporal (IMC)", value: formatOptionalNumber(clinicalBmi, 1) },
+          {
+            label: "Calorías basales actuales (TMB)",
+            value: basalCalories ? `${basalCalories} kcal/día` : "Faltan datos para calcular",
+          },
+          { label: "Glucosa", value: formatMetricValue(consultation?.glucose_mg_dl, "mg/dl") },
+          { label: "Hemoglobina", value: formatMetricValue(consultation?.hemoglobin_g_dl, "g/dl") },
+          { label: "Colesterol", value: formatMetricValue(consultation?.cholesterol_mg_dl, "mg/dl") },
+          { label: "Triglicéridos", value: formatMetricValue(consultation?.triglycerides_mg_dl, "mg/dl") },
+        ]}
+      />
+
+      <ClinicalRecordSection
+        title="Menstruación y embarazo"
+        items={[
+          { label: "Está menstruando", value: formatBooleanStatus(consultation?.is_menstruating) },
+          { label: "Fecha de inicio menstruación", value: formatDateOnly(consultation?.menstruation_start_date) },
+          { label: "Está embarazada", value: formatBooleanStatus(consultation?.is_pregnant) },
+        ]}
+      />
+
+      <ClinicalRecordSection
+        title="V. Comportamiento / Hábitos alimentarios"
+        items={[
+          { label: "Número de comidas que acostumbra realizar", value: formatMetricValue(consultation?.meals_per_day) },
+          { label: "Lugar y entorno social de las comidas", value: consultation?.meal_context ?? null },
+          { label: "Horario desayuno", value: consultation?.breakfast_time ?? null },
+          { label: "Horario almuerzo", value: consultation?.lunch_time ?? null },
+          { label: "Horario cena", value: consultation?.dinner_time ?? null },
+          { label: "Hábito de picar alimentos entre comidas", value: consultation?.snacking_habit ?? null },
+          { label: "Responsable de preparar las comidas", value: consultation?.meal_preparer ?? null },
+          { label: "Responsable de la compra de alimentos", value: consultation?.grocery_buyer ?? null },
+          {
+            label: "Preferencias y aversiones alimentarias",
+            value: consultation?.food_preferences_aversions ?? patient.avoided_foods,
+          },
+          { label: "Sensación de apetito", value: consultation?.appetite_sensation ?? null },
+          { label: "Momento del día de mayor sensación de apetito", value: consultation?.peak_appetite_time ?? null },
+          {
+            label: "Come rápido, sin masticar o compulsivamente",
+            value: consultation?.fast_compulsive_eating ?? null,
+          },
+          {
+            label: "Seguimiento anterior de tratamientos dietéticos",
+            value: consultation?.previous_diet_treatment_followup ?? null,
+          },
+          {
+            label: "Veces y tipo de tratamientos",
+            value: consultation?.diet_treatment_count_types ?? null,
+          },
+          {
+            label: "Tipos de cocción más frecuentes",
+            value: consultation?.frequent_cooking_methods ?? null,
+          },
+        ]}
+      />
+
+      <ClinicalRecordSection
+        title="VI. Conocimiento y aptitudes"
+        items={[
+          {
+            label: "Conocimientos previos de alimentación saludable",
+            value: consultation?.healthy_eating_knowledge ?? null,
+          },
+          { label: "Dieta", value: consultation?.diet_knowledge ?? null },
+          { label: "Diabetes", value: formatConditionStatus(consultation?.diabetes_status) },
+          { label: "Hipertensión", value: formatConditionStatus(consultation?.hypertension_status) },
+          { label: "Hígado graso", value: formatConditionStatus(consultation?.fatty_liver_status) },
+        ]}
+      />
+
+      <ClinicalRecordSection
+        title="VII. Conocimientos culinarios"
+        items={[
+          { label: "Recursos y posibilidades", value: consultation?.culinary_resources ?? null },
+        ]}
+      />
+
+      <ClinicalRecordSection
+        title="VIII. Actividad física"
+        items={[
+          { label: "Nivel", value: getOptionLabel(consultationActivityLevelOptions, consultation?.physical_activity_level ?? null) },
+          { label: "Tipo de actividad que realiza", value: consultation?.activity_type ?? patient.exercise_type },
+          { label: "Duración", value: consultation?.activity_duration ?? null },
+          { label: "Frecuencia", value: consultation?.activity_frequency ?? null },
+        ]}
+      />
+
+      <ClinicalRecordSection
+        title="Diagnóstico y comentarios"
+        items={[
+          { label: "Problema", value: consultation?.diagnosis_problem ?? null },
+          { label: "Origen/Causa", value: consultation?.diagnosis_cause ?? null },
+          { label: "Síntomas", value: consultation?.diagnosis_symptoms ?? null },
+          { label: "Comentarios", value: consultation?.comments ?? null },
+        ]}
+      />
+    </div>
+  );
+}
+
+function ClinicalRecordSection({
+  title,
+  items,
+  defaultOpen = false,
+}: {
+  title: string;
+  items: Array<{ label: string; value: string | number | null }>;
+  defaultOpen?: boolean;
+}) {
+  return (
+    <details
+      className="group rounded-lg border border-[var(--line)] bg-[#fbfaf6]"
+      open={defaultOpen}
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-black [&::-webkit-details-marker]:hidden">
+        <span>{title}</span>
+        <ChevronRight className="size-4 transition group-open:rotate-90" />
+      </summary>
+      <div className="grid gap-3 border-t border-[var(--line)] p-4 md:grid-cols-2 xl:grid-cols-3">
+        {items.map((item) => (
+          <InfoBlock key={item.label} label={item.label} value={item.value} />
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -14422,6 +15084,9 @@ function buildConsultationDraft(
     stressLevel: consultation?.stress_level ?? "none",
     bodyFatPercentage: formatNumberForInput(consultation?.body_fat_percentage ?? null),
     fatMassPercentage: formatNumberForInput(consultation?.fat_mass_percentage ?? null),
+    phoneNumber: consultation?.phone_number ?? "",
+    countryCity: consultation?.country_city ?? "",
+    occupation: consultation?.occupation ?? "",
     birthDate: consultation?.birth_date ?? "",
     age: formatNumberForInput(consultation?.age ?? patient?.age ?? null),
     gender,
@@ -14429,6 +15094,43 @@ function buildConsultationDraft(
     menstruationStartDate: consultation?.menstruation_start_date ?? "",
     isPregnant: consultation?.is_pregnant ? "yes" : "no",
     physicalActivityLevel: consultation?.physical_activity_level ?? "",
+    treatmentMotivation: consultation?.treatment_motivation ?? "",
+    selfEsteemIdentification: consultation?.self_esteem_identification ?? "",
+    situationDescription: consultation?.situation_description ?? "",
+    conditionStartDate: consultation?.condition_start_date ?? "",
+    triggerFactors: consultation?.trigger_factors ?? "",
+    previousTreatments: consultation?.previous_treatments ?? "",
+    associatedPathologies: consultation?.associated_pathologies ?? "",
+    desiredWeightKg: formatNumberForInput(consultation?.desired_weight_kg ?? null),
+    theoreticalWeightKg: formatNumberForInput(consultation?.theoretical_weight_kg ?? null),
+    glucoseMgDl: formatNumberForInput(consultation?.glucose_mg_dl ?? null),
+    hemoglobinGDl: formatNumberForInput(consultation?.hemoglobin_g_dl ?? null),
+    cholesterolMgDl: formatNumberForInput(consultation?.cholesterol_mg_dl ?? null),
+    triglyceridesMgDl: formatNumberForInput(consultation?.triglycerides_mg_dl ?? null),
+    mealsPerDay: formatNumberForInput(consultation?.meals_per_day ?? null),
+    mealContext: consultation?.meal_context ?? "",
+    breakfastTime: consultation?.breakfast_time ?? "",
+    lunchTime: consultation?.lunch_time ?? "",
+    dinnerTime: consultation?.dinner_time ?? "",
+    snackingHabit: consultation?.snacking_habit ?? "",
+    mealPreparer: consultation?.meal_preparer ?? "",
+    groceryBuyer: consultation?.grocery_buyer ?? "",
+    foodPreferencesAversions: consultation?.food_preferences_aversions ?? "",
+    appetiteSensation: consultation?.appetite_sensation ?? "",
+    peakAppetiteTime: consultation?.peak_appetite_time ?? "",
+    fastCompulsiveEating: consultation?.fast_compulsive_eating ?? "",
+    previousDietTreatmentFollowup: consultation?.previous_diet_treatment_followup ?? "",
+    dietTreatmentCountTypes: consultation?.diet_treatment_count_types ?? "",
+    frequentCookingMethods: consultation?.frequent_cooking_methods ?? "",
+    healthyEatingKnowledge: consultation?.healthy_eating_knowledge ?? "",
+    dietKnowledge: consultation?.diet_knowledge ?? "",
+    diabetesStatus: consultation?.diabetes_status ?? "",
+    hypertensionStatus: consultation?.hypertension_status ?? "",
+    fattyLiverStatus: consultation?.fatty_liver_status ?? "",
+    culinaryResources: consultation?.culinary_resources ?? "",
+    activityType: consultation?.activity_type ?? "",
+    activityDuration: consultation?.activity_duration ?? "",
+    activityFrequency: consultation?.activity_frequency ?? "",
     diagnosisProblem: consultation?.diagnosis_problem ?? "",
     diagnosisCause: consultation?.diagnosis_cause ?? "",
     diagnosisSymptoms: consultation?.diagnosis_symptoms ?? "",
@@ -14476,6 +15178,23 @@ function formatConsultationNumber(value: number | string | null, unit = "") {
     maximumFractionDigits: 1,
   });
   return unit ? `${formatted} ${unit}` : formatted;
+}
+
+function formatDateOnly(value: string | null | undefined) {
+  if (!value) return null;
+  return formatDate(`${value}T12:00:00`);
+}
+
+function formatBooleanStatus(value: boolean | null | undefined) {
+  if (value === true) return "Sí";
+  if (value === false) return "No";
+  return null;
+}
+
+function formatConditionStatus(value: ConditionStatus | null | undefined) {
+  if (value === "yes") return "Sí";
+  if (value === "no") return "No";
+  return null;
 }
 
 function getOptionLabel<TValue extends string>(

@@ -9,6 +9,7 @@ const validActivityLevels = new Set([
   "intense",
   "very_intense",
 ]);
+const validConditionStatuses = new Set(["yes", "no"]);
 
 type ConsultationBody = {
   patientId?: string;
@@ -18,6 +19,9 @@ type ConsultationBody = {
   stressLevel?: string | null;
   bodyFatPercentage?: number | null;
   fatMassPercentage?: number | null;
+  phoneNumber?: string | null;
+  countryCity?: string | null;
+  occupation?: string | null;
   birthDate?: string | null;
   age?: number | null;
   gender?: string | null;
@@ -25,6 +29,43 @@ type ConsultationBody = {
   menstruationStartDate?: string | null;
   isPregnant?: boolean | null;
   physicalActivityLevel?: string | null;
+  treatmentMotivation?: string | null;
+  selfEsteemIdentification?: string | null;
+  situationDescription?: string | null;
+  conditionStartDate?: string | null;
+  triggerFactors?: string | null;
+  previousTreatments?: string | null;
+  associatedPathologies?: string | null;
+  desiredWeightKg?: number | null;
+  theoreticalWeightKg?: number | null;
+  glucoseMgDl?: number | null;
+  hemoglobinGDl?: number | null;
+  cholesterolMgDl?: number | null;
+  triglyceridesMgDl?: number | null;
+  mealsPerDay?: number | null;
+  mealContext?: string | null;
+  breakfastTime?: string | null;
+  lunchTime?: string | null;
+  dinnerTime?: string | null;
+  snackingHabit?: string | null;
+  mealPreparer?: string | null;
+  groceryBuyer?: string | null;
+  foodPreferencesAversions?: string | null;
+  appetiteSensation?: string | null;
+  peakAppetiteTime?: string | null;
+  fastCompulsiveEating?: string | null;
+  previousDietTreatmentFollowup?: string | null;
+  dietTreatmentCountTypes?: string | null;
+  frequentCookingMethods?: string | null;
+  healthyEatingKnowledge?: string | null;
+  dietKnowledge?: string | null;
+  diabetesStatus?: string | null;
+  hypertensionStatus?: string | null;
+  fattyLiverStatus?: string | null;
+  culinaryResources?: string | null;
+  activityType?: string | null;
+  activityDuration?: string | null;
+  activityFrequency?: string | null;
   diagnosisProblem?: string | null;
   diagnosisCause?: string | null;
   diagnosisSymptoms?: string | null;
@@ -106,6 +147,9 @@ export async function POST(request: Request) {
     stress_level: body.stressLevel ?? null,
     body_fat_percentage: body.bodyFatPercentage ?? null,
     fat_mass_percentage: body.fatMassPercentage ?? null,
+    phone_number: cleanText(body.phoneNumber),
+    country_city: cleanText(body.countryCity),
+    occupation: cleanText(body.occupation),
     birth_date: body.birthDate || null,
     age: body.age ?? null,
     gender: body.gender || null,
@@ -116,6 +160,43 @@ export async function POST(request: Request) {
         : null,
     is_pregnant: body.isPregnant ?? null,
     physical_activity_level: body.physicalActivityLevel || null,
+    treatment_motivation: cleanText(body.treatmentMotivation),
+    self_esteem_identification: cleanText(body.selfEsteemIdentification),
+    situation_description: cleanText(body.situationDescription),
+    condition_start_date: body.conditionStartDate || null,
+    trigger_factors: cleanText(body.triggerFactors),
+    previous_treatments: cleanText(body.previousTreatments),
+    associated_pathologies: cleanText(body.associatedPathologies),
+    desired_weight_kg: body.desiredWeightKg ?? null,
+    theoretical_weight_kg: body.theoreticalWeightKg ?? null,
+    glucose_mg_dl: body.glucoseMgDl ?? null,
+    hemoglobin_g_dl: body.hemoglobinGDl ?? null,
+    cholesterol_mg_dl: body.cholesterolMgDl ?? null,
+    triglycerides_mg_dl: body.triglyceridesMgDl ?? null,
+    meals_per_day: body.mealsPerDay ?? null,
+    meal_context: cleanText(body.mealContext),
+    breakfast_time: cleanText(body.breakfastTime),
+    lunch_time: cleanText(body.lunchTime),
+    dinner_time: cleanText(body.dinnerTime),
+    snacking_habit: cleanText(body.snackingHabit),
+    meal_preparer: cleanText(body.mealPreparer),
+    grocery_buyer: cleanText(body.groceryBuyer),
+    food_preferences_aversions: cleanText(body.foodPreferencesAversions),
+    appetite_sensation: cleanText(body.appetiteSensation),
+    peak_appetite_time: cleanText(body.peakAppetiteTime),
+    fast_compulsive_eating: cleanText(body.fastCompulsiveEating),
+    previous_diet_treatment_followup: cleanText(body.previousDietTreatmentFollowup),
+    diet_treatment_count_types: cleanText(body.dietTreatmentCountTypes),
+    frequent_cooking_methods: cleanText(body.frequentCookingMethods),
+    healthy_eating_knowledge: cleanText(body.healthyEatingKnowledge),
+    diet_knowledge: cleanText(body.dietKnowledge),
+    diabetes_status: normalizeConditionStatus(body.diabetesStatus),
+    hypertension_status: normalizeConditionStatus(body.hypertensionStatus),
+    fatty_liver_status: normalizeConditionStatus(body.fattyLiverStatus),
+    culinary_resources: cleanText(body.culinaryResources),
+    activity_type: cleanText(body.activityType),
+    activity_duration: cleanText(body.activityDuration),
+    activity_frequency: cleanText(body.activityFrequency),
     diagnosis_problem: cleanText(body.diagnosisProblem),
     diagnosis_cause: cleanText(body.diagnosisCause),
     diagnosis_symptoms: cleanText(body.diagnosisSymptoms),
@@ -269,6 +350,27 @@ function validateConsultationBody(body: ConsultationBody) {
   if (!isOptionalNumberInRange(body.fatMassPercentage, 0, 100)) {
     return "Porcentaje de masa grasa no valido.";
   }
+  if (!isOptionalNumberInRange(body.desiredWeightKg, 1, 400)) {
+    return "Peso deseado no valido.";
+  }
+  if (!isOptionalNumberInRange(body.theoreticalWeightKg, 1, 400)) {
+    return "Peso teorico no valido.";
+  }
+  if (!isOptionalNumberInRange(body.glucoseMgDl, 0, 1000)) {
+    return "Glucosa no valida.";
+  }
+  if (!isOptionalNumberInRange(body.hemoglobinGDl, 0, 30)) {
+    return "Hemoglobina no valida.";
+  }
+  if (!isOptionalNumberInRange(body.cholesterolMgDl, 0, 1000)) {
+    return "Colesterol no valido.";
+  }
+  if (!isOptionalNumberInRange(body.triglyceridesMgDl, 0, 2000)) {
+    return "Trigliceridos no validos.";
+  }
+  if (!isOptionalIntegerInRange(body.mealsPerDay, 0, 20)) {
+    return "Numero de comidas no valido.";
+  }
   if (!isOptionalNumberInRange(body.age, 0, 120)) return "Edad no valida.";
   if (body.stressLevel && !validStressLevels.has(body.stressLevel)) {
     return "Nivel de estres no valido.";
@@ -285,11 +387,23 @@ function validateConsultationBody(body: ConsultationBody) {
   if (body.birthDate && !isIsoDate(body.birthDate)) {
     return "Fecha de nacimiento no valida.";
   }
+  if (body.conditionStartDate && !isIsoDate(body.conditionStartDate)) {
+    return "Fecha de inicio no valida.";
+  }
   if (body.isMenstruating && !isIsoDate(body.menstruationStartDate)) {
     return "Indica la fecha de inicio de menstruacion.";
   }
   if (body.menstruationStartDate && !isIsoDate(body.menstruationStartDate)) {
     return "Fecha de inicio de menstruacion no valida.";
+  }
+  if (!isOptionalConditionStatus(body.diabetesStatus)) {
+    return "Diabetes no valida.";
+  }
+  if (!isOptionalConditionStatus(body.hypertensionStatus)) {
+    return "Hipertension no valida.";
+  }
+  if (!isOptionalConditionStatus(body.fattyLiverStatus)) {
+    return "Higado graso no valido.";
   }
 
   return "";
@@ -302,6 +416,24 @@ function isOptionalNumberInRange(
 ) {
   if (value === null || value === undefined) return true;
   return Number.isFinite(value) && value >= min && value <= max;
+}
+
+function isOptionalIntegerInRange(
+  value: number | null | undefined,
+  min: number,
+  max: number,
+) {
+  if (value === null || value === undefined) return true;
+  return Number.isInteger(value) && value >= min && value <= max;
+}
+
+function isOptionalConditionStatus(value: string | null | undefined) {
+  if (!value) return true;
+  return validConditionStatuses.has(value);
+}
+
+function normalizeConditionStatus(value: string | null | undefined) {
+  return value && validConditionStatuses.has(value) ? value : null;
 }
 
 function isIsoDate(value: unknown) {

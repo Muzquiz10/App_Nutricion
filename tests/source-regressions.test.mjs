@@ -40,6 +40,10 @@ const clientAccessMigrationPath = new URL(
   "../supabase/migrations/202608250001_client_access_and_professional_onboarding.sql",
   import.meta.url,
 );
+const patientClinicalRecordMigrationPath = new URL(
+  "../supabase/migrations/202608270001_patient_clinical_record.sql",
+  import.meta.url,
+);
 const trackingRoutePath = new URL("../app/api/tracking/logs/route.ts", import.meta.url);
 const exerciseRoutePath = new URL("../app/api/tracking/exercises/route.ts", import.meta.url);
 const analyticsRoutePath = new URL("../app/api/analytics/events/route.ts", import.meta.url);
@@ -380,14 +384,20 @@ test("nutritionist patient detail has consultation records", async () => {
   const source = await readFile(componentPath, "utf8");
   const route = await readFile(patientConsultationsRoutePath, "utf8");
   const sql = await readFile(patientConsultationsMigrationPath, "utf8");
+  const clinicalSql = await readFile(patientClinicalRecordMigrationPath, "utf8");
 
   assert.match(source, /PatientDetailTab = "record" \| "consultations" \| "access"/);
   assert.match(source, /Ficha del cliente/);
   assert.match(source, /Consultas/);
-  assert.match(source, /Medidas básicas/);
-  assert.match(source, /Datos personales/);
+  assert.match(source, /ProfessionalClinicalRecord/);
+  assert.match(source, /I\. Datos generales/);
+  assert.match(source, /IV\. Datos antropométricos y bioquímicos/);
+  assert.match(source, /Motivo de la consulta/);
+  assert.match(source, /Anamnesis o historial familiar/);
   assert.match(source, /Menstruación y embarazo/);
-  assert.match(source, /Nivel Actividad Física/);
+  assert.match(source, /Nivel de actividad física/);
+  assert.match(source, /Comportamiento \/ Hábitos alimentarios/);
+  assert.match(source, /Conocimientos culinarios/);
   assert.match(source, /Diagnóstico/);
   assert.match(source, /Guardar consulta/);
   assert.match(source, /\/api\/patients\/consultations/);
@@ -398,9 +408,17 @@ test("nutritionist patient detail has consultation records", async () => {
   assert.match(route, /initial_weight_kg/);
   assert.match(route, /source: "nutritionist"/);
   assert.match(route, /validActivityLevels/);
+  assert.match(route, /treatment_motivation/);
+  assert.match(route, /glucose_mg_dl/);
+  assert.match(route, /diabetes_status/);
   assert.match(sql, /create table if not exists public\.patient_consultations/i);
   assert.match(sql, /enable row level security/i);
   assert.match(sql, /Nutritionists can insert patient consultations/i);
+  assert.match(clinicalSql, /add column if not exists email/i);
+  assert.match(clinicalSql, /phone_number/);
+  assert.match(clinicalSql, /treatment_motivation/);
+  assert.match(clinicalSql, /glucose_mg_dl/);
+  assert.match(clinicalSql, /activity_frequency/);
 });
 
 test("client access and professional onboarding are configurable per patient", async () => {

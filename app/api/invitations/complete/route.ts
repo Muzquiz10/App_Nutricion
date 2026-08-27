@@ -195,6 +195,7 @@ export async function POST(request: Request) {
     nutritionist_user_id: invitation.invited_by,
     patient_code: patientCode,
     full_name: fullName,
+    email: invitation.email,
     age: body.age,
     height_cm: body.heightCm,
     initial_weight_kg: body.currentWeightKg,
