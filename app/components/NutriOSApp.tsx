@@ -4465,12 +4465,19 @@ function ProfessionalPatientDetail({
         />
       )}
       {activeTab === "consultations" && (
-        <PatientConsultationsPanel
-          patient={patient}
-          weights={weights}
-          supabase={supabase}
-          onNotice={onNotice}
-        />
+        <Panel>
+          <div className="flex items-start gap-3">
+            <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#eef3f0] text-[var(--tenant-color)]">
+              <FileText className="size-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-black">Consultas</h2>
+              <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
+                Esta pestaña queda preparada para desarrollar el histórico de consultas con una lógica específica.
+              </p>
+            </div>
+          </div>
+        </Panel>
       )}
       {activeTab === "access" && (
         <PatientAccessPanel
@@ -4677,11 +4684,13 @@ function PatientConsultationsPanel({
   weights,
   supabase,
   onNotice,
+  mode = "consultations",
 }: {
   patient: Patient | null;
   weights: WeightLog[];
   supabase: ReturnType<typeof createSupabaseBrowser>;
   onNotice: (message: string) => void;
+  mode?: "consultations" | "record";
 }) {
   const [consultations, setConsultations] = useState<PatientConsultation[]>([]);
   const [draft, setDraft] = useState<ConsultationDraft>(() =>
@@ -4689,6 +4698,7 @@ function PatientConsultationsPanel({
   );
   const [loadingConsultations, setLoadingConsultations] = useState(false);
   const [savingConsultation, setSavingConsultation] = useState(false);
+  const isRecordMode = mode === "record";
 
   useEffect(() => {
     let cancelled = false;
@@ -4789,6 +4799,7 @@ function PatientConsultationsPanel({
           Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
+          consultationId: isRecordMode ? consultations[0]?.id : undefined,
           patientId: patient.id,
           consultationAt: draft.consultationAt,
           weightKg: parseOptionalNumberInput(draft.weightKg),
@@ -4863,7 +4874,11 @@ function PatientConsultationsPanel({
       ];
       setConsultations(nextRows);
       setDraft(buildConsultationDraft(patient, payload.consultation, weights));
-      onNotice("Consulta guardada. Estos datos quedarán precargados en la próxima consulta.");
+      onNotice(
+        isRecordMode
+          ? "Ficha del cliente guardada."
+          : "Consulta guardada. Estos datos quedarán precargados en la próxima consulta.",
+      );
     } finally {
       setSavingConsultation(false);
     }
@@ -4874,419 +4889,434 @@ function PatientConsultationsPanel({
   }
 
   const latestConsultation = consultations[0] ?? null;
+  const formContent = (
+    <form className="grid gap-4" onSubmit={saveConsultation}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-lg font-black">
+            {isRecordMode ? "Editar ficha del cliente" : "Consultas"}
+          </h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            {isRecordMode
+              ? "Completa la información inicial e informativa para conocer mejor al cliente."
+              : "Registra los datos tomados durante la atención del cliente."}
+          </p>
+        </div>
+        <span className="rounded-lg bg-[#eef3f0] px-3 py-1 text-sm font-semibold text-[#53605a]">
+          {loadingConsultations
+            ? "Cargando..."
+            : latestConsultation
+              ? `${isRecordMode ? "Última edición" : "Última"}: ${formatDate(`${latestConsultation.consultation_at}T12:00:00`)}`
+              : isRecordMode
+                ? "Sin ficha clínica guardada"
+                : "Sin consultas previas"}
+        </span>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field
+          label={isRecordMode ? "Fecha del registro" : "Fecha de consulta"}
+          type="date"
+          value={draft.consultationAt}
+          onChange={(value) => updateDraft("consultationAt", value)}
+          required
+        />
+      </div>
+
+      <ConsultationSection title="I. Datos generales" defaultOpen>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field
+            label="Fecha de nacimiento"
+            type="date"
+            value={draft.birthDate}
+            onChange={updateBirthDate}
+          />
+          <Field
+            label="Edad"
+            type="number"
+            value={draft.age}
+            onChange={(value) => updateDraft("age", value)}
+          />
+          <SelectField
+            label="Género"
+            value={draft.gender}
+            onChange={(value) => updateDraft("gender", value)}
+            options={consultationGenderOptions}
+          />
+          <Field
+            label="Número de teléfono"
+            value={draft.phoneNumber}
+            onChange={(value) => updateDraft("phoneNumber", value)}
+          />
+          <Field
+            label="País/Ciudad"
+            value={draft.countryCity}
+            onChange={(value) => updateDraft("countryCity", value)}
+          />
+          <Field
+            label="Ocupación"
+            value={draft.occupation}
+            onChange={(value) => updateDraft("occupation", value)}
+          />
+        </div>
+      </ConsultationSection>
+
+      <ConsultationSection title="II. Motivo de la consulta / Procedencia" defaultOpen>
+        <div className="grid gap-4 md:grid-cols-2">
+          <TextArea
+            label="Grado y tipo de motivación para seguir tratamiento dietético"
+            value={draft.treatmentMotivation}
+            onChange={(value) => updateDraft("treatmentMotivation", value)}
+          />
+          <TextArea
+            label="Identificación del autoestima"
+            value={draft.selfEsteemIdentification}
+            onChange={(value) => updateDraft("selfEsteemIdentification", value)}
+          />
+        </div>
+      </ConsultationSection>
+
+      <ConsultationSection title="III. Anamnesis o historial familiar, personal y social">
+        <div className="grid gap-4 md:grid-cols-2">
+          <TextArea
+            label="Descripción de la situación o patología"
+            value={draft.situationDescription}
+            onChange={(value) => updateDraft("situationDescription", value)}
+          />
+          <Field
+            label="Fecha de inicio"
+            type="date"
+            value={draft.conditionStartDate}
+            onChange={(value) => updateDraft("conditionStartDate", value)}
+          />
+          <TextArea
+            label="Factores desencadenantes"
+            value={draft.triggerFactors}
+            onChange={(value) => updateDraft("triggerFactors", value)}
+          />
+          <TextArea
+            label="Tratamientos realizados hasta el momento"
+            value={draft.previousTreatments}
+            onChange={(value) => updateDraft("previousTreatments", value)}
+          />
+          <TextArea
+            label="Trastornos o patologías asociados"
+            value={draft.associatedPathologies}
+            onChange={(value) => updateDraft("associatedPathologies", value)}
+          />
+        </div>
+      </ConsultationSection>
+
+      <ConsultationSection title="IV. Datos antropométricos y bioquímicos" defaultOpen>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field
+            label="Peso kg"
+            type="number"
+            step="0.1"
+            value={draft.weightKg}
+            onChange={(value) => updateDraft("weightKg", value)}
+          />
+          <Field
+            label="Altura cm"
+            type="number"
+            step="0.1"
+            value={draft.heightCm}
+            onChange={(value) => updateDraft("heightCm", value)}
+          />
+          <SelectField
+            label="Estrés"
+            value={draft.stressLevel}
+            onChange={(value) => updateDraft("stressLevel", value)}
+            options={consultationStressOptions}
+          />
+          <Field
+            label="Grasa %"
+            type="number"
+            step="0.1"
+            value={draft.bodyFatPercentage}
+            onChange={(value) => updateDraft("bodyFatPercentage", value)}
+          />
+          <Field
+            label="Masa Grasa %"
+            type="number"
+            step="0.1"
+            value={draft.fatMassPercentage}
+            onChange={(value) => updateDraft("fatMassPercentage", value)}
+          />
+          <Field
+            label="Peso deseado kg"
+            type="number"
+            step="0.1"
+            value={draft.desiredWeightKg}
+            onChange={(value) => updateDraft("desiredWeightKg", value)}
+          />
+          <Field
+            label="Peso teórico kg"
+            type="number"
+            step="0.1"
+            value={draft.theoreticalWeightKg}
+            onChange={(value) => updateDraft("theoreticalWeightKg", value)}
+          />
+          <Field
+            label="Glucosa (75-115 mg/dl)"
+            type="number"
+            step="0.1"
+            value={draft.glucoseMgDl}
+            onChange={(value) => updateDraft("glucoseMgDl", value)}
+          />
+          <Field
+            label="Hemoglobina (12-14 g/dl)"
+            type="number"
+            step="0.1"
+            value={draft.hemoglobinGDl}
+            onChange={(value) => updateDraft("hemoglobinGDl", value)}
+          />
+          <Field
+            label="Colesterol (<200 mg/dl)"
+            type="number"
+            step="0.1"
+            value={draft.cholesterolMgDl}
+            onChange={(value) => updateDraft("cholesterolMgDl", value)}
+          />
+          <Field
+            label="Triglicéridos (<150 mg/dl)"
+            type="number"
+            step="0.1"
+            value={draft.triglyceridesMgDl}
+            onChange={(value) => updateDraft("triglyceridesMgDl", value)}
+          />
+        </div>
+      </ConsultationSection>
+
+      <ConsultationSection title="Menstruación y embarazo">
+        <div className="grid gap-4 md:grid-cols-2">
+          <BinaryChoice
+            label="¿Estás menstruando?"
+            value={draft.isMenstruating}
+            onChange={(value) => updateDraft("isMenstruating", value)}
+          />
+          {draft.isMenstruating === "yes" && (
+            <Field
+              label="Fecha de inicio"
+              type="date"
+              value={draft.menstruationStartDate}
+              onChange={(value) => updateDraft("menstruationStartDate", value)}
+            />
+          )}
+          <BinaryChoice
+            label="¿Estás embarazada?"
+            value={draft.isPregnant}
+            onChange={(value) => updateDraft("isPregnant", value)}
+          />
+        </div>
+      </ConsultationSection>
+
+      <ConsultationSection title="Nivel de actividad física">
+        <ChoiceButtonGroup
+          value={draft.physicalActivityLevel}
+          onChange={(value) => updateDraft("physicalActivityLevel", value)}
+          options={consultationActivityLevelOptions.filter((option) => option.value)}
+        />
+      </ConsultationSection>
+
+      <ConsultationSection title="V. Comportamiento / Hábitos alimentarios">
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field
+            label="Número de comidas que acostumbra realizar"
+            type="number"
+            value={draft.mealsPerDay}
+            onChange={(value) => updateDraft("mealsPerDay", value)}
+          />
+          <TextArea
+            label="Lugar y entorno social de las comidas"
+            value={draft.mealContext}
+            onChange={(value) => updateDraft("mealContext", value)}
+          />
+          <Field
+            label="Horario desayuno"
+            value={draft.breakfastTime}
+            onChange={(value) => updateDraft("breakfastTime", value)}
+          />
+          <Field
+            label="Horario almuerzo"
+            value={draft.lunchTime}
+            onChange={(value) => updateDraft("lunchTime", value)}
+          />
+          <Field
+            label="Horario cena"
+            value={draft.dinnerTime}
+            onChange={(value) => updateDraft("dinnerTime", value)}
+          />
+          <TextArea
+            label="Hábito de picar alimentos entre comidas"
+            value={draft.snackingHabit}
+            onChange={(value) => updateDraft("snackingHabit", value)}
+          />
+          <TextArea
+            label="Responsable de preparar las comidas"
+            value={draft.mealPreparer}
+            onChange={(value) => updateDraft("mealPreparer", value)}
+          />
+          <TextArea
+            label="Responsable de la compra de los alimentos"
+            value={draft.groceryBuyer}
+            onChange={(value) => updateDraft("groceryBuyer", value)}
+          />
+          <TextArea
+            label="Preferencias y aversiones alimentarias"
+            value={draft.foodPreferencesAversions}
+            onChange={(value) => updateDraft("foodPreferencesAversions", value)}
+          />
+          <TextArea
+            label="Sensación de apetito"
+            value={draft.appetiteSensation}
+            onChange={(value) => updateDraft("appetiteSensation", value)}
+          />
+          <TextArea
+            label="Momento del día de mayor sensación de apetito"
+            value={draft.peakAppetiteTime}
+            onChange={(value) => updateDraft("peakAppetiteTime", value)}
+          />
+          <TextArea
+            label="¿Come muy rápido, sin masticar o compulsivamente?"
+            value={draft.fastCompulsiveEating}
+            onChange={(value) => updateDraft("fastCompulsiveEating", value)}
+          />
+          <TextArea
+            label="Seguimiento anterior de tratamientos dietéticos"
+            value={draft.previousDietTreatmentFollowup}
+            onChange={(value) => updateDraft("previousDietTreatmentFollowup", value)}
+          />
+          <TextArea
+            label="Cuántas veces y qué tipo de tratamientos"
+            value={draft.dietTreatmentCountTypes}
+            onChange={(value) => updateDraft("dietTreatmentCountTypes", value)}
+          />
+          <TextArea
+            label="Tipos de cocción utilizados con mayor frecuencia"
+            value={draft.frequentCookingMethods}
+            onChange={(value) => updateDraft("frequentCookingMethods", value)}
+          />
+        </div>
+      </ConsultationSection>
+
+      <ConsultationSection title="VI. Conocimiento y aptitudes">
+        <div className="grid gap-4 md:grid-cols-2">
+          <TextArea
+            label="Conocimientos previos de alimentación saludable"
+            value={draft.healthyEatingKnowledge}
+            onChange={(value) => updateDraft("healthyEatingKnowledge", value)}
+          />
+          <TextArea
+            label="Dieta"
+            value={draft.dietKnowledge}
+            onChange={(value) => updateDraft("dietKnowledge", value)}
+          />
+          <SelectField
+            label="Diabetes"
+            value={draft.diabetesStatus}
+            onChange={(value) => updateDraft("diabetesStatus", value)}
+            options={conditionStatusOptions}
+          />
+          <SelectField
+            label="Hipertensión"
+            value={draft.hypertensionStatus}
+            onChange={(value) => updateDraft("hypertensionStatus", value)}
+            options={conditionStatusOptions}
+          />
+          <SelectField
+            label="Hígado graso"
+            value={draft.fattyLiverStatus}
+            onChange={(value) => updateDraft("fattyLiverStatus", value)}
+            options={conditionStatusOptions}
+          />
+        </div>
+      </ConsultationSection>
+
+      <ConsultationSection title="VII. Conocimientos culinarios">
+        <TextArea
+          label="Recursos y posibilidades"
+          value={draft.culinaryResources}
+          onChange={(value) => updateDraft("culinaryResources", value)}
+        />
+      </ConsultationSection>
+
+      <ConsultationSection title="VIII. Actividad física">
+        <div className="grid gap-4 md:grid-cols-3">
+          <TextArea
+            label="Tipo de actividad que realiza"
+            value={draft.activityType}
+            onChange={(value) => updateDraft("activityType", value)}
+          />
+          <Field
+            label="Duración"
+            value={draft.activityDuration}
+            onChange={(value) => updateDraft("activityDuration", value)}
+          />
+          <Field
+            label="Frecuencia"
+            value={draft.activityFrequency}
+            onChange={(value) => updateDraft("activityFrequency", value)}
+          />
+        </div>
+      </ConsultationSection>
+
+      <ConsultationSection title="Diagnóstico">
+        <div className="grid gap-4 lg:grid-cols-3">
+          <TextArea
+            label="Problema"
+            value={draft.diagnosisProblem}
+            onChange={(value) => updateDraft("diagnosisProblem", value)}
+          />
+          <TextArea
+            label="Origen/Causa"
+            value={draft.diagnosisCause}
+            onChange={(value) => updateDraft("diagnosisCause", value)}
+          />
+          <TextArea
+            label="Síntomas"
+            value={draft.diagnosisSymptoms}
+            onChange={(value) => updateDraft("diagnosisSymptoms", value)}
+          />
+        </div>
+      </ConsultationSection>
+
+      <ConsultationSection title="Comentarios">
+        <TextArea
+          label="Comentarios"
+          value={draft.comments}
+          onChange={(value) => updateDraft("comments", value)}
+        />
+      </ConsultationSection>
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="submit"
+          className="inline-flex h-11 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
+          disabled={savingConsultation}
+        >
+          {savingConsultation ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Check className="size-4" />
+          )}
+          {savingConsultation
+            ? "Guardando..."
+            : isRecordMode
+              ? "Guardar ficha"
+              : "Guardar consulta"}
+        </button>
+      </div>
+    </form>
+  );
+
+  if (isRecordMode) {
+    return <div className="mt-5">{formContent}</div>;
+  }
 
   return (
     <div className="grid gap-4">
-      <Panel>
-        <form className="grid gap-4" onSubmit={saveConsultation}>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <h2 className="text-lg font-black">Consultas</h2>
-              <p className="mt-1 text-sm text-[var(--muted)]">
-                Registra los datos tomados durante la atención del cliente.
-              </p>
-            </div>
-            <span className="rounded-lg bg-[#eef3f0] px-3 py-1 text-sm font-semibold text-[#53605a]">
-              {loadingConsultations
-                ? "Cargando..."
-                : latestConsultation
-                  ? `Última: ${formatDate(`${latestConsultation.consultation_at}T12:00:00`)}`
-                  : "Sin consultas previas"}
-            </span>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field
-              label="Fecha de consulta"
-              type="date"
-              value={draft.consultationAt}
-              onChange={(value) => updateDraft("consultationAt", value)}
-              required
-            />
-          </div>
-
-          <ConsultationSection title="IV. Datos antropométricos y bioquímicos" defaultOpen>
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field
-                label="Peso kg"
-                type="number"
-                step="0.1"
-                value={draft.weightKg}
-                onChange={(value) => updateDraft("weightKg", value)}
-              />
-              <Field
-                label="Altura cm"
-                type="number"
-                step="0.1"
-                value={draft.heightCm}
-                onChange={(value) => updateDraft("heightCm", value)}
-              />
-              <SelectField
-                label="Estrés"
-                value={draft.stressLevel}
-                onChange={(value) => updateDraft("stressLevel", value)}
-                options={consultationStressOptions}
-              />
-              <Field
-                label="Grasa %"
-                type="number"
-                step="0.1"
-                value={draft.bodyFatPercentage}
-                onChange={(value) => updateDraft("bodyFatPercentage", value)}
-              />
-              <Field
-                label="Masa Grasa %"
-                type="number"
-                step="0.1"
-                value={draft.fatMassPercentage}
-                onChange={(value) => updateDraft("fatMassPercentage", value)}
-              />
-              <Field
-                label="Peso deseado kg"
-                type="number"
-                step="0.1"
-                value={draft.desiredWeightKg}
-                onChange={(value) => updateDraft("desiredWeightKg", value)}
-              />
-              <Field
-                label="Peso teórico kg"
-                type="number"
-                step="0.1"
-                value={draft.theoreticalWeightKg}
-                onChange={(value) => updateDraft("theoreticalWeightKg", value)}
-              />
-              <Field
-                label="Glucosa (75-115 mg/dl)"
-                type="number"
-                step="0.1"
-                value={draft.glucoseMgDl}
-                onChange={(value) => updateDraft("glucoseMgDl", value)}
-              />
-              <Field
-                label="Hemoglobina (12-14 g/dl)"
-                type="number"
-                step="0.1"
-                value={draft.hemoglobinGDl}
-                onChange={(value) => updateDraft("hemoglobinGDl", value)}
-              />
-              <Field
-                label="Colesterol (<200 mg/dl)"
-                type="number"
-                step="0.1"
-                value={draft.cholesterolMgDl}
-                onChange={(value) => updateDraft("cholesterolMgDl", value)}
-              />
-              <Field
-                label="Triglicéridos (<150 mg/dl)"
-                type="number"
-                step="0.1"
-                value={draft.triglyceridesMgDl}
-                onChange={(value) => updateDraft("triglyceridesMgDl", value)}
-              />
-            </div>
-          </ConsultationSection>
-
-          <ConsultationSection title="I. Datos generales" defaultOpen>
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field
-                label="Fecha de nacimiento"
-                type="date"
-                value={draft.birthDate}
-                onChange={updateBirthDate}
-              />
-              <Field
-                label="Edad"
-                type="number"
-                value={draft.age}
-                onChange={(value) => updateDraft("age", value)}
-              />
-              <SelectField
-                label="Género"
-                value={draft.gender}
-                onChange={(value) => updateDraft("gender", value)}
-                options={consultationGenderOptions}
-              />
-              <Field
-                label="Número de teléfono"
-                value={draft.phoneNumber}
-                onChange={(value) => updateDraft("phoneNumber", value)}
-              />
-              <Field
-                label="País/Ciudad"
-                value={draft.countryCity}
-                onChange={(value) => updateDraft("countryCity", value)}
-              />
-              <Field
-                label="Ocupación"
-                value={draft.occupation}
-                onChange={(value) => updateDraft("occupation", value)}
-              />
-            </div>
-          </ConsultationSection>
-
-          <ConsultationSection title="Menstruación y embarazo">
-            <div className="grid gap-4 md:grid-cols-2">
-              <BinaryChoice
-                label="¿Estás menstruando?"
-                value={draft.isMenstruating}
-                onChange={(value) => updateDraft("isMenstruating", value)}
-              />
-              {draft.isMenstruating === "yes" && (
-                <Field
-                  label="Fecha de inicio"
-                  type="date"
-                  value={draft.menstruationStartDate}
-                  onChange={(value) => updateDraft("menstruationStartDate", value)}
-                />
-              )}
-              <BinaryChoice
-                label="¿Estás embarazada?"
-                value={draft.isPregnant}
-                onChange={(value) => updateDraft("isPregnant", value)}
-              />
-            </div>
-          </ConsultationSection>
-
-          <ConsultationSection title="Nivel de actividad física">
-            <ChoiceButtonGroup
-              value={draft.physicalActivityLevel}
-              onChange={(value) => updateDraft("physicalActivityLevel", value)}
-              options={consultationActivityLevelOptions.filter((option) => option.value)}
-            />
-          </ConsultationSection>
-
-          <ConsultationSection title="II. Motivo de la consulta / Procedencia">
-            <div className="grid gap-4 md:grid-cols-2">
-              <TextArea
-                label="Grado y tipo de motivación para seguir tratamiento dietético"
-                value={draft.treatmentMotivation}
-                onChange={(value) => updateDraft("treatmentMotivation", value)}
-              />
-              <TextArea
-                label="Identificación del autoestima"
-                value={draft.selfEsteemIdentification}
-                onChange={(value) => updateDraft("selfEsteemIdentification", value)}
-              />
-            </div>
-          </ConsultationSection>
-
-          <ConsultationSection title="III. Anamnesis o historial familiar, personal y social">
-            <div className="grid gap-4 md:grid-cols-2">
-              <TextArea
-                label="Descripción de la situación o patología"
-                value={draft.situationDescription}
-                onChange={(value) => updateDraft("situationDescription", value)}
-              />
-              <Field
-                label="Fecha de inicio"
-                type="date"
-                value={draft.conditionStartDate}
-                onChange={(value) => updateDraft("conditionStartDate", value)}
-              />
-              <TextArea
-                label="Factores desencadenantes"
-                value={draft.triggerFactors}
-                onChange={(value) => updateDraft("triggerFactors", value)}
-              />
-              <TextArea
-                label="Tratamientos realizados hasta el momento"
-                value={draft.previousTreatments}
-                onChange={(value) => updateDraft("previousTreatments", value)}
-              />
-              <TextArea
-                label="Trastornos o patologías asociados"
-                value={draft.associatedPathologies}
-                onChange={(value) => updateDraft("associatedPathologies", value)}
-              />
-            </div>
-          </ConsultationSection>
-
-          <ConsultationSection title="V. Comportamiento / Hábitos alimentarios">
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field
-                label="Número de comidas que acostumbra realizar"
-                type="number"
-                value={draft.mealsPerDay}
-                onChange={(value) => updateDraft("mealsPerDay", value)}
-              />
-              <TextArea
-                label="Lugar y entorno social de las comidas"
-                value={draft.mealContext}
-                onChange={(value) => updateDraft("mealContext", value)}
-              />
-              <Field
-                label="Horario desayuno"
-                value={draft.breakfastTime}
-                onChange={(value) => updateDraft("breakfastTime", value)}
-              />
-              <Field
-                label="Horario almuerzo"
-                value={draft.lunchTime}
-                onChange={(value) => updateDraft("lunchTime", value)}
-              />
-              <Field
-                label="Horario cena"
-                value={draft.dinnerTime}
-                onChange={(value) => updateDraft("dinnerTime", value)}
-              />
-              <TextArea
-                label="Hábito de picar alimentos entre comidas"
-                value={draft.snackingHabit}
-                onChange={(value) => updateDraft("snackingHabit", value)}
-              />
-              <TextArea
-                label="Responsable de preparar las comidas"
-                value={draft.mealPreparer}
-                onChange={(value) => updateDraft("mealPreparer", value)}
-              />
-              <TextArea
-                label="Responsable de la compra de los alimentos"
-                value={draft.groceryBuyer}
-                onChange={(value) => updateDraft("groceryBuyer", value)}
-              />
-              <TextArea
-                label="Preferencias y aversiones alimentarias"
-                value={draft.foodPreferencesAversions}
-                onChange={(value) => updateDraft("foodPreferencesAversions", value)}
-              />
-              <TextArea
-                label="Sensación de apetito"
-                value={draft.appetiteSensation}
-                onChange={(value) => updateDraft("appetiteSensation", value)}
-              />
-              <TextArea
-                label="Momento del día de mayor sensación de apetito"
-                value={draft.peakAppetiteTime}
-                onChange={(value) => updateDraft("peakAppetiteTime", value)}
-              />
-              <TextArea
-                label="¿Come muy rápido, sin masticar o compulsivamente?"
-                value={draft.fastCompulsiveEating}
-                onChange={(value) => updateDraft("fastCompulsiveEating", value)}
-              />
-              <TextArea
-                label="Seguimiento anterior de tratamientos dietéticos"
-                value={draft.previousDietTreatmentFollowup}
-                onChange={(value) => updateDraft("previousDietTreatmentFollowup", value)}
-              />
-              <TextArea
-                label="Cuántas veces y qué tipo de tratamientos"
-                value={draft.dietTreatmentCountTypes}
-                onChange={(value) => updateDraft("dietTreatmentCountTypes", value)}
-              />
-              <TextArea
-                label="Tipos de cocción utilizados con mayor frecuencia"
-                value={draft.frequentCookingMethods}
-                onChange={(value) => updateDraft("frequentCookingMethods", value)}
-              />
-            </div>
-          </ConsultationSection>
-
-          <ConsultationSection title="VI. Conocimiento y aptitudes">
-            <div className="grid gap-4 md:grid-cols-2">
-              <TextArea
-                label="Conocimientos previos de alimentación saludable"
-                value={draft.healthyEatingKnowledge}
-                onChange={(value) => updateDraft("healthyEatingKnowledge", value)}
-              />
-              <TextArea
-                label="Dieta"
-                value={draft.dietKnowledge}
-                onChange={(value) => updateDraft("dietKnowledge", value)}
-              />
-              <SelectField
-                label="Diabetes"
-                value={draft.diabetesStatus}
-                onChange={(value) => updateDraft("diabetesStatus", value)}
-                options={conditionStatusOptions}
-              />
-              <SelectField
-                label="Hipertensión"
-                value={draft.hypertensionStatus}
-                onChange={(value) => updateDraft("hypertensionStatus", value)}
-                options={conditionStatusOptions}
-              />
-              <SelectField
-                label="Hígado graso"
-                value={draft.fattyLiverStatus}
-                onChange={(value) => updateDraft("fattyLiverStatus", value)}
-                options={conditionStatusOptions}
-              />
-            </div>
-          </ConsultationSection>
-
-          <ConsultationSection title="VII. Conocimientos culinarios">
-            <TextArea
-              label="Recursos y posibilidades"
-              value={draft.culinaryResources}
-              onChange={(value) => updateDraft("culinaryResources", value)}
-            />
-          </ConsultationSection>
-
-          <ConsultationSection title="VIII. Actividad física">
-            <div className="grid gap-4 md:grid-cols-3">
-              <TextArea
-                label="Tipo de actividad que realiza"
-                value={draft.activityType}
-                onChange={(value) => updateDraft("activityType", value)}
-              />
-              <Field
-                label="Duración"
-                value={draft.activityDuration}
-                onChange={(value) => updateDraft("activityDuration", value)}
-              />
-              <Field
-                label="Frecuencia"
-                value={draft.activityFrequency}
-                onChange={(value) => updateDraft("activityFrequency", value)}
-              />
-            </div>
-          </ConsultationSection>
-
-          <ConsultationSection title="Diagnóstico">
-            <div className="grid gap-4 lg:grid-cols-3">
-              <TextArea
-                label="Problema"
-                value={draft.diagnosisProblem}
-                onChange={(value) => updateDraft("diagnosisProblem", value)}
-              />
-              <TextArea
-                label="Origen/Causa"
-                value={draft.diagnosisCause}
-                onChange={(value) => updateDraft("diagnosisCause", value)}
-              />
-              <TextArea
-                label="Síntomas"
-                value={draft.diagnosisSymptoms}
-                onChange={(value) => updateDraft("diagnosisSymptoms", value)}
-              />
-            </div>
-          </ConsultationSection>
-
-          <ConsultationSection title="Comentarios">
-            <TextArea
-              label="Comentarios"
-              value={draft.comments}
-              onChange={(value) => updateDraft("comments", value)}
-            />
-          </ConsultationSection>
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="submit"
-              className="inline-flex h-11 items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
-              disabled={savingConsultation}
-            >
-              {savingConsultation ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Check className="size-4" />
-              )}
-              {savingConsultation ? "Guardando..." : "Guardar consulta"}
-            </button>
-          </div>
-        </form>
-      </Panel>
+      <Panel>{formContent}</Panel>
 
       <Panel>
         <div className="flex items-center justify-between gap-3">
@@ -6463,66 +6493,11 @@ function PatientRecord({
   onNotice?: (message: string) => void;
   className?: string;
 }) {
-  const [latestConsultation, setLatestConsultation] = useState<PatientConsultation | null>(null);
-  const [loadingClinicalRecord, setLoadingClinicalRecord] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadLatestConsultation() {
-      setLatestConsultation(null);
-
-      if (!patient || role === "patient" || !supabase) {
-        setLoadingClinicalRecord(false);
-        return;
-      }
-
-      setLoadingClinicalRecord(true);
-      const accessToken = await getCurrentAccessToken(supabase);
-      if (!accessToken) {
-        if (!cancelled) {
-          setLoadingClinicalRecord(false);
-          onNotice?.("Tu sesión ha caducado. Cierra sesión y vuelve a entrar.");
-        }
-        return;
-      }
-
-      try {
-        const response = await fetch(
-          `/api/patients/consultations?patientId=${encodeURIComponent(patient.id)}`,
-          {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-          },
-        );
-        const payload = (await response.json()) as PatientConsultationsResponse;
-
-        if (cancelled) return;
-        if (!response.ok) {
-          onNotice?.(payload.error ?? "No se pudo cargar la ficha clínica.");
-          return;
-        }
-
-        setLatestConsultation(payload.consultations?.[0] ?? null);
-      } finally {
-        if (!cancelled) setLoadingClinicalRecord(false);
-      }
-    }
-
-    void loadLatestConsultation();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [patient, role, supabase, onNotice]);
-
   if (!patient) return <Panel><EmptyState text="Selecciona un cliente." /></Panel>;
 
   const currentWeight = getCurrentWeightKg(patient, weights);
   const initialBmi = calculateBmi(patient.initial_weight_kg, patient.height_cm);
   const currentBmi = calculateBmi(currentWeight, patient.height_cm);
-  const basalCalories = calculateBasalCalories(patient, currentWeight);
   const initialBasalCalories = calculateBasalCalories(patient, patient.initial_weight_kg);
 
   return (
@@ -6590,11 +6565,9 @@ function PatientRecord({
           </div>
           <ProfessionalClinicalRecord
             patient={patient}
-            consultation={latestConsultation}
-            currentWeight={currentWeight}
-            currentBmi={currentBmi}
-            basalCalories={basalCalories}
-            loading={loadingClinicalRecord}
+            weights={weights}
+            supabase={supabase}
+            onNotice={onNotice}
           />
         </>
       )}
@@ -6604,22 +6577,42 @@ function PatientRecord({
 
 function ProfessionalClinicalRecord({
   patient,
-  consultation,
-  currentWeight,
-  currentBmi,
-  basalCalories,
-  loading,
+  weights,
+  supabase,
+  onNotice,
+  consultation = null,
+  currentWeight = null,
+  currentBmi = null,
+  basalCalories = null,
+  loading = false,
 }: {
   patient: Patient;
-  consultation: PatientConsultation | null;
-  currentWeight: number | null;
-  currentBmi: number | null;
-  basalCalories: number | null;
-  loading: boolean;
+  weights: WeightLog[];
+  supabase?: ReturnType<typeof createSupabaseBrowser>;
+  onNotice?: (message: string) => void;
+  consultation?: PatientConsultation | null;
+  currentWeight?: number | null;
+  currentBmi?: number | null;
+  basalCalories?: number | null;
+  loading?: boolean;
 }) {
-  const clinicalWeight = consultation?.weight_kg ?? currentWeight;
+  if (supabase && onNotice) {
+    return (
+      <PatientConsultationsPanel
+        patient={patient}
+        weights={weights}
+        supabase={supabase}
+        onNotice={onNotice}
+        mode="record"
+      />
+    );
+  }
+
+  const fallbackCurrentWeight = currentWeight ?? getCurrentWeightKg(patient, weights);
+  const clinicalWeight = consultation?.weight_kg ?? fallbackCurrentWeight;
   const clinicalHeight = consultation?.height_cm ?? patient.height_cm;
   const clinicalBmi = calculateBmi(clinicalWeight, clinicalHeight) ?? currentBmi;
+  const clinicalBasalCalories = basalCalories ?? calculateBasalCalories(patient, clinicalWeight);
 
   return (
     <div className="mt-5 grid gap-3">
@@ -6689,7 +6682,7 @@ function ProfessionalClinicalRecord({
           { label: "Índice de masa corporal (IMC)", value: formatOptionalNumber(clinicalBmi, 1) },
           {
             label: "Calorías basales actuales (TMB)",
-            value: basalCalories ? `${basalCalories} kcal/día` : "Faltan datos para calcular",
+            value: clinicalBasalCalories ? `${clinicalBasalCalories} kcal/día` : "Faltan datos para calcular",
           },
           { label: "Glucosa", value: formatMetricValue(consultation?.glucose_mg_dl, "mg/dl") },
           { label: "Hemoglobina", value: formatMetricValue(consultation?.hemoglobin_g_dl, "g/dl") },
@@ -15078,7 +15071,7 @@ function buildConsultationDraft(
   const gender = consultation?.gender || patient?.sex || "";
 
   return {
-    consultationAt: getLocalDateString(),
+    consultationAt: consultation?.consultation_at ?? getLocalDateString(),
     weightKg: formatNumberForInput(consultation?.weight_kg ?? currentWeight),
     heightCm: formatNumberForInput(consultation?.height_cm ?? patient?.height_cm ?? null),
     stressLevel: consultation?.stress_level ?? "none",

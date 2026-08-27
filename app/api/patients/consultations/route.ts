@@ -12,6 +12,7 @@ const validActivityLevels = new Set([
 const validConditionStatuses = new Set(["yes", "no"]);
 
 type ConsultationBody = {
+  consultationId?: string;
   patientId?: string;
   consultationAt?: string;
   weightKg?: number | null;
@@ -203,11 +204,16 @@ export async function POST(request: Request) {
     comments: cleanText(body.comments),
   };
 
-  const { data, error } = await supabase
-    .from("patient_consultations")
-    .insert(row)
-    .select("*")
-    .single();
+  const query = body.consultationId
+    ? supabase
+        .from("patient_consultations")
+        .update(row)
+        .eq("id", body.consultationId)
+        .eq("tenant_id", access.tenantId)
+        .eq("patient_id", body.patientId)
+    : supabase.from("patient_consultations").insert(row);
+
+  const { data, error } = await query.select("*").single();
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -228,7 +234,7 @@ export async function POST(request: Request) {
     }
   }
 
-  if (body.weightKg !== null && body.weightKg !== undefined) {
+  if (!body.consultationId && body.weightKg !== null && body.weightKg !== undefined) {
     await supabase.from("weight_logs").insert({
       tenant_id: access.tenantId,
       patient_id: body.patientId,
@@ -340,6 +346,9 @@ async function verifyNutritionistPatientAccess(
 }
 
 function validateConsultationBody(body: ConsultationBody) {
+  if (body.consultationId && !isUuid(body.consultationId)) {
+    return "Ficha clinica no valida.";
+  }
   if (!body.patientId) return "Falta el cliente.";
   if (!isIsoDate(body.consultationAt)) return "Fecha de consulta no valida.";
   if (!isOptionalNumberInRange(body.weightKg, 1, 400)) return "Peso no valido.";
@@ -434,6 +443,12 @@ function isOptionalConditionStatus(value: string | null | undefined) {
 
 function normalizeConditionStatus(value: string | null | undefined) {
   return value && validConditionStatuses.has(value) ? value : null;
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }
 
 function isIsoDate(value: unknown) {

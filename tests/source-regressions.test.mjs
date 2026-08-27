@@ -380,7 +380,7 @@ test("calendar and statistics support video links and sleep charts", async () =>
   assert.match(sql, /add column if not exists video_url/i);
 });
 
-test("nutritionist patient detail has consultation records", async () => {
+test("nutritionist patient detail edits the clinical record from the client file", async () => {
   const source = await readFile(componentPath, "utf8");
   const route = await readFile(patientConsultationsRoutePath, "utf8");
   const sql = await readFile(patientConsultationsMigrationPath, "utf8");
@@ -390,6 +390,11 @@ test("nutritionist patient detail has consultation records", async () => {
   assert.match(source, /Ficha del cliente/);
   assert.match(source, /Consultas/);
   assert.match(source, /ProfessionalClinicalRecord/);
+  assert.match(source, /mode="record"/);
+  assert.match(source, /Editar ficha del cliente/);
+  assert.match(source, /Guardar ficha/);
+  assert.match(source, /Ficha del cliente guardada/);
+  assert.match(source, /Esta pestaña queda preparada/);
   assert.match(source, /I\. Datos generales/);
   assert.match(source, /IV\. Datos antropométricos y bioquímicos/);
   assert.match(source, /Motivo de la consulta/);
@@ -399,10 +404,14 @@ test("nutritionist patient detail has consultation records", async () => {
   assert.match(source, /Comportamiento \/ Hábitos alimentarios/);
   assert.match(source, /Conocimientos culinarios/);
   assert.match(source, /Diagnóstico/);
-  assert.match(source, /Guardar consulta/);
+  assert.match(source, /consultationId: isRecordMode \? consultations\[0\]\?\.id : undefined/);
   assert.match(source, /\/api\/patients\/consultations/);
+  assert.match(route, /consultationId\?: string/);
   assert.match(route, /verifyNutritionistPatientAccess/);
   assert.match(route, /patient_consultations/);
+  assert.match(route, /\.update\(row\)/);
+  assert.match(route, /!body\.consultationId && body\.weightKg/);
+  assert.match(route, /isUuid/);
   assert.match(route, /buildPatientPatch/);
   assert.match(route, /current_weight_kg/);
   assert.match(route, /initial_weight_kg/);
