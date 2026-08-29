@@ -119,6 +119,17 @@ test("home route is the shared app entry point", async () => {
   assert.doesNotMatch(source, /resolveTenantSlugFromHost/);
 });
 
+test("app header shows the active page name instead of the role", async () => {
+  const source = await readFile(componentPath, "utf8");
+
+  assert.match(source, /activeTab=\{activeTab\}/);
+  assert.match(source, /getPageHeaderLabel/);
+  assert.match(source, /if \(role === "patient" && tabId === "patients"\) return "Mi Ficha Personal"/);
+  assert.match(source, /if \(role !== "patient" && tabId === "patients"\) return "Página de Inicio"/);
+  assert.doesNotMatch(source, /Panel nutricionista/);
+  assert.doesNotMatch(source, /Area paciente/);
+});
+
 test("goals tab is first and goals panel stays only there", async () => {
   const source = await readFile(componentPath, "utf8");
 

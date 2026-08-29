@@ -2582,6 +2582,7 @@ export function NutriOSApp({
           <Header
             tenant={tenant}
             role={role}
+            activeTab={activeTab}
             selectedPatient={selectedPatient}
             notificationCount={
               unreadAppNotificationCount + (role !== "patient" ? pendingAppointmentCount : 0)
@@ -3426,17 +3427,20 @@ function Brand({
 function Header({
   tenant,
   role,
+  activeTab,
   selectedPatient,
   notificationCount,
   onOpenNotifications,
 }: {
   tenant: Tenant;
   role: UserRole | null;
+  activeTab: TabId;
   selectedPatient: Patient | null;
   notificationCount: number;
   onOpenNotifications: () => void;
 }) {
   const contextName = selectedPatient?.full_name ?? "";
+  const pageTitle = getPageHeaderLabel(activeTab, role);
 
   return (
     <header className="flex flex-col gap-4">
@@ -3452,7 +3456,7 @@ function Header({
           </div>
           <div className="min-w-0">
             <p className="text-xs font-black uppercase tracking-normal text-[var(--tenant-color)]">
-              {role === "patient" ? "Area paciente" : "Panel nutricionista"}
+              {pageTitle}
             </p>
             <h1 className="mt-1 break-words text-2xl font-black tracking-normal text-[var(--tenant-color)] sm:text-4xl">
               {tenant.name}
@@ -15734,11 +15738,15 @@ function getAnalyticsDeviceType() {
   return "desktop";
 }
 
-function getAnalyticsTabLabel(tabId: TabId, role: UserRole) {
+function getPageHeaderLabel(tabId: TabId, role: UserRole | null) {
   if (role === "patient" && tabId === "patients") return "Mi Ficha Personal";
   if (role !== "patient" && tabId === "patients") return "Página de Inicio";
   if (role === "patient" && tabId === "agenda") return "Citas";
   return tabs.find((tab) => tab.id === tabId)?.label ?? tabId;
+}
+
+function getAnalyticsTabLabel(tabId: TabId, role: UserRole) {
+  return getPageHeaderLabel(tabId, role);
 }
 
 function getClientPortalAccess(patient: Patient | null | undefined): ClientPortalAccess {
