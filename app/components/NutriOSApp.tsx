@@ -403,6 +403,23 @@ type ConsultationActivityLevel =
   | "very_intense"
   | "";
 type ConditionStatus = "yes" | "no" | "";
+type FoodRecordRow = {
+  id: string;
+  schedule: string;
+  mealTime: string;
+  foodDrink: string;
+  quantity: string;
+  observation: string;
+};
+type FoodRecordField = keyof Omit<FoodRecordRow, "id">;
+type FoodFrequencyRow = {
+  id: string;
+  food: string;
+  weekly: string;
+  daily: string;
+};
+type FoodFrequencyField = keyof Omit<FoodFrequencyRow, "id">;
+type AppointmentAdvanceStatus = "yes" | "no" | "illness" | "other" | "";
 
 type PatientConsultation = {
   id: string;
@@ -466,6 +483,9 @@ type PatientConsultation = {
   diagnosis_cause: string | null;
   diagnosis_symptoms: string | null;
   comments: string | null;
+  prospective_food_record: FoodRecordRow[] | null;
+  retrospective_food_record: FoodRecordRow[] | null;
+  food_frequency_record: FoodFrequencyRow[] | null;
   created_at: string;
   updated_at: string;
 };
@@ -528,6 +548,29 @@ type ConsultationDraft = {
   diagnosisCause: string;
   diagnosisSymptoms: string;
   comments: string;
+  prospectiveFoodRecord: FoodRecordRow[];
+  retrospectiveFoodRecord: FoodRecordRow[];
+  foodFrequencyRecord: FoodFrequencyRow[];
+};
+
+type PatientAppointmentRecord = {
+  id: string;
+  tenant_id: string;
+  patient_id: string;
+  created_by: string;
+  recorded_at: string;
+  advance_status: Exclude<AppointmentAdvanceStatus, "">;
+  advance_other: string | null;
+  comment: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type AppointmentRecordDraft = {
+  recordedAt: string;
+  advanceStatus: AppointmentAdvanceStatus;
+  advanceOther: string;
+  comment: string;
 };
 
 type TabId =
@@ -603,6 +646,13 @@ type PatientConsultationsResponse = {
   ok?: boolean;
   consultations?: PatientConsultation[];
   consultation?: PatientConsultation;
+};
+
+type PatientAppointmentRecordsResponse = {
+  error?: string;
+  ok?: boolean;
+  records?: PatientAppointmentRecord[];
+  record?: PatientAppointmentRecord;
 };
 
 type PatientProfilePhotoResponse = {
@@ -950,28 +1000,67 @@ const consultationGenderOptions: Array<{ value: ConsultationGender; label: strin
   { value: "non_binary", label: "No binario" },
   { value: "prefer_not_to_say", label: "Prefiere no indicar" },
 ];
-const consultationActivityLevelOptions: Array<{
-  value: ConsultationActivityLevel;
-  label: string;
-}> = [
-  { value: "", label: "Seleccionar" },
-  { value: "sedentary", label: "Sedentario" },
-  { value: "light_moderate", label: "Ligero o Moderado" },
-  { value: "intense", label: "Intenso" },
-  {
-    value: "very_intense",
-    label: "Muy Intenso (Compite tanto a nivel amateur como profesional)",
-  },
-];
-const yesNoOptions = [
-  { value: "no", label: "No" },
-  { value: "yes", label: "Sí" },
-];
-
 const conditionStatusOptions: Array<{ value: ConditionStatus; label: string }> = [
   { value: "", label: "Sin indicar" },
   { value: "yes", label: "Sí" },
   { value: "no", label: "No" },
+];
+
+const foodRecordMealTimes = [
+  "Desayuno",
+  "Media mañana",
+  "Almuerzo",
+  "Media tarde",
+  "Cena",
+];
+
+const foodRecordMealOptions = [
+  { value: "", label: "Seleccionar" },
+  ...foodRecordMealTimes.map((mealTime) => ({ value: mealTime, label: mealTime })),
+];
+
+const foodFrequencyItems = [
+  "Leche",
+  "Yogur",
+  "Queso",
+  "Mantequilla",
+  "Huevos",
+  "Huevo codorniz",
+  "Pollo",
+  "Pescado",
+  "Pavo/pavita",
+  "Atún",
+  "Pan",
+  "Fideos",
+  "Frutas",
+  "Verduras",
+  "Helados",
+  "Menestra",
+  "Cereales",
+  "Tubérculos",
+  "Aceite de oliva",
+  "Palta",
+  "Comida envasada",
+  "Chocolates",
+  "Postres",
+  "Agua",
+  "Bebidas alcohólicas",
+  "Gaseosas",
+  "Snack",
+  "Comida rápida",
+  "Dulces",
+  "Galletas light",
+];
+
+const appointmentAdvanceOptions: Array<{
+  value: AppointmentAdvanceStatus;
+  label: string;
+}> = [
+  { value: "", label: "Seleccionar" },
+  { value: "yes", label: "Sí" },
+  { value: "no", label: "No" },
+  { value: "illness", label: "Enfermedad" },
+  { value: "other", label: "Otros" },
 ];
 
 const demoTenant = (slug: string): Tenant => ({
@@ -4248,7 +4337,7 @@ function OnlineConsultationChoiceDialog({
             onClick={onGoToConsultation}
           >
             <FileText className="size-4 text-[var(--tenant-color)]" />
-            Ir a Consulta
+            Ir a Registro de Cita
           </button>
         </div>
         {!event.video_url && (
@@ -4432,7 +4521,7 @@ function ProfessionalPatientDetail({
       <div className="flex flex-wrap gap-2">
         {[
           { id: "record", label: "Ficha del cliente", icon: ClipboardList },
-          { id: "consultations", label: "Consultas", icon: FileText },
+          { id: "consultations", label: "Registro de Cita", icon: FileText },
           { id: "access", label: "Accesos", icon: ShieldCheck },
         ].map((tab) => {
           const active = activeTab === tab.id;
@@ -4465,19 +4554,11 @@ function ProfessionalPatientDetail({
         />
       )}
       {activeTab === "consultations" && (
-        <Panel>
-          <div className="flex items-start gap-3">
-            <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-[#eef3f0] text-[var(--tenant-color)]">
-              <FileText className="size-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-black">Consultas</h2>
-              <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
-                Esta pestaña queda preparada para desarrollar el histórico de consultas con una lógica específica.
-              </p>
-            </div>
-          </div>
-        </Panel>
+        <AppointmentRecordsPanel
+          patient={patient}
+          supabase={supabase}
+          onNotice={onNotice}
+        />
       )}
       {activeTab === "access" && (
         <PatientAccessPanel
@@ -4679,6 +4760,231 @@ function ClientAccessPicker({
   );
 }
 
+function AppointmentRecordsPanel({
+  patient,
+  supabase,
+  onNotice,
+}: {
+  patient: Patient | null;
+  supabase: ReturnType<typeof createSupabaseBrowser>;
+  onNotice: (message: string) => void;
+}) {
+  const [records, setRecords] = useState<PatientAppointmentRecord[]>([]);
+  const [draft, setDraft] = useState<AppointmentRecordDraft>(() =>
+    buildAppointmentRecordDraft(),
+  );
+  const [loadingRecords, setLoadingRecords] = useState(false);
+  const [savingRecord, setSavingRecord] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadRecords() {
+      setRecords([]);
+      setDraft(buildAppointmentRecordDraft());
+
+      if (!patient || !supabase) return;
+
+      setLoadingRecords(true);
+      const accessToken = await getCurrentAccessToken(supabase);
+      if (!accessToken) {
+        if (!cancelled) {
+          setLoadingRecords(false);
+          onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/patients/appointment-records?patientId=${encodeURIComponent(patient.id)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          },
+        );
+        const payload = (await response.json()) as PatientAppointmentRecordsResponse;
+
+        if (cancelled) return;
+        if (!response.ok) {
+          onNotice(payload.error ?? "No se pudo cargar el histórico de citas.");
+          return;
+        }
+
+        setRecords(payload.records ?? []);
+      } finally {
+        if (!cancelled) setLoadingRecords(false);
+      }
+    }
+
+    void loadRecords();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [patient, supabase, onNotice]);
+
+  function updateDraft(key: keyof AppointmentRecordDraft, value: string) {
+    setDraft((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  async function saveRecord(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!patient) {
+      onNotice("Selecciona un cliente.");
+      return;
+    }
+
+    if (!supabase) {
+      onNotice("Modo demo: conecta Supabase para guardar registros reales.");
+      return;
+    }
+
+    const accessToken = await getCurrentAccessToken(supabase);
+    if (!accessToken) {
+      onNotice("Tu sesion ha caducado. Cierra sesion y vuelve a entrar.");
+      return;
+    }
+
+    setSavingRecord(true);
+    try {
+      const response = await fetch("/api/patients/appointment-records", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          patientId: patient.id,
+          recordedAt: draft.recordedAt,
+          advanceStatus: draft.advanceStatus,
+          advanceOther: draft.advanceOther,
+          comment: draft.comment,
+        }),
+      });
+      const payload = (await response.json()) as PatientAppointmentRecordsResponse;
+
+      if (!response.ok || !payload.record) {
+        onNotice(payload.error ?? "No se pudo guardar el registro de cita.");
+        return;
+      }
+
+      setRecords((current) => [payload.record!, ...current]);
+      setDraft(buildAppointmentRecordDraft());
+      onNotice("Registro de cita guardado.");
+    } finally {
+      setSavingRecord(false);
+    }
+  }
+
+  if (!patient) {
+    return <Panel><EmptyState text="Selecciona un cliente para registrar una cita." /></Panel>;
+  }
+
+  return (
+    <div className="grid gap-4">
+      <Panel>
+        <form className="grid gap-4" onSubmit={saveRecord}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-lg font-black">Registro de Cita</h2>
+              <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
+                Guarda el avance y comentarios de la atención para consultar el histórico cuando quieras.
+              </p>
+            </div>
+            <span className="rounded-lg bg-[#eef3f0] px-3 py-1 text-xs font-bold text-[#53605a]">
+              {records.length} registros
+            </span>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field
+              label="Fecha de la cita"
+              type="date"
+              value={draft.recordedAt}
+              onChange={(value) => updateDraft("recordedAt", value)}
+              required
+            />
+            <SelectField
+              label="Avance"
+              value={draft.advanceStatus}
+              onChange={(value) => updateDraft("advanceStatus", value)}
+              options={appointmentAdvanceOptions}
+            />
+            {draft.advanceStatus === "other" && (
+              <Field
+                label="Detalle de otros"
+                value={draft.advanceOther}
+                onChange={(value) => updateDraft("advanceOther", value)}
+                required
+              />
+            )}
+          </div>
+
+          <TextArea
+            label="Comentario"
+            value={draft.comment}
+            onChange={(value) => updateDraft("comment", value)}
+          />
+
+          <button
+            type="submit"
+            className="inline-flex h-11 w-fit items-center gap-2 rounded-lg bg-[var(--tenant-color)] px-4 text-sm font-black text-white disabled:opacity-60"
+            disabled={savingRecord}
+          >
+            {savingRecord ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Check className="size-4" />
+            )}
+            {savingRecord ? "Guardando..." : "Guardar registro"}
+          </button>
+        </form>
+      </Panel>
+
+      <Panel>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-base font-black">Histórico de citas</h3>
+          {loadingRecords && (
+            <span className="inline-flex items-center gap-2 text-xs font-bold text-[var(--muted)]">
+              <Loader2 className="size-3 animate-spin" />
+              Cargando
+            </span>
+          )}
+        </div>
+        <div className="mt-4 grid gap-3">
+          {records.map((record) => (
+            <article
+              key={record.id}
+              className="rounded-lg border border-[var(--line)] bg-white p-3"
+            >
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="font-black">{formatDateOnly(record.recorded_at)}</p>
+                  <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
+                    {record.comment || "Sin comentario indicado"}
+                  </p>
+                </div>
+                <span className="w-fit rounded-md bg-[#eef3f0] px-2 py-1 text-xs font-bold text-[#255d50]">
+                  {formatAppointmentAdvance(record)}
+                </span>
+              </div>
+            </article>
+          ))}
+          {!loadingRecords && records.length === 0 && (
+            <EmptyState text="Aún no hay registros de cita para este cliente." />
+          )}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
 function PatientConsultationsPanel({
   patient,
   weights,
@@ -4760,6 +5066,64 @@ function PatientConsultationsPanel({
     setDraft((current) => ({
       ...current,
       [key]: value,
+    }));
+  }
+
+  function updateFoodRecordRow(
+    key: "prospectiveFoodRecord" | "retrospectiveFoodRecord",
+    rowId: string,
+    field: FoodRecordField,
+    value: string,
+  ) {
+    setDraft((current) => ({
+      ...current,
+      [key]: current[key].map((row) =>
+        row.id === rowId ? { ...row, [field]: value } : row,
+      ),
+    }));
+  }
+
+  function addFoodRecordRow(key: "prospectiveFoodRecord" | "retrospectiveFoodRecord") {
+    setDraft((current) => ({
+      ...current,
+      [key]: [...current[key], createFoodRecordRow()],
+    }));
+  }
+
+  function removeFoodRecordRow(
+    key: "prospectiveFoodRecord" | "retrospectiveFoodRecord",
+    rowId: string,
+  ) {
+    setDraft((current) => ({
+      ...current,
+      [key]: current[key].filter((row) => row.id !== rowId),
+    }));
+  }
+
+  function updateFoodFrequencyRow(
+    rowId: string,
+    field: FoodFrequencyField,
+    value: string,
+  ) {
+    setDraft((current) => ({
+      ...current,
+      foodFrequencyRecord: current.foodFrequencyRecord.map((row) =>
+        row.id === rowId ? { ...row, [field]: value } : row,
+      ),
+    }));
+  }
+
+  function addFoodFrequencyRow() {
+    setDraft((current) => ({
+      ...current,
+      foodFrequencyRecord: [...current.foodFrequencyRecord, createFoodFrequencyRow()],
+    }));
+  }
+
+  function removeFoodFrequencyRow(rowId: string) {
+    setDraft((current) => ({
+      ...current,
+      foodFrequencyRecord: current.foodFrequencyRecord.filter((row) => row.id !== rowId),
     }));
   }
 
@@ -4859,6 +5223,9 @@ function PatientConsultationsPanel({
           diagnosisCause: draft.diagnosisCause,
           diagnosisSymptoms: draft.diagnosisSymptoms,
           comments: draft.comments,
+          prospectiveFoodRecord: draft.prospectiveFoodRecord,
+          retrospectiveFoodRecord: draft.retrospectiveFoodRecord,
+          foodFrequencyRecord: draft.foodFrequencyRecord,
         }),
       });
       const payload = (await response.json()) as PatientConsultationsResponse;
@@ -5088,37 +5455,6 @@ function PatientConsultationsPanel({
         </div>
       </ConsultationSection>
 
-      <ConsultationSection title="Menstruación y embarazo">
-        <div className="grid gap-4 md:grid-cols-2">
-          <BinaryChoice
-            label="¿Estás menstruando?"
-            value={draft.isMenstruating}
-            onChange={(value) => updateDraft("isMenstruating", value)}
-          />
-          {draft.isMenstruating === "yes" && (
-            <Field
-              label="Fecha de inicio"
-              type="date"
-              value={draft.menstruationStartDate}
-              onChange={(value) => updateDraft("menstruationStartDate", value)}
-            />
-          )}
-          <BinaryChoice
-            label="¿Estás embarazada?"
-            value={draft.isPregnant}
-            onChange={(value) => updateDraft("isPregnant", value)}
-          />
-        </div>
-      </ConsultationSection>
-
-      <ConsultationSection title="Nivel de actividad física">
-        <ChoiceButtonGroup
-          value={draft.physicalActivityLevel}
-          onChange={(value) => updateDraft("physicalActivityLevel", value)}
-          options={consultationActivityLevelOptions.filter((option) => option.value)}
-        />
-      </ConsultationSection>
-
       <ConsultationSection title="V. Comportamiento / Hábitos alimentarios">
         <div className="grid gap-4 md:grid-cols-2">
           <Field
@@ -5261,33 +5597,34 @@ function PatientConsultationsPanel({
         </div>
       </ConsultationSection>
 
-      <ConsultationSection title="Diagnóstico">
-        <div className="grid gap-4 lg:grid-cols-3">
-          <TextArea
-            label="Problema"
-            value={draft.diagnosisProblem}
-            onChange={(value) => updateDraft("diagnosisProblem", value)}
-          />
-          <TextArea
-            label="Origen/Causa"
-            value={draft.diagnosisCause}
-            onChange={(value) => updateDraft("diagnosisCause", value)}
-          />
-          <TextArea
-            label="Síntomas"
-            value={draft.diagnosisSymptoms}
-            onChange={(value) => updateDraft("diagnosisSymptoms", value)}
-          />
-        </div>
-      </ConsultationSection>
+      <FoodRecordRowsEditor
+        title="IX. Registro alimentario prospectivo"
+        description="Anota alimentos y bebidas consumidas hasta hoy."
+        rows={draft.prospectiveFoodRecord}
+        onChange={(rowId, field, value) =>
+          updateFoodRecordRow("prospectiveFoodRecord", rowId, field, value)
+        }
+        onAddRow={() => addFoodRecordRow("prospectiveFoodRecord")}
+        onRemoveRow={(rowId) => removeFoodRecordRow("prospectiveFoodRecord", rowId)}
+      />
 
-      <ConsultationSection title="Comentarios">
-        <TextArea
-          label="Comentarios"
-          value={draft.comments}
-          onChange={(value) => updateDraft("comments", value)}
-        />
-      </ConsultationSection>
+      <FoodRecordRowsEditor
+        title="X. Recordatorio de 24 horas"
+        description="Recoge el consumo retrospectivo de las últimas 24 horas."
+        rows={draft.retrospectiveFoodRecord}
+        onChange={(rowId, field, value) =>
+          updateFoodRecordRow("retrospectiveFoodRecord", rowId, field, value)
+        }
+        onAddRow={() => addFoodRecordRow("retrospectiveFoodRecord")}
+        onRemoveRow={(rowId) => removeFoodRecordRow("retrospectiveFoodRecord", rowId)}
+      />
+
+      <FoodFrequencyEditor
+        rows={draft.foodFrequencyRecord}
+        onChange={updateFoodFrequencyRow}
+        onAddRow={addFoodFrequencyRow}
+        onRemoveRow={removeFoodFrequencyRow}
+      />
 
       <div className="flex flex-wrap gap-2">
         <button
@@ -5385,70 +5722,149 @@ function ConsultationSection({
   );
 }
 
-function BinaryChoice({
-  label,
-  value,
+function FoodRecordRowsEditor({
+  title,
+  description,
+  rows,
   onChange,
+  onAddRow,
+  onRemoveRow,
 }: {
-  label: string;
-  value: "yes" | "no";
-  onChange: (value: "yes" | "no") => void;
+  title: string;
+  description: string;
+  rows: FoodRecordRow[];
+  onChange: (rowId: string, field: FoodRecordField, value: string) => void;
+  onAddRow: () => void;
+  onRemoveRow: (rowId: string) => void;
 }) {
   return (
-    <div>
-      <span className="mb-1 block text-sm font-semibold text-[#39433f]">{label}</span>
-      <div className="grid grid-cols-2 gap-2">
-        {yesNoOptions.map((option) => {
-          const active = value === option.value;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              className={`h-11 rounded-lg border px-3 text-sm font-bold transition ${
-                active
-                  ? "border-[var(--tenant-color)] bg-[var(--tenant-color)] text-white"
-                  : "border-[var(--line)] bg-white text-[#4a554f]"
-              }`}
-              onClick={() => onChange(option.value as "yes" | "no")}
+    <ConsultationSection title={title}>
+      <div className="grid gap-3">
+        <p className="text-sm leading-6 text-[var(--muted)]">{description}</p>
+        <div className="grid gap-3">
+          {rows.map((row, index) => (
+            <div
+              key={row.id}
+              className="grid gap-3 rounded-lg border border-[var(--line)] bg-white p-3 xl:grid-cols-[0.9fr_1.1fr_1.6fr_1fr_1.4fr_auto]"
             >
-              {option.label}
-            </button>
-          );
-        })}
+              <Field
+                label="Horario"
+                value={row.schedule}
+                onChange={(value) => onChange(row.id, "schedule", value)}
+                placeholder="08:00"
+              />
+              <SelectField
+                label="Tiempo de comida"
+                value={row.mealTime}
+                onChange={(value) => onChange(row.id, "mealTime", value)}
+                options={foodRecordMealOptions}
+              />
+              <TextArea
+                label="Alimento y/o bebida"
+                value={row.foodDrink}
+                onChange={(value) => onChange(row.id, "foodDrink", value)}
+              />
+              <Field
+                label="Cantidad"
+                value={row.quantity}
+                onChange={(value) => onChange(row.id, "quantity", value)}
+              />
+              <TextArea
+                label="Observación"
+                value={row.observation}
+                onChange={(value) => onChange(row.id, "observation", value)}
+              />
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-[#efc4ba] bg-[#fff3f0] text-[#8a3327] xl:w-11"
+                  onClick={() => onRemoveRow(row.id)}
+                  aria-label={`Eliminar fila ${index + 1}`}
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="inline-flex h-10 w-fit items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-black text-[#39433f]"
+          onClick={onAddRow}
+        >
+          <Plus className="size-4 text-[var(--tenant-color)]" />
+          Añadir fila
+        </button>
       </div>
-    </div>
+    </ConsultationSection>
   );
 }
 
-function ChoiceButtonGroup<TValue extends string>({
-  value,
+function FoodFrequencyEditor({
+  rows,
   onChange,
-  options,
+  onAddRow,
+  onRemoveRow,
 }: {
-  value: TValue;
-  onChange: (value: TValue) => void;
-  options: Array<{ value: TValue; label: string }>;
+  rows: FoodFrequencyRow[];
+  onChange: (rowId: string, field: FoodFrequencyField, value: string) => void;
+  onAddRow: () => void;
+  onRemoveRow: (rowId: string) => void;
 }) {
   return (
-    <div className="grid gap-2 md:grid-cols-2">
-      {options.map((option) => {
-        const active = value === option.value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            className={`min-h-11 rounded-lg border px-3 py-2 text-left text-sm font-bold transition ${
-              active
-                ? "border-[var(--tenant-color)] bg-[var(--tenant-color)] text-white"
-                : "border-[var(--line)] bg-white text-[#4a554f] hover:border-[#bfb7aa]"
-            }`}
-            onClick={() => onChange(option.value)}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
+    <ConsultationSection title="XI. Cuestionario de frecuencia de consumo">
+      <div className="grid gap-3">
+        <p className="text-sm leading-6 text-[var(--muted)]">
+          Registra la frecuencia habitual por alimento. Puedes usar texto libre si necesitas matizar.
+        </p>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {rows.map((row) => (
+            <div
+              key={row.id}
+              className="rounded-lg border border-[var(--line)] bg-white p-3"
+            >
+              <div className="flex items-start gap-2">
+                <div className="grid flex-1 gap-3">
+                  <Field
+                    label="Alimento"
+                    value={row.food}
+                    onChange={(value) => onChange(row.id, "food", value)}
+                  />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field
+                      label="1 o 2 veces por semana"
+                      value={row.weekly}
+                      onChange={(value) => onChange(row.id, "weekly", value)}
+                    />
+                    <Field
+                      label="Todos los días"
+                      value={row.daily}
+                      onChange={(value) => onChange(row.id, "daily", value)}
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="mt-6 grid size-10 shrink-0 place-items-center rounded-lg border border-[#efc4ba] bg-[#fff3f0] text-[#8a3327]"
+                  onClick={() => onRemoveRow(row.id)}
+                  aria-label={`Eliminar ${row.food || "alimento"}`}
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="inline-flex h-10 w-fit items-center gap-2 rounded-lg border border-[var(--line)] bg-white px-3 text-sm font-black text-[#39433f]"
+          onClick={onAddRow}
+        >
+          <Plus className="size-4 text-[var(--tenant-color)]" />
+          Añadir alimento
+        </button>
+      </div>
+    </ConsultationSection>
   );
 }
 
@@ -6692,15 +7108,6 @@ function ProfessionalClinicalRecord({
       />
 
       <ClinicalRecordSection
-        title="Menstruación y embarazo"
-        items={[
-          { label: "Está menstruando", value: formatBooleanStatus(consultation?.is_menstruating) },
-          { label: "Fecha de inicio menstruación", value: formatDateOnly(consultation?.menstruation_start_date) },
-          { label: "Está embarazada", value: formatBooleanStatus(consultation?.is_pregnant) },
-        ]}
-      />
-
-      <ClinicalRecordSection
         title="V. Comportamiento / Hábitos alimentarios"
         items={[
           { label: "Número de comidas que acostumbra realizar", value: formatMetricValue(consultation?.meals_per_day) },
@@ -6760,20 +7167,9 @@ function ProfessionalClinicalRecord({
       <ClinicalRecordSection
         title="VIII. Actividad física"
         items={[
-          { label: "Nivel", value: getOptionLabel(consultationActivityLevelOptions, consultation?.physical_activity_level ?? null) },
           { label: "Tipo de actividad que realiza", value: consultation?.activity_type ?? patient.exercise_type },
           { label: "Duración", value: consultation?.activity_duration ?? null },
           { label: "Frecuencia", value: consultation?.activity_frequency ?? null },
-        ]}
-      />
-
-      <ClinicalRecordSection
-        title="Diagnóstico y comentarios"
-        items={[
-          { label: "Problema", value: consultation?.diagnosis_problem ?? null },
-          { label: "Origen/Causa", value: consultation?.diagnosis_cause ?? null },
-          { label: "Síntomas", value: consultation?.diagnosis_symptoms ?? null },
-          { label: "Comentarios", value: consultation?.comments ?? null },
         ]}
       />
     </div>
@@ -15128,7 +15524,87 @@ function buildConsultationDraft(
     diagnosisCause: consultation?.diagnosis_cause ?? "",
     diagnosisSymptoms: consultation?.diagnosis_symptoms ?? "",
     comments: consultation?.comments ?? "",
+    prospectiveFoodRecord: buildFoodRecordDraftRows(consultation?.prospective_food_record),
+    retrospectiveFoodRecord: buildFoodRecordDraftRows(consultation?.retrospective_food_record),
+    foodFrequencyRecord: buildFoodFrequencyDraftRows(consultation?.food_frequency_record),
   };
+}
+
+function createFoodRecordRow(mealTime = ""): FoodRecordRow {
+  return {
+    id: createBrowserUuid(),
+    schedule: "",
+    mealTime,
+    foodDrink: "",
+    quantity: "",
+    observation: "",
+  };
+}
+
+function buildFoodRecordDraftRows(rows: FoodRecordRow[] | null | undefined) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return foodRecordMealTimes.map((mealTime) => createFoodRecordRow(mealTime));
+  }
+
+  return rows.map((row) => ({
+    id: row.id || createBrowserUuid(),
+    schedule: row.schedule ?? "",
+    mealTime: row.mealTime ?? "",
+    foodDrink: row.foodDrink ?? "",
+    quantity: row.quantity ?? "",
+    observation: row.observation ?? "",
+  }));
+}
+
+function createFoodFrequencyRow(food = ""): FoodFrequencyRow {
+  return {
+    id: createBrowserUuid(),
+    food,
+    weekly: "",
+    daily: "",
+  };
+}
+
+function buildFoodFrequencyDraftRows(rows: FoodFrequencyRow[] | null | undefined) {
+  const existingRows = Array.isArray(rows) ? rows : [];
+  const normalizedRows = existingRows.map((row) => ({
+    id: row.id || createBrowserUuid(),
+    food: row.food ?? "",
+    weekly: row.weekly ?? "",
+    daily: row.daily ?? "",
+  }));
+  const rowsByFood = new Map(
+    normalizedRows
+      .filter((row) => row.food.trim())
+      .map((row) => [row.food.trim().toLowerCase(), row]),
+  );
+  const defaultRows = foodFrequencyItems.map((food) => {
+    const existing = rowsByFood.get(food.toLowerCase());
+    return existing ?? createFoodFrequencyRow(food);
+  });
+  const customRows = normalizedRows.filter(
+    (row) => !foodFrequencyItems.some((food) => food.toLowerCase() === row.food.trim().toLowerCase()),
+  );
+
+  return [...defaultRows, ...customRows];
+}
+
+function buildAppointmentRecordDraft(): AppointmentRecordDraft {
+  return {
+    recordedAt: getLocalDateString(),
+    advanceStatus: "",
+    advanceOther: "",
+    comment: "",
+  };
+}
+
+function formatAppointmentAdvance(record: PatientAppointmentRecord) {
+  const label = getOptionLabel(appointmentAdvanceOptions, record.advance_status);
+  if (record.advance_status === "other" && record.advance_other) {
+    return `${label}: ${record.advance_other}`;
+  }
+
+  return label;
 }
 
 function formatNumberForInput(value: number | string | null | undefined) {
@@ -15176,12 +15652,6 @@ function formatConsultationNumber(value: number | string | null, unit = "") {
 function formatDateOnly(value: string | null | undefined) {
   if (!value) return null;
   return formatDate(`${value}T12:00:00`);
-}
-
-function formatBooleanStatus(value: boolean | null | undefined) {
-  if (value === true) return "Sí";
-  if (value === false) return "No";
-  return null;
 }
 
 function formatConditionStatus(value: ConditionStatus | null | undefined) {

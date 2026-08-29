@@ -44,6 +44,10 @@ const patientClinicalRecordMigrationPath = new URL(
   "../supabase/migrations/202608270001_patient_clinical_record.sql",
   import.meta.url,
 );
+const patientFoodAndAppointmentRecordsMigrationPath = new URL(
+  "../supabase/migrations/202608290001_patient_food_records_and_appointment_records.sql",
+  import.meta.url,
+);
 const trackingRoutePath = new URL("../app/api/tracking/logs/route.ts", import.meta.url);
 const exerciseRoutePath = new URL("../app/api/tracking/exercises/route.ts", import.meta.url);
 const analyticsRoutePath = new URL("../app/api/analytics/events/route.ts", import.meta.url);
@@ -51,6 +55,10 @@ const chatSendRoutePath = new URL("../app/api/chat/send/route.ts", import.meta.u
 const calendarEventsRoutePath = new URL("../app/api/calendar/events/route.ts", import.meta.url);
 const patientConsultationsRoutePath = new URL(
   "../app/api/patients/consultations/route.ts",
+  import.meta.url,
+);
+const patientAppointmentRecordsRoutePath = new URL(
+  "../app/api/patients/appointment-records/route.ts",
   import.meta.url,
 );
 const patientProfilePhotoRoutePath = new URL(
@@ -142,7 +150,7 @@ test("nutritionist home dashboard replaces visible clients tab and profile photo
   assert.match(source, /Actividad reciente/);
   assert.match(source, /OnlineConsultationChoiceDialog/);
   assert.match(source, /Abrir Consulta Online/);
-  assert.match(source, /Ir a Consulta/);
+  assert.match(source, /Ir a Registro de Cita/);
   assert.match(source, /openPatientConsultation/);
   assert.match(source, /window\.open\(onlineConsultationEvent\.video_url/);
   assert.match(source, /PatientAvatar/);
@@ -383,29 +391,43 @@ test("calendar and statistics support video links and sleep charts", async () =>
 test("nutritionist patient detail edits the clinical record from the client file", async () => {
   const source = await readFile(componentPath, "utf8");
   const route = await readFile(patientConsultationsRoutePath, "utf8");
+  const appointmentRoute = await readFile(patientAppointmentRecordsRoutePath, "utf8");
   const sql = await readFile(patientConsultationsMigrationPath, "utf8");
   const clinicalSql = await readFile(patientClinicalRecordMigrationPath, "utf8");
+  const foodAndAppointmentSql = await readFile(
+    patientFoodAndAppointmentRecordsMigrationPath,
+    "utf8",
+  );
 
   assert.match(source, /PatientDetailTab = "record" \| "consultations" \| "access"/);
   assert.match(source, /Ficha del cliente/);
-  assert.match(source, /Consultas/);
+  assert.match(source, /Registro de Cita/);
   assert.match(source, /ProfessionalClinicalRecord/);
   assert.match(source, /mode="record"/);
   assert.match(source, /Editar ficha del cliente/);
   assert.match(source, /Guardar ficha/);
   assert.match(source, /Ficha del cliente guardada/);
-  assert.match(source, /Esta pestaña queda preparada/);
   assert.match(source, /I\. Datos generales/);
   assert.match(source, /IV\. Datos antropométricos y bioquímicos/);
   assert.match(source, /Motivo de la consulta/);
   assert.match(source, /Anamnesis o historial familiar/);
-  assert.match(source, /Menstruación y embarazo/);
-  assert.match(source, /Nivel de actividad física/);
   assert.match(source, /Comportamiento \/ Hábitos alimentarios/);
   assert.match(source, /Conocimientos culinarios/);
-  assert.match(source, /Diagnóstico/);
+  assert.match(source, /IX\. Registro alimentario prospectivo/);
+  assert.match(source, /X\. Recordatorio de 24 horas/);
+  assert.match(source, /XI\. Cuestionario de frecuencia de consumo/);
+  assert.match(source, /FoodRecordRowsEditor/);
+  assert.match(source, /FoodFrequencyEditor/);
+  assert.match(source, /AppointmentRecordsPanel/);
+  assert.match(source, /Histórico de citas/);
+  assert.match(source, /Guardar registro/);
+  assert.doesNotMatch(source, /<ConsultationSection title="Menstruación y embarazo"/);
+  assert.doesNotMatch(source, /<ConsultationSection title="Nivel de actividad física"/);
+  assert.doesNotMatch(source, /<ConsultationSection title="Diagnóstico"/);
+  assert.doesNotMatch(source, /<ConsultationSection title="Comentarios"/);
   assert.match(source, /consultationId: isRecordMode \? consultations\[0\]\?\.id : undefined/);
   assert.match(source, /\/api\/patients\/consultations/);
+  assert.match(source, /\/api\/patients\/appointment-records/);
   assert.match(route, /consultationId\?: string/);
   assert.match(route, /verifyNutritionistPatientAccess/);
   assert.match(route, /patient_consultations/);
@@ -420,6 +442,13 @@ test("nutritionist patient detail edits the clinical record from the client file
   assert.match(route, /treatment_motivation/);
   assert.match(route, /glucose_mg_dl/);
   assert.match(route, /diabetes_status/);
+  assert.match(route, /prospective_food_record/);
+  assert.match(route, /retrospective_food_record/);
+  assert.match(route, /food_frequency_record/);
+  assert.match(appointmentRoute, /patient_appointment_records/);
+  assert.match(appointmentRoute, /advance_status/);
+  assert.match(appointmentRoute, /verifyNutritionistPatientAccess/);
+  assert.match(appointmentRoute, /recorded_at/);
   assert.match(sql, /create table if not exists public\.patient_consultations/i);
   assert.match(sql, /enable row level security/i);
   assert.match(sql, /Nutritionists can insert patient consultations/i);
@@ -428,6 +457,18 @@ test("nutritionist patient detail edits the clinical record from the client file
   assert.match(clinicalSql, /treatment_motivation/);
   assert.match(clinicalSql, /glucose_mg_dl/);
   assert.match(clinicalSql, /activity_frequency/);
+  assert.match(foodAndAppointmentSql, /prospective_food_record/i);
+  assert.match(foodAndAppointmentSql, /retrospective_food_record/i);
+  assert.match(foodAndAppointmentSql, /food_frequency_record/i);
+  assert.match(
+    foodAndAppointmentSql,
+    /create table if not exists public\.patient_appointment_records/i,
+  );
+  assert.match(foodAndAppointmentSql, /enable row level security/i);
+  assert.match(
+    foodAndAppointmentSql,
+    /Nutritionists can insert patient appointment records/i,
+  );
 });
 
 test("client access and professional onboarding are configurable per patient", async () => {

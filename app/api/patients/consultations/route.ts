@@ -11,6 +11,22 @@ const validActivityLevels = new Set([
 ]);
 const validConditionStatuses = new Set(["yes", "no"]);
 
+type FoodRecordRowBody = {
+  id?: string | null;
+  schedule?: string | null;
+  mealTime?: string | null;
+  foodDrink?: string | null;
+  quantity?: string | null;
+  observation?: string | null;
+};
+
+type FoodFrequencyRowBody = {
+  id?: string | null;
+  food?: string | null;
+  weekly?: string | null;
+  daily?: string | null;
+};
+
 type ConsultationBody = {
   consultationId?: string;
   patientId?: string;
@@ -71,6 +87,9 @@ type ConsultationBody = {
   diagnosisCause?: string | null;
   diagnosisSymptoms?: string | null;
   comments?: string | null;
+  prospectiveFoodRecord?: FoodRecordRowBody[] | null;
+  retrospectiveFoodRecord?: FoodRecordRowBody[] | null;
+  foodFrequencyRecord?: FoodFrequencyRowBody[] | null;
 };
 
 export async function GET(request: Request) {
@@ -202,6 +221,9 @@ export async function POST(request: Request) {
     diagnosis_cause: cleanText(body.diagnosisCause),
     diagnosis_symptoms: cleanText(body.diagnosisSymptoms),
     comments: cleanText(body.comments),
+    prospective_food_record: normalizeFoodRecordRows(body.prospectiveFoodRecord),
+    retrospective_food_record: normalizeFoodRecordRows(body.retrospectiveFoodRecord),
+    food_frequency_record: normalizeFoodFrequencyRows(body.foodFrequencyRecord),
   };
 
   const query = body.consultationId
@@ -414,8 +436,45 @@ function validateConsultationBody(body: ConsultationBody) {
   if (!isOptionalConditionStatus(body.fattyLiverStatus)) {
     return "Higado graso no valido.";
   }
+  if (!isOptionalArray(body.prospectiveFoodRecord, 40)) {
+    return "Registro alimentario prospectivo no valido.";
+  }
+  if (!isOptionalArray(body.retrospectiveFoodRecord, 40)) {
+    return "Recordatorio de 24 horas no valido.";
+  }
+  if (!isOptionalArray(body.foodFrequencyRecord, 80)) {
+    return "Cuestionario de frecuencia de consumo no valido.";
+  }
 
   return "";
+}
+
+function normalizeFoodRecordRows(rows: FoodRecordRowBody[] | null | undefined) {
+  if (!Array.isArray(rows)) return [];
+
+  return rows.slice(0, 40).map((row) => ({
+    id: cleanText(row.id) ?? "",
+    schedule: cleanText(row.schedule) ?? "",
+    mealTime: cleanText(row.mealTime) ?? "",
+    foodDrink: cleanText(row.foodDrink) ?? "",
+    quantity: cleanText(row.quantity) ?? "",
+    observation: cleanText(row.observation) ?? "",
+  }));
+}
+
+function normalizeFoodFrequencyRows(rows: FoodFrequencyRowBody[] | null | undefined) {
+  if (!Array.isArray(rows)) return [];
+
+  return rows.slice(0, 80).map((row) => ({
+    id: cleanText(row.id) ?? "",
+    food: cleanText(row.food) ?? "",
+    weekly: cleanText(row.weekly) ?? "",
+    daily: cleanText(row.daily) ?? "",
+  }));
+}
+
+function isOptionalArray(value: unknown, maxLength: number) {
+  return value === null || value === undefined || (Array.isArray(value) && value.length <= maxLength);
 }
 
 function isOptionalNumberInRange(
